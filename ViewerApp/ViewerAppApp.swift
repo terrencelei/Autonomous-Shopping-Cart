@@ -1,6 +1,6 @@
 //
-//  UWBCartApp.swift
-//  UWBCart
+//  ViewerAppApp.swift
+//  ViewerApp
 //
 //  Created by Terrence Lei on 4/19/26.
 //
@@ -8,10 +8,10 @@
 import SwiftUI
 
 @main
-struct UWBCartApp: App {
+struct ViewerAppApp: App {
     var body: some Scene {
         WindowGroup {
-            TagView()
+            ViewerRootView()
         }
     }
 }
