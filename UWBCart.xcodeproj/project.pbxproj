@@ -46,9 +46,29 @@
 		73B822DE2F95DB3300BE4F05 /* ViewerAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ViewerAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		73B2A6442F95F03700B166CC /* Exceptions for "UWBCart" folder in "UWBCart" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 73B822952F95DAF800BE4F05 /* UWBCart */;
+		};
+		73B2A6452F95F03B00B166CC /* Exceptions for "ViewerApp" folder in "ViewerApp" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 73B822C52F95DB3000BE4F05 /* ViewerApp */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		73B822982F95DAF800BE4F05 /* UWBCart */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				73B2A6442F95F03700B166CC /* Exceptions for "UWBCart" folder in "UWBCart" target */,
+			);
 			path = UWBCart;
 			sourceTree = "<group>";
 		};
@@ -64,6 +84,9 @@
 		};
 		73B822C72F95DB3000BE4F05 /* ViewerApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				73B2A6452F95F03B00B166CC /* Exceptions for "ViewerApp" folder in "ViewerApp" target */,
+			);
 			path = ViewerApp;
 			sourceTree = "<group>";
 		};
