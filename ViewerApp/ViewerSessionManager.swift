@@ -251,11 +251,6 @@ extension ViewerSessionManager: MCSessionDelegate {
         }
         print("[Viewer] Received discovery token from \(peerID.displayName)")
 
-        // Re-send our token in case the initial send was dropped
-        if let myToken = niSession?.discoveryToken {
-            sendDiscoveryToken(myToken)
-        }
-
         DispatchQueue.main.async {
             self.peerDiscoveryToken = token
             self.configureAndRun(with: token)
