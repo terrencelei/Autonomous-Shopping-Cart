@@ -10,6 +10,8 @@
 	<array>
 		<string>_uwb-cart._tcp</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>UWBCart uses the camera to improve UWB direction measurement.</string>
 	<key>NSNearbyInteractionUsageDescription</key>
 	<string>UWBCart uses Nearby Interaction to measure distance and direction between devices.</string>
 </dict>

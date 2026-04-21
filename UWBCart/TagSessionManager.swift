@@ -101,6 +101,9 @@ class TagSessionManager: NSObject, ObservableObject {
     private func configureAndRun(with peerToken: NIDiscoveryToken) {
         guard let niSession else { return }
         let config = NINearbyPeerConfiguration(peerToken: peerToken)
+        if #available(iOS 16.0, *), NISession.deviceCapabilities.supportsCameraAssistance {
+            config.isCameraAssistanceEnabled = true
+        }
         niSession.run(config)
         DispatchQueue.main.async {
             self.isRanging = true
