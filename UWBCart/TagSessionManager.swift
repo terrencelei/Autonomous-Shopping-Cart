@@ -43,6 +43,7 @@ class TagSessionManager: NSObject, ObservableObject {
         advertiser = MCNearbyServiceAdvertiser(peer: myPeerID, discoveryInfo: nil, serviceType: serviceType)
         advertiser.delegate = self
         advertiser.startAdvertisingPeer()
+        print("[Tag] Started advertising as \(myPeerID.displayName) on service: \(serviceType)")
 
         status = "Advertising — open Viewer app on cart iPhone"
     }
@@ -55,6 +56,11 @@ class TagSessionManager: NSObject, ObservableObject {
     // MARK: - NI Session Setup
 
     private func startNISession() {
+        guard NISession.isSupported else {
+            status = "Connected (UWB not available on this device)"
+            return
+        }
+
         niSession?.invalidate()
         niSession = NISession()
         niSession?.delegate = self
@@ -139,7 +145,15 @@ extension TagSessionManager: MCNearbyServiceAdvertiserDelegate {
                     didReceiveInvitationFromPeer peer: MCPeerID,
                     withContext context: Data?,
                     invitationHandler: @escaping (Bool, MCSession?) -> Void) {
+        print("[Tag] Received invitation from \(peer.displayName)")
         invitationHandler(true, mcSession)
+    }
+
+    func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
+        print("[Tag] ERROR: Failed to start advertising: \(error.localizedDescription)")
+        DispatchQueue.main.async {
+            self.status = "Advertising failed: \(error.localizedDescription)"
+        }
     }
 }
 
@@ -148,6 +162,7 @@ extension TagSessionManager: MCNearbyServiceAdvertiserDelegate {
 extension TagSessionManager: MCSessionDelegate {
 
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
+        print("[Tag] Peer \(peerID.displayName) state: \(state.rawValue) (0=notConnected, 1=connecting, 2=connected)")
         DispatchQueue.main.async {
             switch state {
             case .connected:

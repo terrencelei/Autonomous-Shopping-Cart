@@ -53,6 +53,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
         browser = MCNearbyServiceBrowser(peer: myPeerID, serviceType: serviceType)
         browser.delegate = self
         browser.startBrowsingForPeers()
+        print("[Viewer] Started browsing for service: \(serviceType)")
     }
 
     deinit {
@@ -63,6 +64,11 @@ class ViewerSessionManager: NSObject, ObservableObject {
     // MARK: - NI Session Setup
 
     private func startNISession() {
+        guard NISession.isSupported else {
+            status = "Connected (UWB not available on this device)"
+            return
+        }
+
         niSession?.invalidate()
         niSession = NISession()
         niSession?.delegate = self
@@ -173,13 +179,23 @@ extension ViewerSessionManager: NISessionDelegate {
 extension ViewerSessionManager: MCNearbyServiceBrowserDelegate {
 
     func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String: String]?) {
+        print("[Viewer] Found peer: \(peerID.displayName)")
         browser.invitePeer(peerID, to: mcSession, withContext: nil, timeout: 10)
         DispatchQueue.main.async {
             self.status = "Found \(peerID.displayName), connecting..."
         }
     }
 
-    func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {}
+    func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
+        print("[Viewer] Lost peer: \(peerID.displayName)")
+    }
+
+    func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
+        print("[Viewer] ERROR: Failed to start browsing: \(error.localizedDescription)")
+        DispatchQueue.main.async {
+            self.status = "Browsing failed: \(error.localizedDescription)"
+        }
+    }
 }
 
 // MARK: - MCSessionDelegate
@@ -187,6 +203,7 @@ extension ViewerSessionManager: MCNearbyServiceBrowserDelegate {
 extension ViewerSessionManager: MCSessionDelegate {
 
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
+        print("[Viewer] Peer \(peerID.displayName) state: \(state.rawValue) (0=notConnected, 1=connecting, 2=connected)")
         DispatchQueue.main.async {
             switch state {
             case .connected:
