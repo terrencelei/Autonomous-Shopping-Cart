@@ -57,6 +57,32 @@ struct ViewerRootView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 24)
                 }
+                HStack(spacing: 16) {
+                    Button {
+                        manager.zeroDistance()
+                    } label: {
+                        Label("Set Zero", systemImage: "scope")
+                            .font(.caption.bold())
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Color.blue.opacity(0.15))
+                            .foregroundStyle(.blue)
+                            .clipShape(Capsule())
+                    }
+                    if manager.calibrationOffset != 0 {
+                        Button {
+                            manager.resetCalibration()
+                        } label: {
+                            Label("Reset", systemImage: "arrow.counterclockwise")
+                                .font(.caption)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(Color.secondary.opacity(0.12))
+                                .foregroundStyle(.secondary)
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
                 .padding(.bottom, 32)
             } else {
                 Text(manager.isConnected ? "Waiting for UWB signal..." : "Waiting for connection...")

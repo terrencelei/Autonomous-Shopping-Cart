@@ -30,6 +30,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
     @Published var isConnected = false
     @Published var isRanging = false
     @Published var convergenceHint: String? = nil
+    @Published private(set) var calibrationOffset: Float
 
     // MARK: - NearbyInteraction
 
@@ -46,6 +47,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
     // MARK: - Init
 
     override init() {
+        calibrationOffset = UserDefaults.standard.float(forKey: "uwb_calibration_offset")
         super.init()
 
         mcSession = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .required)
@@ -107,6 +109,22 @@ class ViewerSessionManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Distance Calibration
+
+    /// Call with the phones held together to zero out the hardware distance offset.
+    func zeroDistance() {
+        guard let r = reading else { return }
+        // r.distance is already calibrated (raw - currentOffset),
+        // so the new offset = currentOffset + r.distance removes the remaining gap.
+        calibrationOffset += r.distance
+        UserDefaults.standard.set(calibrationOffset, forKey: "uwb_calibration_offset")
+    }
+
+    func resetCalibration() {
+        calibrationOffset = 0
+        UserDefaults.standard.removeObject(forKey: "uwb_calibration_offset")
+    }
+
     private func configureAndRun(with peerToken: NIDiscoveryToken) {
         guard let niSession else { return }
         let config = NINearbyPeerConfiguration(peerToken: peerToken)
@@ -137,7 +155,10 @@ extension ViewerSessionManager: NISessionDelegate {
 
         // Skip update when distance is nil (signal too weak).
         // The previous valid reading remains on screen.
-        guard let dist = obj.distance else { return }
+        guard let rawDist = obj.distance else { return }
+
+        // Apply calibration offset and clamp so display never goes negative.
+        let dist = max(0, rawDist - calibrationOffset)
 
         // Derive 2D position from the direction vector
         // direction.x: positive = right, direction.z: negative = forward (away from screen)
