@@ -26,7 +26,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
     // MARK: - Published State
 
     @Published var reading: TagReading?
-    @Published var status = "Searching for Tag phone..."
+    @Published var status = "Searching for Shopper..."
     @Published var isConnected = false
     @Published var isRanging = false
 
@@ -39,7 +39,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
 
     private var mcSession: MCSession!
     private var browser: MCNearbyServiceBrowser!
-    private let myPeerID = MCPeerID(displayName: "Viewer-\(UIDevice.current.name)")
+    private let myPeerID = MCPeerID(displayName: "CartView-\(UIDevice.current.name)")
     private let serviceType = "uwb-cart"
 
     // MARK: - Init
@@ -64,7 +64,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
     // MARK: - NI Session Setup
 
     private func startNISession() {
-        guard NISession.isSupported else {
+        guard NISession.deviceCapabilities.supportsPreciseDistanceMeasurement else {
             status = "Connected (UWB not available on this device)"
             return
         }
@@ -80,12 +80,30 @@ class ViewerSessionManager: NSObject, ObservableObject {
         }
 
         sendDiscoveryToken(myToken)
-        status = "Sent token — waiting for tag's token..."
+        status = "Sent token — waiting for Shopper's token..."
     }
 
     private func sendDiscoveryToken(_ token: NIDiscoveryToken) {
-        guard let data = try? NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true) else { return }
-        try? mcSession.send(data, toPeers: mcSession.connectedPeers, with: .reliable)
+        let data: Data
+        do {
+            data = try NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true)
+        } catch {
+            print("[Viewer] ERROR: Failed to archive discovery token: \(error.localizedDescription)")
+            DispatchQueue.main.async {
+                self.status = "Token error — restart app"
+            }
+            return
+        }
+
+        do {
+            try mcSession.send(data, toPeers: mcSession.connectedPeers, with: .reliable)
+            print("[Viewer] Sent discovery token to \(mcSession.connectedPeers.count) peer(s)")
+        } catch {
+            print("[Viewer] ERROR: Failed to send discovery token: \(error.localizedDescription)")
+            DispatchQueue.main.async {
+                self.status = "Send failed — retrying..."
+            }
+        }
     }
 
     private func configureAndRun(with peerToken: NIDiscoveryToken) {
@@ -106,7 +124,9 @@ extension ViewerSessionManager: NISessionDelegate {
     func session(_ session: NISession, didUpdate nearbyObjects: [NINearbyObject]) {
         guard let obj = nearbyObjects.first else { return }
 
-        let dist = obj.distance ?? 0
+        // Skip update when distance is nil (signal too weak).
+        // The previous valid reading remains on screen.
+        guard let dist = obj.distance else { return }
 
         // Derive 2D position from the direction vector
         // direction.x: positive = right, direction.z: negative = forward (away from screen)
@@ -125,13 +145,11 @@ extension ViewerSessionManager: NISessionDelegate {
                 x: screenX,
                 y: screenY
             )
-            if let d = obj.distance {
-                if let dir = obj.direction {
-                    let angleDeg = atan2(dir.x, -dir.z) * 180 / .pi
-                    self.status = String(format: "%.2fm  %+.0f°", d, angleDeg)
-                } else {
-                    self.status = String(format: "%.2fm (no direction)", d)
-                }
+            if let dir = obj.direction {
+                let angleDeg = atan2(dir.x, -dir.z) * 180 / .pi
+                self.status = String(format: "%.2fm  %+.0f°", dist, angleDeg)
+            } else {
+                self.status = String(format: "%.2fm (no direction)", dist)
             }
         }
     }
@@ -227,7 +245,17 @@ extension ViewerSessionManager: MCSessionDelegate {
 
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         // Received tag phone's discovery token
-        guard let token = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NIDiscoveryToken.self, from: data) else { return }
+        guard let token = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NIDiscoveryToken.self, from: data) else {
+            print("[Viewer] ERROR: Failed to unarchive discovery token from \(peerID.displayName)")
+            return
+        }
+        print("[Viewer] Received discovery token from \(peerID.displayName)")
+
+        // Re-send our token in case the initial send was dropped
+        if let myToken = niSession?.discoveryToken {
+            sendDiscoveryToken(myToken)
+        }
+
         DispatchQueue.main.async {
             self.peerDiscoveryToken = token
             self.configureAndRun(with: token)

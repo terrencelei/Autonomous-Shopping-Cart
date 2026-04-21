@@ -29,7 +29,7 @@ class TagSessionManager: NSObject, ObservableObject {
 
     private var mcSession: MCSession!
     private var advertiser: MCNearbyServiceAdvertiser!
-    private let myPeerID = MCPeerID(displayName: "Tag-\(UIDevice.current.name)")
+    private let myPeerID = MCPeerID(displayName: "Shopper-\(UIDevice.current.name)")
     private let serviceType = "uwb-cart"
 
     // MARK: - Init
@@ -45,7 +45,7 @@ class TagSessionManager: NSObject, ObservableObject {
         advertiser.startAdvertisingPeer()
         print("[Tag] Started advertising as \(myPeerID.displayName) on service: \(serviceType)")
 
-        status = "Advertising — open Viewer app on cart iPhone"
+        status = "Advertising — open CartView app on cart iPhone"
     }
 
     deinit {
@@ -56,7 +56,7 @@ class TagSessionManager: NSObject, ObservableObject {
     // MARK: - NI Session Setup
 
     private func startNISession() {
-        guard NISession.isSupported else {
+        guard NISession.deviceCapabilities.supportsPreciseDistanceMeasurement else {
             status = "Connected (UWB not available on this device)"
             return
         }
@@ -72,12 +72,30 @@ class TagSessionManager: NSObject, ObservableObject {
         }
 
         sendDiscoveryToken(myToken)
-        status = "Sent token — waiting for viewer's token..."
+        status = "Sent token — waiting for CartView's token..."
     }
 
     private func sendDiscoveryToken(_ token: NIDiscoveryToken) {
-        guard let data = try? NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true) else { return }
-        try? mcSession.send(data, toPeers: mcSession.connectedPeers, with: .reliable)
+        let data: Data
+        do {
+            data = try NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true)
+        } catch {
+            print("[Tag] ERROR: Failed to archive discovery token: \(error.localizedDescription)")
+            DispatchQueue.main.async {
+                self.status = "Token error — restart app"
+            }
+            return
+        }
+
+        do {
+            try mcSession.send(data, toPeers: mcSession.connectedPeers, with: .reliable)
+            print("[Tag] Sent discovery token to \(mcSession.connectedPeers.count) peer(s)")
+        } catch {
+            print("[Tag] ERROR: Failed to send discovery token: \(error.localizedDescription)")
+            DispatchQueue.main.async {
+                self.status = "Send failed — retrying..."
+            }
+        }
     }
 
     private func configureAndRun(with peerToken: NIDiscoveryToken) {
@@ -185,7 +203,17 @@ extension TagSessionManager: MCSessionDelegate {
 
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         // Received viewer's discovery token
-        guard let token = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NIDiscoveryToken.self, from: data) else { return }
+        guard let token = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NIDiscoveryToken.self, from: data) else {
+            print("[Tag] ERROR: Failed to unarchive discovery token from \(peerID.displayName)")
+            return
+        }
+        print("[Tag] Received discovery token from \(peerID.displayName)")
+
+        // Re-send our token in case the initial send was dropped
+        if let myToken = niSession?.discoveryToken {
+            sendDiscoveryToken(myToken)
+        }
+
         DispatchQueue.main.async {
             self.peerDiscoveryToken = token
             self.configureAndRun(with: token)

@@ -38,28 +38,28 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		73B822962F95DAF800BE4F05 /* UWBCart.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = UWBCart.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		73B822A52F95DAFA00BE4F05 /* UWBCartTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = UWBCartTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		73B822AF2F95DAFA00BE4F05 /* UWBCartUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = UWBCartUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		73B822C62F95DB3000BE4F05 /* ViewerApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ViewerApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		73B822D42F95DB3300BE4F05 /* ViewerAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ViewerAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		73B822DE2F95DB3300BE4F05 /* ViewerAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ViewerAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		73B822962F95DAF800BE4F05 /* Shopper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Shopper.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		73B822A52F95DAFA00BE4F05 /* ShopperTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ShopperTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		73B822AF2F95DAFA00BE4F05 /* ShopperUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ShopperUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		73B822C62F95DB3000BE4F05 /* CartView.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CartView.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		73B822D42F95DB3300BE4F05 /* CartViewTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CartViewTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		73B822DE2F95DB3300BE4F05 /* CartViewUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CartViewUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		73B2A6442F95F03700B166CC /* Exceptions for "UWBCart" folder in "UWBCart" target */ = {
+		73B2A6442F95F03700B166CC /* Exceptions for "UWBCart" folder in "Shopper" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = 73B822952F95DAF800BE4F05 /* UWBCart */;
+			target = 73B822952F95DAF800BE4F05 /* Shopper */;
 		};
-		73B2A6452F95F03B00B166CC /* Exceptions for "ViewerApp" folder in "ViewerApp" target */ = {
+		73B2A6452F95F03B00B166CC /* Exceptions for "ViewerApp" folder in "CartView" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = 73B822C52F95DB3000BE4F05 /* ViewerApp */;
+			target = 73B822C52F95DB3000BE4F05 /* CartView */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -67,7 +67,7 @@
 		73B822982F95DAF800BE4F05 /* UWBCart */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				73B2A6442F95F03700B166CC /* Exceptions for "UWBCart" folder in "UWBCart" target */,
+				73B2A6442F95F03700B166CC /* Exceptions for "UWBCart" folder in "Shopper" target */,
 			);
 			path = UWBCart;
 			sourceTree = "<group>";
@@ -85,7 +85,7 @@
 		73B822C72F95DB3000BE4F05 /* ViewerApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				73B2A6452F95F03B00B166CC /* Exceptions for "ViewerApp" folder in "ViewerApp" target */,
+				73B2A6452F95F03B00B166CC /* Exceptions for "ViewerApp" folder in "CartView" target */,
 			);
 			path = ViewerApp;
 			sourceTree = "<group>";
@@ -164,12 +164,12 @@
 		73B822972F95DAF800BE4F05 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				73B822962F95DAF800BE4F05 /* UWBCart.app */,
-				73B822A52F95DAFA00BE4F05 /* UWBCartTests.xctest */,
-				73B822AF2F95DAFA00BE4F05 /* UWBCartUITests.xctest */,
-				73B822C62F95DB3000BE4F05 /* ViewerApp.app */,
-				73B822D42F95DB3300BE4F05 /* ViewerAppTests.xctest */,
-				73B822DE2F95DB3300BE4F05 /* ViewerAppUITests.xctest */,
+				73B822962F95DAF800BE4F05 /* Shopper.app */,
+				73B822A52F95DAFA00BE4F05 /* ShopperTests.xctest */,
+				73B822AF2F95DAFA00BE4F05 /* ShopperUITests.xctest */,
+				73B822C62F95DB3000BE4F05 /* CartView.app */,
+				73B822D42F95DB3300BE4F05 /* CartViewTests.xctest */,
+				73B822DE2F95DB3300BE4F05 /* CartViewUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -177,9 +177,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		73B822952F95DAF800BE4F05 /* UWBCart */ = {
+		73B822952F95DAF800BE4F05 /* Shopper */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 73B822B92F95DAFA00BE4F05 /* Build configuration list for PBXNativeTarget "UWBCart" */;
+			buildConfigurationList = 73B822B92F95DAFA00BE4F05 /* Build configuration list for PBXNativeTarget "Shopper" */;
 			buildPhases = (
 				73B822922F95DAF800BE4F05 /* Sources */,
 				73B822932F95DAF800BE4F05 /* Frameworks */,
@@ -192,16 +192,16 @@
 			fileSystemSynchronizedGroups = (
 				73B822982F95DAF800BE4F05 /* UWBCart */,
 			);
-			name = UWBCart;
+			name = Shopper;
 			packageProductDependencies = (
 			);
 			productName = UWBCart;
-			productReference = 73B822962F95DAF800BE4F05 /* UWBCart.app */;
+			productReference = 73B822962F95DAF800BE4F05 /* Shopper.app */;
 			productType = "com.apple.product-type.application";
 		};
-		73B822A42F95DAFA00BE4F05 /* UWBCartTests */ = {
+		73B822A42F95DAFA00BE4F05 /* ShopperTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 73B822BC2F95DAFA00BE4F05 /* Build configuration list for PBXNativeTarget "UWBCartTests" */;
+			buildConfigurationList = 73B822BC2F95DAFA00BE4F05 /* Build configuration list for PBXNativeTarget "ShopperTests" */;
 			buildPhases = (
 				73B822A12F95DAFA00BE4F05 /* Sources */,
 				73B822A22F95DAFA00BE4F05 /* Frameworks */,
@@ -215,16 +215,16 @@
 			fileSystemSynchronizedGroups = (
 				73B822A82F95DAFA00BE4F05 /* UWBCartTests */,
 			);
-			name = UWBCartTests;
+			name = ShopperTests;
 			packageProductDependencies = (
 			);
 			productName = UWBCartTests;
-			productReference = 73B822A52F95DAFA00BE4F05 /* UWBCartTests.xctest */;
+			productReference = 73B822A52F95DAFA00BE4F05 /* ShopperTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		73B822AE2F95DAFA00BE4F05 /* UWBCartUITests */ = {
+		73B822AE2F95DAFA00BE4F05 /* ShopperUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 73B822BF2F95DAFA00BE4F05 /* Build configuration list for PBXNativeTarget "UWBCartUITests" */;
+			buildConfigurationList = 73B822BF2F95DAFA00BE4F05 /* Build configuration list for PBXNativeTarget "ShopperUITests" */;
 			buildPhases = (
 				73B822AB2F95DAFA00BE4F05 /* Sources */,
 				73B822AC2F95DAFA00BE4F05 /* Frameworks */,
@@ -238,16 +238,16 @@
 			fileSystemSynchronizedGroups = (
 				73B822B22F95DAFA00BE4F05 /* UWBCartUITests */,
 			);
-			name = UWBCartUITests;
+			name = ShopperUITests;
 			packageProductDependencies = (
 			);
 			productName = UWBCartUITests;
-			productReference = 73B822AF2F95DAFA00BE4F05 /* UWBCartUITests.xctest */;
+			productReference = 73B822AF2F95DAFA00BE4F05 /* ShopperUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
-		73B822C52F95DB3000BE4F05 /* ViewerApp */ = {
+		73B822C52F95DB3000BE4F05 /* CartView */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 73B822E62F95DB3300BE4F05 /* Build configuration list for PBXNativeTarget "ViewerApp" */;
+			buildConfigurationList = 73B822E62F95DB3300BE4F05 /* Build configuration list for PBXNativeTarget "CartView" */;
 			buildPhases = (
 				73B822C22F95DB3000BE4F05 /* Sources */,
 				73B822C32F95DB3000BE4F05 /* Frameworks */,
@@ -260,16 +260,16 @@
 			fileSystemSynchronizedGroups = (
 				73B822C72F95DB3000BE4F05 /* ViewerApp */,
 			);
-			name = ViewerApp;
+			name = CartView;
 			packageProductDependencies = (
 			);
 			productName = ViewerApp;
-			productReference = 73B822C62F95DB3000BE4F05 /* ViewerApp.app */;
+			productReference = 73B822C62F95DB3000BE4F05 /* CartView.app */;
 			productType = "com.apple.product-type.application";
 		};
-		73B822D32F95DB3300BE4F05 /* ViewerAppTests */ = {
+		73B822D32F95DB3300BE4F05 /* CartViewTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 73B822E92F95DB3300BE4F05 /* Build configuration list for PBXNativeTarget "ViewerAppTests" */;
+			buildConfigurationList = 73B822E92F95DB3300BE4F05 /* Build configuration list for PBXNativeTarget "CartViewTests" */;
 			buildPhases = (
 				73B822D02F95DB3300BE4F05 /* Sources */,
 				73B822D12F95DB3300BE4F05 /* Frameworks */,
@@ -283,16 +283,16 @@
 			fileSystemSynchronizedGroups = (
 				73B822D72F95DB3300BE4F05 /* ViewerAppTests */,
 			);
-			name = ViewerAppTests;
+			name = CartViewTests;
 			packageProductDependencies = (
 			);
 			productName = ViewerAppTests;
-			productReference = 73B822D42F95DB3300BE4F05 /* ViewerAppTests.xctest */;
+			productReference = 73B822D42F95DB3300BE4F05 /* CartViewTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		73B822DD2F95DB3300BE4F05 /* ViewerAppUITests */ = {
+		73B822DD2F95DB3300BE4F05 /* CartViewUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 73B822EC2F95DB3300BE4F05 /* Build configuration list for PBXNativeTarget "ViewerAppUITests" */;
+			buildConfigurationList = 73B822EC2F95DB3300BE4F05 /* Build configuration list for PBXNativeTarget "CartViewUITests" */;
 			buildPhases = (
 				73B822DA2F95DB3300BE4F05 /* Sources */,
 				73B822DB2F95DB3300BE4F05 /* Frameworks */,
@@ -306,11 +306,11 @@
 			fileSystemSynchronizedGroups = (
 				73B822E12F95DB3300BE4F05 /* ViewerAppUITests */,
 			);
-			name = ViewerAppUITests;
+			name = CartViewUITests;
 			packageProductDependencies = (
 			);
 			productName = ViewerAppUITests;
-			productReference = 73B822DE2F95DB3300BE4F05 /* ViewerAppUITests.xctest */;
+			productReference = 73B822DE2F95DB3300BE4F05 /* CartViewUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -361,12 +361,12 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				73B822952F95DAF800BE4F05 /* UWBCart */,
-				73B822A42F95DAFA00BE4F05 /* UWBCartTests */,
-				73B822AE2F95DAFA00BE4F05 /* UWBCartUITests */,
-				73B822C52F95DB3000BE4F05 /* ViewerApp */,
-				73B822D32F95DB3300BE4F05 /* ViewerAppTests */,
-				73B822DD2F95DB3300BE4F05 /* ViewerAppUITests */,
+				73B822952F95DAF800BE4F05 /* Shopper */,
+				73B822A42F95DAFA00BE4F05 /* ShopperTests */,
+				73B822AE2F95DAFA00BE4F05 /* ShopperUITests */,
+				73B822C52F95DB3000BE4F05 /* CartView */,
+				73B822D32F95DB3300BE4F05 /* CartViewTests */,
+				73B822DD2F95DB3300BE4F05 /* CartViewUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -464,22 +464,22 @@
 /* Begin PBXTargetDependency section */
 		73B822A72F95DAFA00BE4F05 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 73B822952F95DAF800BE4F05 /* UWBCart */;
+			target = 73B822952F95DAF800BE4F05 /* Shopper */;
 			targetProxy = 73B822A62F95DAFA00BE4F05 /* PBXContainerItemProxy */;
 		};
 		73B822B12F95DAFA00BE4F05 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 73B822952F95DAF800BE4F05 /* UWBCart */;
+			target = 73B822952F95DAF800BE4F05 /* Shopper */;
 			targetProxy = 73B822B02F95DAFA00BE4F05 /* PBXContainerItemProxy */;
 		};
 		73B822D62F95DB3300BE4F05 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 73B822C52F95DB3000BE4F05 /* ViewerApp */;
+			target = 73B822C52F95DB3000BE4F05 /* CartView */;
 			targetProxy = 73B822D52F95DB3300BE4F05 /* PBXContainerItemProxy */;
 		};
 		73B822E02F95DB3300BE4F05 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 73B822C52F95DB3000BE4F05 /* ViewerApp */;
+			target = 73B822C52F95DB3000BE4F05 /* CartView */;
 			targetProxy = 73B822DF2F95DB3300BE4F05 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -924,7 +924,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		73B822B92F95DAFA00BE4F05 /* Build configuration list for PBXNativeTarget "UWBCart" */ = {
+		73B822B92F95DAFA00BE4F05 /* Build configuration list for PBXNativeTarget "Shopper" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				73B822BA2F95DAFA00BE4F05 /* Debug */,
@@ -933,7 +933,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		73B822BC2F95DAFA00BE4F05 /* Build configuration list for PBXNativeTarget "UWBCartTests" */ = {
+		73B822BC2F95DAFA00BE4F05 /* Build configuration list for PBXNativeTarget "ShopperTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				73B822BD2F95DAFA00BE4F05 /* Debug */,
@@ -942,7 +942,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		73B822BF2F95DAFA00BE4F05 /* Build configuration list for PBXNativeTarget "UWBCartUITests" */ = {
+		73B822BF2F95DAFA00BE4F05 /* Build configuration list for PBXNativeTarget "ShopperUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				73B822C02F95DAFA00BE4F05 /* Debug */,
@@ -951,7 +951,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		73B822E62F95DB3300BE4F05 /* Build configuration list for PBXNativeTarget "ViewerApp" */ = {
+		73B822E62F95DB3300BE4F05 /* Build configuration list for PBXNativeTarget "CartView" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				73B822E72F95DB3300BE4F05 /* Debug */,
@@ -960,7 +960,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		73B822E92F95DB3300BE4F05 /* Build configuration list for PBXNativeTarget "ViewerAppTests" */ = {
+		73B822E92F95DB3300BE4F05 /* Build configuration list for PBXNativeTarget "CartViewTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				73B822EA2F95DB3300BE4F05 /* Debug */,
@@ -969,7 +969,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		73B822EC2F95DB3300BE4F05 /* Build configuration list for PBXNativeTarget "ViewerAppUITests" */ = {
+		73B822EC2F95DB3300BE4F05 /* Build configuration list for PBXNativeTarget "CartViewUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				73B822ED2F95DB3300BE4F05 /* Debug */,

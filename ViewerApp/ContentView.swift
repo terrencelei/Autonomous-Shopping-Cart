@@ -73,12 +73,36 @@ struct RadarView: View {
     let reading: TagReading?
 
     private let ringCount = 4
-    private let maxRange: Float = 4.0  // metres shown on radar
+
+    /// Nice round scale tiers in metres.
+    private let scaleTiers: [Float] = [1, 2, 3, 4, 5, 6, 8, 10, 15, 20]
+
+    /// Default range when no reading is available.
+    private let defaultRange: Float = 4.0
+
+    /// Compute the ideal maxRange for the current distance.
+    private var targetMaxRange: Float {
+        guard let distance = reading?.distance else { return defaultRange }
+
+        // Add 40% padding so the dot is not at the very edge
+        let padded = distance * 1.4
+
+        // Find the smallest tier that accommodates the padded distance
+        for tier in scaleTiers {
+            if tier >= padded {
+                return tier
+            }
+        }
+
+        // Beyond the largest tier: round up to the nearest 5
+        return ceil(padded / 5) * 5
+    }
 
     var body: some View {
         GeometryReader { geo in
             let size = min(geo.size.width, geo.size.height)
             let center = CGPoint(x: geo.size.width / 2, y: geo.size.height * 0.75)
+            let maxRange = targetMaxRange
             let scale = CGFloat(size) * 0.42 / CGFloat(maxRange)
 
             ZStack {
@@ -91,7 +115,8 @@ struct RadarView: View {
                         .position(center)
 
                     // Range label
-                    Text(String(format: "%.0fm", Float(i) * maxRange / Float(ringCount)))
+                    let ringDistance = Float(i) * maxRange / Float(ringCount)
+                    Text(ringLabelText(ringDistance))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary.opacity(0.6))
                         .position(x: center.x + radius + 14, y: center.y)
@@ -144,7 +169,16 @@ struct RadarView: View {
                         .position(x: clampedX, y: clampedY)
                 }
             }
+            .animation(.easeInOut(duration: 0.5), value: maxRange)
         }
+    }
+
+    /// Format ring label: integer for whole numbers, one decimal otherwise.
+    private func ringLabelText(_ distance: Float) -> String {
+        if distance == distance.rounded() {
+            return String(format: "%.0fm", distance)
+        }
+        return String(format: "%.1fm", distance)
     }
 
     private func clamp(_ value: CGFloat, min minVal: CGFloat, max maxVal: CGFloat) -> CGFloat {

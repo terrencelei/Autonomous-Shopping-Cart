@@ -31,7 +31,7 @@ struct TagView: View {
             }
             .frame(width: 160, height: 160)
 
-            Text("Tag Mode")
+            Text("Shopper")
                 .font(.largeTitle.bold())
 
             Text(manager.status)
