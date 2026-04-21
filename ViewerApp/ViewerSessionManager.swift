@@ -29,6 +29,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
     @Published var status = "Searching for Shopper..."
     @Published var isConnected = false
     @Published var isRanging = false
+    @Published var convergenceHint: String? = nil
 
     // MARK: - NearbyInteraction
 
@@ -109,8 +110,15 @@ class ViewerSessionManager: NSObject, ObservableObject {
     private func configureAndRun(with peerToken: NIDiscoveryToken) {
         guard let niSession else { return }
         let config = NINearbyPeerConfiguration(peerToken: peerToken)
-        if #available(iOS 16.0, *), NISession.deviceCapabilities.supportsCameraAssistance {
-            config.isCameraAssistanceEnabled = true
+        if #available(iOS 16.0, *) {
+            let supported = NISession.deviceCapabilities.supportsCameraAssistance
+            print("[Viewer] supportsCameraAssistance: \(supported)")
+            if supported {
+                config.isCameraAssistanceEnabled = true
+                print("[Viewer] Camera assistance enabled on session config")
+            } else {
+                print("[Viewer] Camera assistance not supported — direction may be unavailable")
+            }
         }
         niSession.run(config)
         DispatchQueue.main.async {
@@ -149,12 +157,34 @@ extension ViewerSessionManager: NISessionDelegate {
                 y: screenY
             )
             if let dir = obj.direction {
+                self.convergenceHint = nil
                 let angleDeg = atan2(dir.x, -dir.z) * 180 / .pi
                 self.status = String(format: "%.2fm  %+.0f°", dist, angleDeg)
             } else {
-                self.status = String(format: "%.2fm (no direction)", dist)
+                self.status = String(format: "%.2fm", dist)
             }
         }
+    }
+
+    @available(iOS 16.0, *)
+    func session(_ session: NISession, didUpdateAlgorithmConvergence convergence: NIAlgorithmConvergence, for object: NINearbyObject?) {
+        guard object != nil, reading?.direction == nil else { return }
+        let hint: String
+        switch convergence.status {
+        case .converged:
+            hint = ""
+        case .notConverged(let reasons):
+            if reasons.contains(.insufficientLighting) {
+                hint = "Move to a brighter area for direction"
+            } else if reasons.contains(.limitedField) {
+                hint = "Point phone toward shopper"
+            } else {
+                hint = "Slowly sweep phone left/right to calibrate direction"
+            }
+        @unknown default:
+            hint = "Move phone to calibrate direction"
+        }
+        convergenceHint = hint.isEmpty ? nil : hint
     }
 
     func session(_ session: NISession, didRemove nearbyObjects: [NINearbyObject], reason: NINearbyObject.RemovalReason) {
@@ -235,6 +265,7 @@ extension ViewerSessionManager: MCSessionDelegate {
                 self.isConnected = false
                 self.isRanging = false
                 self.reading = nil
+                self.convergenceHint = nil
                 self.niSession?.invalidate()
                 self.niSession = nil
                 self.status = "Disconnected — searching..."

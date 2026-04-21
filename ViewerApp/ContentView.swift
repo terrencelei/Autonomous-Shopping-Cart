@@ -50,6 +50,13 @@ struct ViewerRootView: View {
                         }
                     }
                 }
+                if let hint = manager.convergenceHint {
+                    Text(hint)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
                 .padding(.bottom, 32)
             } else {
                 Text(manager.isConnected ? "Waiting for UWB signal..." : "Waiting for connection...")
