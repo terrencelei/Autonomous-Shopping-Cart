@@ -190,24 +190,12 @@ extension ViewerSessionManager: NISessionDelegate {
     @available(iOS 16.0, *)
     func session(_ session: NISession, didUpdateAlgorithmConvergence convergence: NIAlgorithmConvergence, for object: NINearbyObject?) {
         guard object != nil, reading?.direction == nil else { return }
-        let hint: String
-        switch convergence.status {
-        case .converged:
+        if case .converged = convergence.status {
             convergenceHint = nil
             status = "Direction locked"
-            return
-        case .notConverged(let reasons):
-            if reasons.contains(.insufficientLighting) {
-                hint = "Move to a brighter area for direction"
-            } else if reasons.contains(.limitedField) {
-                hint = "Point phone toward shopper"
-            } else {
-                hint = "Slowly sweep phone left/right to calibrate direction"
-            }
-        @unknown default:
-            hint = "Move phone to calibrate direction"
+        } else {
+            convergenceHint = "Slowly sweep phone left/right to calibrate direction"
         }
-        convergenceHint = hint.isEmpty ? nil : hint
     }
 
     func session(_ session: NISession, didRemove nearbyObjects: [NINearbyObject], reason: NINearbyObject.RemovalReason) {
