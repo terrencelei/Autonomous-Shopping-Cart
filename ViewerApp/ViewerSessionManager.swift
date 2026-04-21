@@ -193,7 +193,9 @@ extension ViewerSessionManager: NISessionDelegate {
         let hint: String
         switch convergence.status {
         case .converged:
-            hint = ""
+            convergenceHint = nil
+            status = "Direction locked"
+            return
         case .notConverged(let reasons):
             if reasons.contains(.insufficientLighting) {
                 hint = "Move to a brighter area for direction"
