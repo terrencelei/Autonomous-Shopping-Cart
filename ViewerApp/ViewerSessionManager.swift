@@ -200,7 +200,7 @@ extension ViewerSessionManager: NISessionDelegate {
 
     // Called only when isCameraAssistanceEnabled = true.
     // If this never prints, camera assistance is not activating.
-    func session(_ session: NISession, didUpdateAlgorithmConvergence convergence: NIAlgorithmConvergence, peer: NINearbyObject?) {
+    func session(_ session: NISession, didUpdateAlgorithmConvergence convergence: NIAlgorithmConvergence, for peer: NINearbyObject?) {
         if case .converged = convergence.status {
             print("[Viewer] Convergence: CONVERGED ✓")
             DispatchQueue.main.async {
