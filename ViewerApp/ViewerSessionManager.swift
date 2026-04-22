@@ -129,31 +129,29 @@ class ViewerSessionManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Smoothing
+    // MARK: - Smoothing (exponential moving average)
+    // alpha: 0=no smoothing/instant, 1=heavily smoothed/slow. 0.2 keeps noise low with minimal lag.
 
-    private let smoothingWindow = 5
-    private var distanceBuffer: [Float] = []
-    private var hAngleBuffer: [Float] = []
+    private let emaAlpha: Float = 0.2
+    private var emaDist: Float? = nil
+    private var emaAngle: Float? = nil
 
     private func smoothedDistance(_ raw: Float) -> Float {
-        distanceBuffer.append(raw)
-        if distanceBuffer.count > smoothingWindow { distanceBuffer.removeFirst() }
-        return distanceBuffer.reduce(0, +) / Float(distanceBuffer.count)
+        let out = emaDist.map { emaAlpha * raw + (1 - emaAlpha) * $0 } ?? raw
+        emaDist = out
+        return out
     }
 
     private func smoothedHAngle(_ raw: Float?) -> Float? {
-        guard let raw else {
-            // Don't clear the buffer on a single nil — keep last good average
-            return hAngleBuffer.isEmpty ? nil : hAngleBuffer.reduce(0, +) / Float(hAngleBuffer.count)
-        }
-        hAngleBuffer.append(raw)
-        if hAngleBuffer.count > smoothingWindow { hAngleBuffer.removeFirst() }
-        return hAngleBuffer.reduce(0, +) / Float(hAngleBuffer.count)
+        guard let raw else { return emaAngle }   // hold last known on dropout
+        let out = emaAngle.map { emaAlpha * raw + (1 - emaAlpha) * $0 } ?? raw
+        emaAngle = out
+        return out
     }
 
     private func clearSmoothingBuffers() {
-        distanceBuffer.removeAll()
-        hAngleBuffer.removeAll()
+        emaDist = nil
+        emaAngle = nil
     }
 
     // MARK: - Distance Calibration

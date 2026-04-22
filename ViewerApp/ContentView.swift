@@ -218,7 +218,7 @@ struct RadarView: View {
                         .position(x: clampedX, y: clampedY)
                 }
             }
-            .animation(.easeInOut(duration: 0.5), value: maxRange)
+            .animation(.easeOut(duration: 0.1), value: maxRange)
         }
     }
 
