@@ -70,12 +70,11 @@ private struct ReadoutView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if reading.direction != nil {
+                if let deg = reading.angleDegrees {
                     VStack {
-                        let angleDeg = atan2(reading.x, reading.y) * 180 / .pi
-                        Text(String(format: "%+.0f°", angleDeg))
+                        Text(String(format: "%+.0f°", deg))
                             .font(.system(.title, design: .monospaced).bold())
-                        Text("angle")
+                        Text(reading.direction != nil ? "angle (3D)" : "angle (horizontal)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -84,7 +83,7 @@ private struct ReadoutView: View {
                         Text("—")
                             .font(.system(.title, design: .monospaced).bold())
                             .foregroundStyle(.secondary)
-                        Text("move phone slowly for direction")
+                        Text("no angle data")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

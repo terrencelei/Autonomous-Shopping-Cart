@@ -13,10 +13,25 @@ import simd
 
 /// Position data from a UWB reading.
 struct TagReading {
-    var distance: Float     // metres
-    var direction: simd_float3? // raw direction vector from NI
-    var x: Float            // derived: metres right (+) or left (-)
-    var y: Float            // derived: metres forward (+)
+    var distance: Float          // metres
+    var direction: simd_float3?  // full 3D direction vector (requires AoA FOV)
+    var horizontalAngle: Float?  // azimuthal angle in radians (available more often than direction)
+    var x: Float                 // derived: metres right (+) or left (-)
+    var y: Float                 // derived: metres forward (+)
+
+    /// True if we have any angular data (either 3D direction or at least horizontal angle).
+    var hasAngle: Bool { direction != nil || horizontalAngle != nil }
+
+    /// Best available angle in degrees for display.
+    var angleDegrees: Float? {
+        if let dir = direction {
+            return atan2(dir.x, -dir.z) * 180 / .pi
+        }
+        if let h = horizontalAngle {
+            return h * 180 / .pi
+        }
+        return nil
+    }
 }
 
 /// Manages the UWB + MultipeerConnectivity session for the Viewer (cart) phone.
@@ -69,7 +84,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
 
     private func startNISession() {
         let caps = NISession.deviceCapabilities
-        print("[Viewer] Device capabilities — preciseDist=\(caps.supportsPreciseDistanceMeasurement)  cameraAssistance=\(caps.supportsCameraAssistance)")
+        print("[Viewer] Capabilities — preciseDist=\(caps.supportsPreciseDistanceMeasurement)  direction=\(caps.supportsDirectionMeasurement)  cameraAssistance=\(caps.supportsCameraAssistance)  extendedDist=\(caps.supportsExtendedDistanceMeasurement)")
 
         guard caps.supportsPreciseDistanceMeasurement else {
             status = "Connected (UWB not available on this device)"
@@ -80,7 +95,6 @@ class ViewerSessionManager: NSObject, ObservableObject {
         niSession = NISession()
         niSession?.delegate = self
 
-        // Share our discovery token with the tag phone
         guard let myToken = niSession?.discoveryToken else {
             status = "Error: could not get discovery token"
             return
@@ -96,9 +110,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
             data = try NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true)
         } catch {
             print("[Viewer] ERROR: Failed to archive discovery token: \(error.localizedDescription)")
-            DispatchQueue.main.async {
-                self.status = "Token error — restart app"
-            }
+            DispatchQueue.main.async { self.status = "Token error — restart app" }
             return
         }
 
@@ -107,9 +119,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
             print("[Viewer] Sent discovery token to \(mcSession.connectedPeers.count) peer(s)")
         } catch {
             print("[Viewer] ERROR: Failed to send discovery token: \(error.localizedDescription)")
-            DispatchQueue.main.async {
-                self.status = "Send failed — retrying..."
-            }
+            DispatchQueue.main.async { self.status = "Send failed — retrying..." }
         }
     }
 
@@ -118,7 +128,6 @@ class ViewerSessionManager: NSObject, ObservableObject {
     private var calibrationSamples: [Float] = []
     private let calibrationSampleCount = 20
 
-    /// Hold phones together then call this. Collects samples over ~2 s and averages them.
     func beginCalibration() {
         guard isRanging, !isCalibrating else { return }
         calibrationSamples = []
@@ -140,8 +149,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
             return
         }
         let config = NINearbyPeerConfiguration(peerToken: peerToken)
-        // Pure UWB — U2 chip (iPhone 14 Pro+) provides direction natively, no camera needed
-        print("[Viewer] Running NISession — pure UWB, isCameraAssistanceEnabled=\(config.isCameraAssistanceEnabled)")
+        print("[Viewer] Running NISession with peer config")
         niSession.run(config)
         DispatchQueue.main.async {
             self.isRanging = true
@@ -160,34 +168,33 @@ extension ViewerSessionManager: NISessionDelegate {
             return
         }
 
-        // Skip update when distance is nil (signal too weak).
-        // The previous valid reading remains on screen.
         guard let rawDist = obj.distance else {
-            print("[Viewer] didUpdate: distance is nil (signal too weak or out of range)")
+            print("[Viewer] didUpdate: distance=nil (signal too weak)")
             return
         }
 
-        if let dir = obj.direction {
-            print("[Viewer] didUpdate: distance=\(rawDist)m  direction=(\(dir.x), \(dir.y), \(dir.z))")
-        } else {
-            print("[Viewer] didUpdate: distance=\(rawDist)m  direction=NIL ← peer outside AoA field of view")
-        }
+        // Log all available angle data
+        let dirStr = obj.direction.map { "(\($0.x), \($0.y), \($0.z))" } ?? "nil"
+        let hAngleStr = obj.horizontalAngle.map { String(format: "%.3f rad / %.1f°", $0, $0 * 180 / .pi) } ?? "nil"
+        print("[Viewer] didUpdate: dist=\(String(format: "%.2f", rawDist))m  direction=\(dirStr)  horizontalAngle=\(hAngleStr)  vertical=\(obj.verticalDirectionEstimate.rawValue)")
 
-        // Apply calibration offset and clamp so display never goes negative.
         let dist = max(0, rawDist - calibrationOffset)
 
-        // Derive 2D position from the direction vector
-        // direction.x: positive = right, direction.z: negative = forward (away from screen)
+        // Derive 2D radar position — prefer full direction vector, fall back to horizontal angle
         var screenX: Float = 0
-        var screenY: Float = dist  // default: straight ahead at measured distance
+        var screenY: Float = dist
 
         if let dir = obj.direction {
+            // Full 3D vector: x = right, z = into screen (negative = forward)
             screenX = dist * dir.x
-            screenY = dist * (-dir.z)  // flip z so forward is positive
+            screenY = dist * (-dir.z)
+        } else if let hAngle = obj.horizontalAngle {
+            // Azimuthal angle only: project onto horizontal plane
+            screenX = dist * sin(hAngle)
+            screenY = dist * cos(hAngle)
         }
 
         DispatchQueue.main.async {
-            // Accumulate raw samples during calibration
             if self.isCalibrating {
                 self.calibrationSamples.append(rawDist)
                 self.calibrationProgress = Double(self.calibrationSamples.count) / Double(self.calibrationSampleCount)
@@ -206,14 +213,15 @@ extension ViewerSessionManager: NISessionDelegate {
             self.reading = TagReading(
                 distance: dist,
                 direction: obj.direction,
+                horizontalAngle: obj.horizontalAngle,
                 x: screenX,
                 y: screenY
             )
-            if let dir = obj.direction {
-                let angleDeg = atan2(dir.x, -dir.z) * 180 / .pi
-                self.status = String(format: "%.2fm  %+.0f°", dist, angleDeg)
+
+            if let deg = self.reading?.angleDegrees {
+                self.status = String(format: "%.2fm  %+.0f°", dist, deg)
             } else {
-                self.status = String(format: "%.2fm", dist)
+                self.status = String(format: "%.2fm  (no angle)", dist)
             }
         }
     }
@@ -245,9 +253,7 @@ extension ViewerSessionManager: NISessionDelegate {
     }
 
     func sessionWasSuspended(_ session: NISession) {
-        DispatchQueue.main.async {
-            self.status = "Suspended — bring app to foreground"
-        }
+        DispatchQueue.main.async { self.status = "Suspended — bring app to foreground" }
     }
 
     func sessionSuspensionEnded(_ session: NISession) {
@@ -265,9 +271,7 @@ extension ViewerSessionManager: MCNearbyServiceBrowserDelegate {
     func browser(_ browser: MCNearbyServiceBrowser, foundPeer peerID: MCPeerID, withDiscoveryInfo info: [String: String]?) {
         print("[Viewer] Found peer: \(peerID.displayName)")
         browser.invitePeer(peerID, to: mcSession, withContext: nil, timeout: 10)
-        DispatchQueue.main.async {
-            self.status = "Found \(peerID.displayName), connecting..."
-        }
+        DispatchQueue.main.async { self.status = "Found \(peerID.displayName), connecting..." }
     }
 
     func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
@@ -276,9 +280,7 @@ extension ViewerSessionManager: MCNearbyServiceBrowserDelegate {
 
     func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
         print("[Viewer] ERROR: Failed to start browsing: \(error.localizedDescription)")
-        DispatchQueue.main.async {
-            self.status = "Browsing failed: \(error.localizedDescription)"
-        }
+        DispatchQueue.main.async { self.status = "Browsing failed: \(error.localizedDescription)" }
     }
 }
 
@@ -310,13 +312,11 @@ extension ViewerSessionManager: MCSessionDelegate {
     }
 
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
-        // Received tag phone's discovery token
         guard let token = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NIDiscoveryToken.self, from: data) else {
             print("[Viewer] ERROR: Failed to unarchive discovery token from \(peerID.displayName)")
             return
         }
         print("[Viewer] Received discovery token from \(peerID.displayName)")
-
         DispatchQueue.main.async {
             self.peerDiscoveryToken = token
             self.configureAndRun(with: token)
