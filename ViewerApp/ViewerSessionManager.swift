@@ -9,34 +9,27 @@ import Foundation
 import Combine
 import NearbyInteraction
 import MultipeerConnectivity
-import ARKit
+import AVFoundation
 import simd
 
 /// Position data from a UWB reading.
 struct TagReading {
     var distance: Float          // metres
-    var direction: simd_float3?  // full 3D direction vector (requires AoA FOV)
-    var horizontalAngle: Float?  // azimuthal angle in radians (available more often than direction)
+    var direction: simd_float3?  // full 3D direction vector
+    var horizontalAngle: Float?  // azimuthal angle in radians
     var x: Float                 // derived: metres right (+) or left (-)
     var y: Float                 // derived: metres forward (+)
 
-    /// True if we have any angular data (either 3D direction or at least horizontal angle).
     var hasAngle: Bool { direction != nil || horizontalAngle != nil }
 
-    /// Best available angle in degrees for display.
     var angleDegrees: Float? {
-        if let dir = direction {
-            return atan2(dir.x, -dir.z) * 180 / .pi
-        }
-        if let h = horizontalAngle {
-            return h * 180 / .pi
-        }
+        if let dir = direction { return atan2(dir.x, -dir.z) * 180 / .pi }
+        if let h = horizontalAngle { return h * 180 / .pi }
         return nil
     }
 }
 
 /// Manages the UWB + MultipeerConnectivity session for the Viewer (cart) phone.
-/// This device browses for the Tag phone and displays its position on a radar.
 class ViewerSessionManager: NSObject, ObservableObject {
 
     // MARK: - Published State
@@ -53,7 +46,6 @@ class ViewerSessionManager: NSObject, ObservableObject {
 
     private var niSession: NISession?
     private var peerDiscoveryToken: NIDiscoveryToken?
-    private var arSession: ARSession?
 
     // MARK: - MultipeerConnectivity
 
@@ -80,28 +72,19 @@ class ViewerSessionManager: NSObject, ObservableObject {
     deinit {
         browser.stopBrowsingForPeers()
         niSession?.invalidate()
-        arSession?.pause()
     }
 
     // MARK: - NI Session Setup
 
     private func startNISession() {
         let caps = NISession.deviceCapabilities
+        let camAuth = AVCaptureDevice.authorizationStatus(for: .video)
         print("[Viewer] Capabilities — preciseDist=\(caps.supportsPreciseDistanceMeasurement)  direction=\(caps.supportsDirectionMeasurement)  cameraAssistance=\(caps.supportsCameraAssistance)  extendedDist=\(caps.supportsExtendedDistanceMeasurement)")
+        print("[Viewer] Camera auth status: \(camAuth.rawValue) (0=notDetermined 1=restricted 2=denied 3=authorized)")
 
         guard caps.supportsPreciseDistanceMeasurement else {
             status = "Connected (UWB not available on this device)"
             return
-        }
-
-        // Start an explicit ARSession for camera assistance direction measurement.
-        // NI can manage its own internally, but providing one explicitly is more reliable.
-        if caps.supportsCameraAssistance {
-            let ar = ARSession()
-            let arConfig = ARWorldTrackingConfiguration()
-            ar.run(arConfig)
-            arSession = ar
-            print("[Viewer] ARSession started for camera assistance")
         }
 
         niSession?.invalidate()
@@ -122,16 +105,15 @@ class ViewerSessionManager: NSObject, ObservableObject {
         do {
             data = try NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true)
         } catch {
-            print("[Viewer] ERROR: Failed to archive discovery token: \(error.localizedDescription)")
+            print("[Viewer] ERROR: Failed to archive token: \(error.localizedDescription)")
             DispatchQueue.main.async { self.status = "Token error — restart app" }
             return
         }
-
         do {
             try mcSession.send(data, toPeers: mcSession.connectedPeers, with: .reliable)
             print("[Viewer] Sent discovery token to \(mcSession.connectedPeers.count) peer(s)")
         } catch {
-            print("[Viewer] ERROR: Failed to send discovery token: \(error.localizedDescription)")
+            print("[Viewer] ERROR: Failed to send token: \(error.localizedDescription)")
             DispatchQueue.main.async { self.status = "Send failed — retrying..." }
         }
     }
@@ -158,17 +140,16 @@ class ViewerSessionManager: NSObject, ObservableObject {
 
     private func configureAndRun(with peerToken: NIDiscoveryToken) {
         guard let niSession else {
-            print("[Viewer] configureAndRun: niSession is nil — cannot run")
+            print("[Viewer] configureAndRun: niSession is nil")
             return
         }
         let config = NINearbyPeerConfiguration(peerToken: peerToken)
-        if NISession.deviceCapabilities.supportsCameraAssistance, let ar = arSession {
+        // Let NI manage its own ARSession internally — only set flag, don't call setARSession.
+        // setARSession is for apps that already have ARKit running for other purposes.
+        if NISession.deviceCapabilities.supportsCameraAssistance {
             config.isCameraAssistanceEnabled = true
-            niSession.setARSession(ar)
-            print("[Viewer] Running NISession with camera assistance + explicit ARSession")
-        } else {
-            print("[Viewer] Running NISession — distance only (no camera assistance)")
         }
+        print("[Viewer] Running NISession — cameraAssistance=\(config.isCameraAssistanceEnabled)")
         niSession.run(config)
         DispatchQueue.main.async {
             self.isRanging = true
@@ -181,36 +162,40 @@ class ViewerSessionManager: NSObject, ObservableObject {
 
 extension ViewerSessionManager: NISessionDelegate {
 
+    // Called only when isCameraAssistanceEnabled = true.
+    // If this never prints, camera assistance is not activating.
+    func session(_ session: NISession, didUpdateAlgorithmConvergence convergence: NIAlgorithmConvergence, peer: NINearbyObject?) {
+        if case .converged = convergence.status {
+            print("[Viewer] Convergence: CONVERGED ✓ — direction should now be available")
+        } else {
+            print("[Viewer] Convergence: not yet — \(convergence.status)")
+        }
+    }
+
     func session(_ session: NISession, didUpdate nearbyObjects: [NINearbyObject]) {
         guard let obj = nearbyObjects.first else {
-            print("[Viewer] didUpdate: nearbyObjects is empty")
+            print("[Viewer] didUpdate: empty")
             return
         }
-
         guard let rawDist = obj.distance else {
-            print("[Viewer] didUpdate: distance=nil (signal too weak)")
+            print("[Viewer] didUpdate: distance=nil")
             return
         }
 
-        // Log all available angle data
-        let dirStr = obj.direction.map { "(\($0.x), \($0.y), \($0.z))" } ?? "nil"
-        let hAngleStr = obj.horizontalAngle.map { String(format: "%.3f rad / %.1f°", $0, $0 * 180 / .pi) } ?? "nil"
-        print("[Viewer] didUpdate: dist=\(String(format: "%.2f", rawDist))m  direction=\(dirStr)  horizontalAngle=\(hAngleStr)  vertical=\(obj.verticalDirectionEstimate.rawValue)")
+        let dirStr   = obj.direction.map { "(\(String(format: "%.2f", $0.x)), \(String(format: "%.2f", $0.y)), \(String(format: "%.2f", $0.z)))" } ?? "nil"
+        let hAngleStr = obj.horizontalAngle.map { String(format: "%.3f rad (%.1f°)", $0, $0 * 180 / .pi) } ?? "nil"
+        print("[Viewer] dist=\(String(format: "%.2f", rawDist))m  dir=\(dirStr)  hAngle=\(hAngleStr)  vert=\(obj.verticalDirectionEstimate.rawValue)")
 
         let dist = max(0, rawDist - calibrationOffset)
-
-        // Derive 2D radar position — prefer full direction vector, fall back to horizontal angle
         var screenX: Float = 0
         var screenY: Float = dist
 
         if let dir = obj.direction {
-            // Full 3D vector: x = right, z = into screen (negative = forward)
             screenX = dist * dir.x
             screenY = dist * (-dir.z)
-        } else if let hAngle = obj.horizontalAngle {
-            // Azimuthal angle only: project onto horizontal plane
-            screenX = dist * sin(hAngle)
-            screenY = dist * cos(hAngle)
+        } else if let h = obj.horizontalAngle {
+            screenX = dist * sin(h)
+            screenY = dist * cos(h)
         }
 
         DispatchQueue.main.async {
@@ -246,15 +231,13 @@ extension ViewerSessionManager: NISessionDelegate {
     }
 
     func session(_ session: NISession, didRemove nearbyObjects: [NINearbyObject], reason: NINearbyObject.RemovalReason) {
-        print("[Viewer] didRemove: reason=\(reason.rawValue) (0=peerEnded, 1=timeout)")
+        print("[Viewer] didRemove: reason=\(reason.rawValue)")
         DispatchQueue.main.async {
             self.isRanging = false
             self.reading = nil
             if reason == .timeout {
                 self.status = "Peer out of range — waiting..."
-                if !self.mcSession.connectedPeers.isEmpty {
-                    self.startNISession()
-                }
+                if !self.mcSession.connectedPeers.isEmpty { self.startNISession() }
             }
         }
     }
@@ -265,9 +248,7 @@ extension ViewerSessionManager: NISessionDelegate {
             self.isRanging = false
             self.reading = nil
             self.status = "Session error: \(error.localizedDescription)"
-            if !self.mcSession.connectedPeers.isEmpty {
-                self.startNISession()
-            }
+            if !self.mcSession.connectedPeers.isEmpty { self.startNISession() }
         }
     }
 
@@ -298,7 +279,7 @@ extension ViewerSessionManager: MCNearbyServiceBrowserDelegate {
     }
 
     func browser(_ browser: MCNearbyServiceBrowser, didNotStartBrowsingForPeers error: Error) {
-        print("[Viewer] ERROR: Failed to start browsing: \(error.localizedDescription)")
+        print("[Viewer] ERROR: browsing failed: \(error.localizedDescription)")
         DispatchQueue.main.async { self.status = "Browsing failed: \(error.localizedDescription)" }
     }
 }
@@ -308,7 +289,7 @@ extension ViewerSessionManager: MCNearbyServiceBrowserDelegate {
 extension ViewerSessionManager: MCSessionDelegate {
 
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
-        print("[Viewer] Peer \(peerID.displayName) state: \(state.rawValue) (0=notConnected, 1=connecting, 2=connected)")
+        print("[Viewer] Peer \(peerID.displayName) state: \(state.rawValue)")
         DispatchQueue.main.async {
             switch state {
             case .connected:
@@ -321,8 +302,6 @@ extension ViewerSessionManager: MCSessionDelegate {
                 self.reading = nil
                 self.niSession?.invalidate()
                 self.niSession = nil
-                self.arSession?.pause()
-                self.arSession = nil
                 self.status = "Disconnected — searching..."
             case .connecting:
                 self.status = "Connecting..."
@@ -334,7 +313,7 @@ extension ViewerSessionManager: MCSessionDelegate {
 
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         guard let token = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NIDiscoveryToken.self, from: data) else {
-            print("[Viewer] ERROR: Failed to unarchive discovery token from \(peerID.displayName)")
+            print("[Viewer] ERROR: Failed to unarchive token from \(peerID.displayName)")
             return
         }
         print("[Viewer] Received discovery token from \(peerID.displayName)")
