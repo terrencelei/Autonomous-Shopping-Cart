@@ -29,85 +29,22 @@ struct ViewerRootView: View {
             RadarView(reading: manager.reading)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // Numeric readout
-            if let r = manager.reading {
-                HStack(spacing: 32) {
-                    VStack {
-                        Text(String(format: "%.2f m", r.distance))
-                            .font(.system(.title, design: .monospaced).bold())
-                        Text("distance")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if r.direction != nil {
-                        VStack {
-                            let angleDeg = atan2(r.x, r.y) * 180 / .pi
-                            Text(String(format: "%+.0f°", angleDeg))
-                                .font(.system(.title, design: .monospaced).bold())
-                            Text("angle")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                if let hint = manager.convergenceHint {
-                    Text(hint)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
-                }
+            // Bottom section — mutually exclusive states
+            Group {
                 if manager.isCalibrating {
-                    VStack(spacing: 6) {
-                        ZStack {
-                            Circle()
-                                .stroke(Color.secondary.opacity(0.2), lineWidth: 4)
-                            Circle()
-                                .trim(from: 0, to: manager.calibrationProgress)
-                                .stroke(Color.blue, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                                .rotationEffect(.degrees(-90))
-                                .animation(.linear(duration: 0.1), value: manager.calibrationProgress)
-                        }
-                        .frame(width: 36, height: 36)
-                        Text("Hold phones together…")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.bottom, 32)
+                    DistanceCalibrationView(progress: manager.calibrationProgress)
+                } else if manager.convergenceHint != nil {
+                    DirectionCalibrationGuide(distance: manager.reading?.distance)
+                } else if let r = manager.reading {
+                    ReadoutView(reading: r, manager: manager)
                 } else {
-                    HStack(spacing: 16) {
-                        Button {
-                            manager.beginCalibration()
-                        } label: {
-                            Label("Set Zero", systemImage: "scope")
-                                .font(.caption.bold())
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(Color.blue.opacity(0.15))
-                                .foregroundStyle(.blue)
-                                .clipShape(Capsule())
-                        }
-                        if manager.calibrationOffset != 0 {
-                            Button {
-                                manager.resetCalibration()
-                            } label: {
-                                Label("Reset", systemImage: "arrow.counterclockwise")
-                                    .font(.caption)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 7)
-                                    .background(Color.secondary.opacity(0.12))
-                                    .foregroundStyle(.secondary)
-                                    .clipShape(Capsule())
-                            }
-                        }
-                    }
-                    .padding(.bottom, 32)
+                    Text(manager.isConnected ? "Waiting for UWB signal…" : "Waiting for connection…")
+                        .foregroundStyle(.secondary)
+                        .padding(.bottom, 32)
                 }
-            } else {
-                Text(manager.isConnected ? "Waiting for UWB signal..." : "Waiting for connection...")
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 32)
             }
+            .padding(.horizontal)
+            .padding(.bottom, 24)
         }
         .background(Color(UIColor.systemBackground))
     }
@@ -119,34 +56,165 @@ struct ViewerRootView: View {
     }
 }
 
+// MARK: - Readout (normal ranging state)
+
+private struct ReadoutView: View {
+    let reading: TagReading
+    let manager: ViewerSessionManager
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 32) {
+                VStack {
+                    Text(String(format: "%.2f m", reading.distance))
+                        .font(.system(.title, design: .monospaced).bold())
+                    Text("distance")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if reading.direction != nil {
+                    VStack {
+                        let angleDeg = atan2(reading.x, reading.y) * 180 / .pi
+                        Text(String(format: "%+.0f°", angleDeg))
+                            .font(.system(.title, design: .monospaced).bold())
+                        Text("angle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            HStack(spacing: 12) {
+                Button { manager.beginCalibration() } label: {
+                    Label("Set Zero", systemImage: "scope")
+                        .font(.caption.bold())
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Color.blue.opacity(0.15))
+                        .foregroundStyle(.blue)
+                        .clipShape(Capsule())
+                }
+                if manager.calibrationOffset != 0 {
+                    Button { manager.resetCalibration() } label: {
+                        Label("Reset", systemImage: "arrow.counterclockwise")
+                            .font(.caption)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Color.secondary.opacity(0.12))
+                            .foregroundStyle(.secondary)
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Direction Calibration Guide
+
+struct DirectionCalibrationGuide: View {
+    let distance: Float?
+    @State private var phoneOffset: CGFloat = -24
+
+    var body: some View {
+        VStack(spacing: 14) {
+            // Animated phone moving laterally
+            ZStack(alignment: .center) {
+                // Track line
+                Capsule()
+                    .fill(Color.orange.opacity(0.15))
+                    .frame(width: 120, height: 6)
+
+                // End arrows
+                HStack(spacing: 90) {
+                    Image(systemName: "chevron.left")
+                        .font(.caption.bold())
+                        .foregroundStyle(.orange.opacity(0.5))
+                    Image(systemName: "chevron.right")
+                        .font(.caption.bold())
+                        .foregroundStyle(.orange.opacity(0.5))
+                }
+
+                // Phone icon sliding along track
+                Image(systemName: "iphone")
+                    .font(.title2)
+                    .foregroundStyle(.orange)
+                    .offset(x: phoneOffset)
+                    .animation(
+                        .easeInOut(duration: 1.4).repeatForever(autoreverses: true),
+                        value: phoneOffset
+                    )
+            }
+            .frame(height: 44)
+
+            // Instructions
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Calibrating Direction")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+                Divider().padding(.vertical, 2)
+
+                Label("Point this phone at the Shopper", systemImage: "1.circle.fill")
+                    .font(.subheadline)
+                Label("Walk slowly left and right while facing them", systemImage: "2.circle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Label("Keep walking until direction locks", systemImage: "3.circle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Show distance while waiting so screen isn't empty
+            if let d = distance {
+                Text(String(format: "%.2f m", d))
+                    .font(.system(.title2, design: .monospaced).bold())
+                    .foregroundStyle(.primary.opacity(0.5))
+            }
+        }
+        .padding(16)
+        .background(Color.orange.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .onAppear { phoneOffset = 24 }
+    }
+}
+
+// MARK: - Distance Calibration Progress
+
+struct DistanceCalibrationView: View {
+    let progress: Double
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 5)
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(Color.blue, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.linear(duration: 0.1), value: progress)
+            }
+            .frame(width: 44, height: 44)
+            Text("Hold phones together…")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
 // MARK: - Radar View
 
 struct RadarView: View {
     let reading: TagReading?
 
     private let ringCount = 4
-
-    /// Nice round scale tiers in metres.
     private let scaleTiers: [Float] = [1, 2, 3, 4, 5, 6, 8, 10, 15, 20]
-
-    /// Default range when no reading is available.
     private let defaultRange: Float = 4.0
 
-    /// Compute the ideal maxRange for the current distance.
     private var targetMaxRange: Float {
         guard let distance = reading?.distance else { return defaultRange }
-
-        // Add 40% padding so the dot is not at the very edge
         let padded = distance * 1.4
-
-        // Find the smallest tier that accommodates the padded distance
-        for tier in scaleTiers {
-            if tier >= padded {
-                return tier
-            }
-        }
-
-        // Beyond the largest tier: round up to the nearest 5
+        for tier in scaleTiers { if tier >= padded { return tier } }
         return ceil(padded / 5) * 5
     }
 
@@ -165,8 +233,6 @@ struct RadarView: View {
                         .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
                         .frame(width: radius * 2, height: radius * 2)
                         .position(center)
-
-                    // Range label
                     let ringDistance = Float(i) * maxRange / Float(ringCount)
                     Text(ringLabelText(ringDistance))
                         .font(.system(size: 10))
@@ -201,20 +267,17 @@ struct RadarView: View {
                     let clampedX = clamp(px, min: 20, max: geo.size.width - 20)
                     let clampedY = clamp(py, min: 20, max: geo.size.height - 20)
 
-                    // Dashed line from cart to tag
                     Path { path in
                         path.move(to: center)
                         path.addLine(to: CGPoint(x: clampedX, y: clampedY))
                     }
                     .stroke(Color.orange.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
 
-                    // Pulse ring
                     Circle()
                         .strokeBorder(Color.orange.opacity(0.3), lineWidth: 2)
                         .frame(width: 36, height: 36)
                         .position(x: clampedX, y: clampedY)
 
-                    // Solid dot
                     Circle()
                         .fill(Color.orange)
                         .frame(width: 18, height: 18)
@@ -225,12 +288,10 @@ struct RadarView: View {
         }
     }
 
-    /// Format ring label: integer for whole numbers, one decimal otherwise.
     private func ringLabelText(_ distance: Float) -> String {
-        if distance == distance.rounded() {
-            return String(format: "%.0fm", distance)
-        }
-        return String(format: "%.1fm", distance)
+        distance == distance.rounded()
+            ? String(format: "%.0fm", distance)
+            : String(format: "%.1fm", distance)
     }
 
     private func clamp(_ value: CGFloat, min minVal: CGFloat, max maxVal: CGFloat) -> CGFloat {
@@ -240,7 +301,6 @@ struct RadarView: View {
 
 // MARK: - Cart Icon Shape
 
-/// A simple upward-pointing arrow representing the cart's position and heading.
 struct CartIcon: Shape {
     func path(in rect: CGRect) -> Path {
         var p = Path()
