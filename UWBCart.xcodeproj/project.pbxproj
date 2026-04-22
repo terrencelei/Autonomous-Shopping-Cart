@@ -778,6 +778,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ViewerApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CartView;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Camera is used with UWB to measure the direction to the shopper.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "CartView uses the local network to discover nearby devices for UWB ranging.";
 				INFOPLIST_KEY_NSNearbyInteractionUsageDescription = "CartView uses Nearby Interaction to track the position of nearby devices.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -815,6 +816,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ViewerApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CartView;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Camera is used with UWB to measure the direction to the shopper.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "CartView uses the local network to discover nearby devices for UWB ranging.";
 				INFOPLIST_KEY_NSNearbyInteractionUsageDescription = "CartView uses Nearby Interaction to track the position of nearby devices.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

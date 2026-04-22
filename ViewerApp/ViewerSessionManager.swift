@@ -149,7 +149,15 @@ class ViewerSessionManager: NSObject, ObservableObject {
             return
         }
         let config = NINearbyPeerConfiguration(peerToken: peerToken)
-        print("[Viewer] Running NISession with peer config")
+        // Camera assistance is required to activate the direction algorithm even on U2 devices.
+        // The OS gates angle-of-arrival computation behind the ARKit sensor fusion pipeline.
+        if NISession.deviceCapabilities.supportsCameraAssistance {
+            config.isCameraAssistanceEnabled = true
+            print("[Viewer] Camera assistance enabled — direction will appear with normal movement")
+        } else {
+            print("[Viewer] Camera assistance not supported — distance only")
+        }
+        print("[Viewer] Running NISession with peer config (cameraAssistance=\(config.isCameraAssistanceEnabled))")
         niSession.run(config)
         DispatchQueue.main.async {
             self.isRanging = true
