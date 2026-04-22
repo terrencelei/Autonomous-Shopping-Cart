@@ -54,41 +54,29 @@ struct ViewerRootView: View {
     }
 }
 
-// MARK: - Readout (normal ranging state)
+// MARK: - Readout (console-style raw figures)
 
 private struct ReadoutView: View {
     let reading: TagReading
     let manager: ViewerSessionManager
 
+    private var dirString: String {
+        guard let d = reading.direction else { return "nil" }
+        return String(format: "(%.3f, %.3f, %.3f)", d.x, d.y, d.z)
+    }
+
+    private var hAngleString: String {
+        guard let h = reading.horizontalAngle else { return "nil" }
+        return String(format: "%.3f rad  %+.1f°", h, h * 180 / .pi)
+    }
+
     var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 32) {
-                VStack {
-                    Text(String(format: "%.2f m", reading.distance))
-                        .font(.system(.title, design: .monospaced).bold())
-                    Text("distance")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if let deg = reading.angleDegrees {
-                    VStack {
-                        Text(String(format: "%+.0f°", deg))
-                            .font(.system(.title, design: .monospaced).bold())
-                        Text(reading.direction != nil ? "angle (3D)" : "angle (horizontal)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    VStack {
-                        Text("—")
-                            .font(.system(.title, design: .monospaced).bold())
-                            .foregroundStyle(.secondary)
-                        Text("no angle data")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+        VStack(alignment: .leading, spacing: 4) {
+            row("dist",   String(format: "%.3f m", reading.distance))
+            row("dir",    dirString)
+            row("hAngle", hAngleString)
+            row("vert",   "\(reading.verticalEstimate)  (\(reading.verticalLabel))")
+
             HStack(spacing: 12) {
                 Button { manager.beginCalibration() } label: {
                     Label("Set Zero", systemImage: "scope")
@@ -111,6 +99,22 @@ private struct ReadoutView: View {
                     }
                 }
             }
+            .padding(.top, 4)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(Color(UIColor.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            Text(label.padding(toLength: 8, withPad: " ", startingAt: 0))
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.primary)
         }
     }
 }

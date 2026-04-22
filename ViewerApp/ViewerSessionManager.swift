@@ -14,9 +14,10 @@ import simd
 
 /// Position data from a UWB reading.
 struct TagReading {
-    var distance: Float          // metres
+    var distance: Float          // metres (smoothed)
     var direction: simd_float3?  // full 3D direction vector
-    var horizontalAngle: Float?  // azimuthal angle in radians
+    var horizontalAngle: Float?  // azimuthal angle in radians (smoothed)
+    var verticalEstimate: Int    // NINearbyObject.VerticalDirectionEstimate rawValue
     var x: Float                 // derived: metres right (+) or left (-)
     var y: Float                 // derived: metres forward (+)
 
@@ -26,6 +27,16 @@ struct TagReading {
         if let dir = direction { return atan2(dir.x, -dir.z) * 180 / .pi }
         if let h = horizontalAngle { return h * 180 / .pi }
         return nil
+    }
+
+    var verticalLabel: String {
+        switch verticalEstimate {
+        case 1: return "same"
+        case 2: return "above"
+        case 3: return "below"
+        case 4: return "above/below"
+        default: return "unknown"
+        }
     }
 }
 
@@ -247,6 +258,7 @@ extension ViewerSessionManager: NISessionDelegate {
                 distance: smoothDist,
                 direction: obj.direction,
                 horizontalAngle: smoothAngle,
+                verticalEstimate: obj.verticalDirectionEstimate.rawValue,
                 x: screenX,
                 y: screenY
             )
