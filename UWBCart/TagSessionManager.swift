@@ -99,8 +99,12 @@ class TagSessionManager: NSObject, ObservableObject {
     }
 
     private func configureAndRun(with peerToken: NIDiscoveryToken) {
-        guard let niSession else { return }
+        guard let niSession else {
+            print("[Tag] configureAndRun: niSession is nil — cannot run")
+            return
+        }
         let config = NINearbyPeerConfiguration(peerToken: peerToken)
+        print("[Tag] Running NISession with peer config")
         niSession.run(config)
         DispatchQueue.main.async {
             self.isRanging = true
@@ -115,6 +119,11 @@ extension TagSessionManager: NISessionDelegate {
 
     func session(_ session: NISession, didUpdate nearbyObjects: [NINearbyObject]) {
         // Tag app doesn't need to process position updates — just keep ranging
+        if let obj = nearbyObjects.first {
+            print("[Tag] didUpdate: distance=\(obj.distance.map { "\($0)m" } ?? "nil")  direction=\(obj.direction != nil ? "available" : "nil")")
+        } else {
+            print("[Tag] didUpdate: nearbyObjects is empty")
+        }
     }
 
     func session(_ session: NISession, didRemove nearbyObjects: [NINearbyObject], reason: NINearbyObject.RemovalReason) {
@@ -131,9 +140,10 @@ extension TagSessionManager: NISessionDelegate {
     }
 
     func session(_ session: NISession, didInvalidateWith error: Error) {
+        print("[Tag] didInvalidateWith: \(error.localizedDescription)")
         DispatchQueue.main.async {
             self.isRanging = false
-            self.status = "Session invalidated — reconnecting..."
+            self.status = "Session error: \(error.localizedDescription)"
             // Restart if still connected via MC
             if !self.mcSession.connectedPeers.isEmpty {
                 self.startNISession()

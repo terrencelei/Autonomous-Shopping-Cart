@@ -132,8 +132,12 @@ class ViewerSessionManager: NSObject, ObservableObject {
     }
 
     private func configureAndRun(with peerToken: NIDiscoveryToken) {
-        guard let niSession else { return }
+        guard let niSession else {
+            print("[Viewer] configureAndRun: niSession is nil — cannot run")
+            return
+        }
         let config = NINearbyPeerConfiguration(peerToken: peerToken)
+        print("[Viewer] Running NISession with peer config")
         niSession.run(config)
         DispatchQueue.main.async {
             self.isRanging = true
@@ -147,11 +151,19 @@ class ViewerSessionManager: NSObject, ObservableObject {
 extension ViewerSessionManager: NISessionDelegate {
 
     func session(_ session: NISession, didUpdate nearbyObjects: [NINearbyObject]) {
-        guard let obj = nearbyObjects.first else { return }
+        guard let obj = nearbyObjects.first else {
+            print("[Viewer] didUpdate: nearbyObjects is empty")
+            return
+        }
 
         // Skip update when distance is nil (signal too weak).
         // The previous valid reading remains on screen.
-        guard let rawDist = obj.distance else { return }
+        guard let rawDist = obj.distance else {
+            print("[Viewer] didUpdate: distance is nil (signal too weak or out of range)")
+            return
+        }
+
+        print("[Viewer] didUpdate: distance=\(rawDist)m  direction=\(obj.direction.map { "\($0)" } ?? "nil")")
 
         // Apply calibration offset and clamp so display never goes negative.
         let dist = max(0, rawDist - calibrationOffset)
@@ -199,6 +211,7 @@ extension ViewerSessionManager: NISessionDelegate {
     }
 
     func session(_ session: NISession, didRemove nearbyObjects: [NINearbyObject], reason: NINearbyObject.RemovalReason) {
+        print("[Viewer] didRemove: reason=\(reason.rawValue) (0=peerEnded, 1=timeout)")
         DispatchQueue.main.async {
             self.isRanging = false
             self.reading = nil
@@ -212,10 +225,11 @@ extension ViewerSessionManager: NISessionDelegate {
     }
 
     func session(_ session: NISession, didInvalidateWith error: Error) {
+        print("[Viewer] didInvalidateWith: \(error.localizedDescription)")
         DispatchQueue.main.async {
             self.isRanging = false
             self.reading = nil
-            self.status = "Session error — reconnecting..."
+            self.status = "Session error: \(error.localizedDescription)"
             if !self.mcSession.connectedPeers.isEmpty {
                 self.startNISession()
             }
