@@ -70,21 +70,34 @@ private struct ReadoutView: View {
             row("dist",  String(format: "%.3f m", reading.distance))
             row("angle", angleString)
 
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Button { manager.beginCalibration() } label: {
-                    Label("Set Zero", systemImage: "scope")
+                    Label("Zero Dist", systemImage: "scope")
                         .font(.caption.bold())
-                        .padding(.horizontal, 14)
+                        .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .background(Color.blue.opacity(0.15))
                         .foregroundStyle(.blue)
                         .clipShape(Capsule())
                 }
-                if manager.calibrationOffset != 0 {
-                    Button { manager.resetCalibration() } label: {
-                        Label("Reset", systemImage: "arrow.counterclockwise")
+                Button { manager.zeroAngle() } label: {
+                    Label("Zero Angle", systemImage: "arrow.up.circle")
+                        .font(.caption.bold())
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Color.blue.opacity(0.15))
+                        .foregroundStyle(.blue)
+                        .clipShape(Capsule())
+                }
+                .disabled(reading.horizontalAngle == nil)
+                if manager.calibrationOffset != 0 || manager.angleOffset != 0 {
+                    Button {
+                        manager.resetCalibration()
+                        manager.resetAngleCalibration()
+                    } label: {
+                        Label("Reset All", systemImage: "arrow.counterclockwise")
                             .font(.caption)
-                            .padding(.horizontal, 14)
+                            .padding(.horizontal, 12)
                             .padding(.vertical, 7)
                             .background(Color.secondary.opacity(0.12))
                             .foregroundStyle(.secondary)

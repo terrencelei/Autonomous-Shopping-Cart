@@ -52,6 +52,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
     @Published private(set) var calibrationOffset: Float
     @Published var isCalibrating = false
     @Published var calibrationProgress: Double = 0
+    @Published private(set) var angleOffset: Float
 
     // MARK: - NearbyInteraction
 
@@ -70,6 +71,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
 
     override init() {
         calibrationOffset = UserDefaults.standard.float(forKey: "uwb_calibration_offset")
+        angleOffset = UserDefaults.standard.float(forKey: "uwb_angle_offset")
         super.init()
 
         mcSession = MCSession(peer: myPeerID, securityIdentity: nil, encryptionPreference: .required)
@@ -179,6 +181,19 @@ class ViewerSessionManager: NSObject, ObservableObject {
         UserDefaults.standard.removeObject(forKey: "uwb_calibration_offset")
     }
 
+    // MARK: - Angle Calibration
+
+    func zeroAngle() {
+        guard let current = emaAngle else { return }
+        angleOffset = current
+        UserDefaults.standard.set(current, forKey: "uwb_angle_offset")
+    }
+
+    func resetAngleCalibration() {
+        angleOffset = 0
+        UserDefaults.standard.removeObject(forKey: "uwb_angle_offset")
+    }
+
     private func configureAndRun(with peerToken: NIDiscoveryToken) {
         guard let niSession else {
             print("[Viewer] configureAndRun: niSession is nil")
@@ -234,7 +249,14 @@ extension ViewerSessionManager: NISessionDelegate {
         print("[Viewer] dist=\(String(format: "%.2f", rawDist))m  dir=\(dirStr)  hAngle=\(hAngleStr)  vert=\(obj.verticalDirectionEstimate.rawValue)")
 
         let smoothDist  = max(0, smoothedDistance(rawDist) - calibrationOffset)
-        let smoothAngle = smoothedHAngle(obj.horizontalAngle)
+        let rawAngle    = smoothedHAngle(obj.horizontalAngle)
+        // Apply angle offset and normalise to [-π, π]
+        let smoothAngle: Float? = rawAngle.map {
+            var a = $0 - angleOffset
+            while a >  .pi { a -= 2 * .pi }
+            while a < -.pi { a += 2 * .pi }
+            return a
+        }
 
         var screenX: Float = 0
         var screenY: Float = smoothDist
