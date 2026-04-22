@@ -207,10 +207,8 @@ class ViewerSessionManager: NSObject, ObservableObject {
         }
         print("[Viewer] Running NISession — cameraAssistance=\(config.isCameraAssistanceEnabled)")
         niSession.run(config)
-        DispatchQueue.main.async {
-            self.isRanging = true
-            self.status = "UWB ranging active"
-        }
+        isRanging = true
+        status = "UWB ranging active"
     }
 }
 
@@ -223,14 +221,10 @@ extension ViewerSessionManager: NISessionDelegate {
     func session(_ session: NISession, didUpdateAlgorithmConvergence convergence: NIAlgorithmConvergence, for peer: NINearbyObject?) {
         if case .converged = convergence.status {
             print("[Viewer] Convergence: CONVERGED ✓")
-            DispatchQueue.main.async {
-                if self.isRanging { self.status = "Angle locked" }
-            }
+            if isRanging { status = "Angle locked" }
         } else {
             print("[Viewer] Convergence: not yet — \(convergence.status)")
-            DispatchQueue.main.async {
-                if self.isRanging { self.status = "Move phone to establish angle…" }
-            }
+            if isRanging { status = "Move phone to establish angle…" }
         }
     }
 
@@ -258,10 +252,14 @@ extension ViewerSessionManager: NISessionDelegate {
             return a
         }
 
+        // NISession delegates are called on the main queue — update reading synchronously.
+        let direction = obj.direction
+        let vertEst   = obj.verticalDirectionEstimate.rawValue
+
         var screenX: Float = 0
         var screenY: Float = smoothDist
 
-        if let dir = obj.direction {
+        if let dir = direction {
             screenX = smoothDist * dir.x
             screenY = smoothDist * (-dir.z)
         } else if let h = smoothAngle {
@@ -269,72 +267,64 @@ extension ViewerSessionManager: NISessionDelegate {
             screenY = smoothDist * cos(h)
         }
 
-        DispatchQueue.main.async {
-            if self.isCalibrating {
-                self.calibrationSamples.append(rawDist)  // calibrate against raw, not smoothed
-                self.calibrationProgress = Double(self.calibrationSamples.count) / Double(self.calibrationSampleCount)
-                if self.calibrationSamples.count >= self.calibrationSampleCount {
-                    let avg = self.calibrationSamples.reduce(0, +) / Float(self.calibrationSamples.count)
-                    self.calibrationOffset = avg
-                    UserDefaults.standard.set(avg, forKey: "uwb_calibration_offset")
-                    self.isCalibrating = false
-                    self.calibrationSamples = []
-                    self.calibrationProgress = 0
-                    self.status = "Distance zeroed"
-                }
-                return
+        if isCalibrating {
+            calibrationSamples.append(rawDist)
+            calibrationProgress = Double(calibrationSamples.count) / Double(calibrationSampleCount)
+            if calibrationSamples.count >= calibrationSampleCount {
+                let avg = calibrationSamples.reduce(0, +) / Float(calibrationSamples.count)
+                calibrationOffset = avg
+                UserDefaults.standard.set(avg, forKey: "uwb_calibration_offset")
+                isCalibrating = false
+                calibrationSamples = []
+                calibrationProgress = 0
+                status = "Distance zeroed"
             }
+            return
+        }
 
-            self.reading = TagReading(
-                distance: smoothDist,
-                direction: obj.direction,
-                horizontalAngle: smoothAngle,
-                verticalEstimate: obj.verticalDirectionEstimate.rawValue,
-                x: screenX,
-                y: screenY
-            )
+        reading = TagReading(
+            distance: smoothDist,
+            direction: direction,
+            horizontalAngle: smoothAngle,
+            verticalEstimate: vertEst,
+            x: screenX,
+            y: screenY
+        )
 
-            if let deg = self.reading?.angleDegrees {
-                self.status = String(format: "%.2fm  %+.0f°", smoothDist, deg)
-            } else {
-                self.status = String(format: "%.2fm  (no angle)", smoothDist)
-            }
+        if let deg = reading?.angleDegrees {
+            status = String(format: "%.2fm  %+.0f°", smoothDist, deg)
+        } else {
+            status = String(format: "%.2fm  (no angle)", smoothDist)
         }
     }
 
     func session(_ session: NISession, didRemove nearbyObjects: [NINearbyObject], reason: NINearbyObject.RemovalReason) {
         print("[Viewer] didRemove: reason=\(reason.rawValue)")
-        DispatchQueue.main.async {
-            self.isRanging = false
-            self.reading = nil
-            self.clearSmoothingBuffers()
-            if reason == .timeout {
-                self.status = "Peer out of range — waiting..."
-                if self.connectedPeerID != nil { self.startNISession() }
-            }
+        isRanging = false
+        reading = nil
+        clearSmoothingBuffers()
+        if reason == .timeout {
+            status = "Peer out of range — waiting..."
+            if connectedPeerID != nil { startNISession() }
         }
     }
 
     func session(_ session: NISession, didInvalidateWith error: Error) {
         print("[Viewer] didInvalidateWith: \(error.localizedDescription)")
-        DispatchQueue.main.async {
-            self.isRanging = false
-            self.reading = nil
-            self.clearSmoothingBuffers()
-            self.status = "Session error: \(error.localizedDescription)"
-            if self.connectedPeerID != nil { self.startNISession() }
-        }
+        isRanging = false
+        reading = nil
+        clearSmoothingBuffers()
+        status = "Session error: \(error.localizedDescription)"
+        if connectedPeerID != nil { startNISession() }
     }
 
     func sessionWasSuspended(_ session: NISession) {
-        DispatchQueue.main.async { self.status = "Suspended — bring app to foreground" }
+        status = "Suspended — bring app to foreground"
     }
 
     func sessionSuspensionEnded(_ session: NISession) {
-        DispatchQueue.main.async {
-            self.status = "Resumed — restarting..."
-            self.startNISession()
-        }
+        status = "Resumed — restarting..."
+        startNISession()
     }
 }
 
