@@ -29,7 +29,6 @@ class ViewerSessionManager: NSObject, ObservableObject {
     @Published var status = "Searching for Shopper..."
     @Published var isConnected = false
     @Published var isRanging = false
-    @Published var convergenceHint: String? = nil
     @Published private(set) var calibrationOffset: Float
     @Published var isCalibrating = false
     @Published var calibrationProgress: Double = 0
@@ -135,16 +134,6 @@ class ViewerSessionManager: NSObject, ObservableObject {
     private func configureAndRun(with peerToken: NIDiscoveryToken) {
         guard let niSession else { return }
         let config = NINearbyPeerConfiguration(peerToken: peerToken)
-        if #available(iOS 16.0, *) {
-            let supported = NISession.deviceCapabilities.supportsCameraAssistance
-            print("[Viewer] supportsCameraAssistance: \(supported)")
-            if supported {
-                config.isCameraAssistanceEnabled = true
-                print("[Viewer] Camera assistance enabled on session config")
-            } else {
-                print("[Viewer] Camera assistance not supported — direction may be unavailable")
-            }
-        }
         niSession.run(config)
         DispatchQueue.main.async {
             self.isRanging = true
@@ -201,23 +190,11 @@ extension ViewerSessionManager: NISessionDelegate {
                 y: screenY
             )
             if let dir = obj.direction {
-                self.convergenceHint = nil
                 let angleDeg = atan2(dir.x, -dir.z) * 180 / .pi
                 self.status = String(format: "%.2fm  %+.0f°", dist, angleDeg)
             } else {
                 self.status = String(format: "%.2fm", dist)
             }
-        }
-    }
-
-    @available(iOS 16.0, *)
-    func session(_ session: NISession, didUpdateAlgorithmConvergence convergence: NIAlgorithmConvergence, for object: NINearbyObject?) {
-        guard object != nil, reading?.direction == nil else { return }
-        if case .converged = convergence.status {
-            convergenceHint = nil
-            status = "Direction locked"
-        } else {
-            convergenceHint = "Slowly sweep phone left/right to calibrate direction"
         }
     }
 
@@ -299,7 +276,6 @@ extension ViewerSessionManager: MCSessionDelegate {
                 self.isConnected = false
                 self.isRanging = false
                 self.reading = nil
-                self.convergenceHint = nil
                 self.niSession?.invalidate()
                 self.niSession = nil
                 self.status = "Disconnected — searching..."

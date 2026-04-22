@@ -33,8 +33,6 @@ struct ViewerRootView: View {
             Group {
                 if manager.isCalibrating {
                     DistanceCalibrationView(progress: manager.calibrationProgress)
-                } else if manager.convergenceHint != nil {
-                    DirectionCalibrationGuide(distance: manager.reading?.distance)
                 } else if let r = manager.reading {
                     ReadoutView(reading: r, manager: manager)
                 } else {
@@ -81,6 +79,15 @@ private struct ReadoutView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                } else {
+                    VStack {
+                        Text("—")
+                            .font(.system(.title, design: .monospaced).bold())
+                            .foregroundStyle(.secondary)
+                        Text("face phones together")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             HStack(spacing: 12) {
@@ -106,75 +113,6 @@ private struct ReadoutView: View {
                 }
             }
         }
-    }
-}
-
-// MARK: - Direction Calibration Guide
-
-struct DirectionCalibrationGuide: View {
-    let distance: Float?
-    @State private var phoneOffset: CGFloat = -24
-
-    var body: some View {
-        VStack(spacing: 14) {
-            // Animated phone moving laterally
-            ZStack(alignment: .center) {
-                // Track line
-                Capsule()
-                    .fill(Color.orange.opacity(0.15))
-                    .frame(width: 120, height: 6)
-
-                // End arrows
-                HStack(spacing: 90) {
-                    Image(systemName: "chevron.left")
-                        .font(.caption.bold())
-                        .foregroundStyle(.orange.opacity(0.5))
-                    Image(systemName: "chevron.right")
-                        .font(.caption.bold())
-                        .foregroundStyle(.orange.opacity(0.5))
-                }
-
-                // Phone icon sliding along track
-                Image(systemName: "iphone")
-                    .font(.title2)
-                    .foregroundStyle(.orange)
-                    .offset(x: phoneOffset)
-                    .animation(
-                        .easeInOut(duration: 1.4).repeatForever(autoreverses: true),
-                        value: phoneOffset
-                    )
-            }
-            .frame(height: 44)
-
-            // Instructions
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Calibrating Direction")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, alignment: .center)
-
-                Divider().padding(.vertical, 2)
-
-                Label("Point this phone at the Shopper", systemImage: "1.circle.fill")
-                    .font(.subheadline)
-                Label("Walk slowly left and right while facing them", systemImage: "2.circle.fill")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Label("Keep walking until direction locks", systemImage: "3.circle.fill")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            // Show distance while waiting so screen isn't empty
-            if let d = distance {
-                Text(String(format: "%.2f m", d))
-                    .font(.system(.title2, design: .monospaced).bold())
-                    .foregroundStyle(.primary.opacity(0.5))
-            }
-        }
-        .padding(16)
-        .background(Color.orange.opacity(0.07))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .onAppear { phoneOffset = 24 }
     }
 }
 
