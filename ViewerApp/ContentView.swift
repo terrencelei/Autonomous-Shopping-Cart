@@ -60,22 +60,15 @@ private struct ReadoutView: View {
     let reading: TagReading
     let manager: ViewerSessionManager
 
-    private var dirString: String {
-        guard let d = reading.direction else { return "nil" }
-        return String(format: "(%.3f, %.3f, %.3f)", d.x, d.y, d.z)
-    }
-
-    private var hAngleString: String {
+    private var angleString: String {
         guard let h = reading.horizontalAngle else { return "nil" }
         return String(format: "%.3f rad  %+.1f°", h, h * 180 / .pi)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            row("dist",   String(format: "%.3f m", reading.distance))
-            row("dir",    dirString)
-            row("hAngle", hAngleString)
-            row("vert",   "\(reading.verticalEstimate)  (\(reading.verticalLabel))")
+            row("dist",  String(format: "%.3f m", reading.distance))
+            row("angle", angleString)
 
             HStack(spacing: 12) {
                 Button { manager.beginCalibration() } label: {
