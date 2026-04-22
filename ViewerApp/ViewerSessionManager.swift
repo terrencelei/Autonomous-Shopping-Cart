@@ -9,6 +9,7 @@ import Foundation
 import Combine
 import NearbyInteraction
 import MultipeerConnectivity
+import ARKit
 import simd
 
 /// Position data from a UWB reading.
@@ -52,6 +53,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
 
     private var niSession: NISession?
     private var peerDiscoveryToken: NIDiscoveryToken?
+    private var arSession: ARSession?
 
     // MARK: - MultipeerConnectivity
 
@@ -78,6 +80,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
     deinit {
         browser.stopBrowsingForPeers()
         niSession?.invalidate()
+        arSession?.pause()
     }
 
     // MARK: - NI Session Setup
@@ -89,6 +92,16 @@ class ViewerSessionManager: NSObject, ObservableObject {
         guard caps.supportsPreciseDistanceMeasurement else {
             status = "Connected (UWB not available on this device)"
             return
+        }
+
+        // Start an explicit ARSession for camera assistance direction measurement.
+        // NI can manage its own internally, but providing one explicitly is more reliable.
+        if caps.supportsCameraAssistance {
+            let ar = ARSession()
+            let arConfig = ARWorldTrackingConfiguration()
+            ar.run(arConfig)
+            arSession = ar
+            print("[Viewer] ARSession started for camera assistance")
         }
 
         niSession?.invalidate()
@@ -149,15 +162,13 @@ class ViewerSessionManager: NSObject, ObservableObject {
             return
         }
         let config = NINearbyPeerConfiguration(peerToken: peerToken)
-        // Camera assistance is required to activate the direction algorithm even on U2 devices.
-        // The OS gates angle-of-arrival computation behind the ARKit sensor fusion pipeline.
-        if NISession.deviceCapabilities.supportsCameraAssistance {
+        if NISession.deviceCapabilities.supportsCameraAssistance, let ar = arSession {
             config.isCameraAssistanceEnabled = true
-            print("[Viewer] Camera assistance enabled — direction will appear with normal movement")
+            niSession.setARSession(ar)
+            print("[Viewer] Running NISession with camera assistance + explicit ARSession")
         } else {
-            print("[Viewer] Camera assistance not supported — distance only")
+            print("[Viewer] Running NISession — distance only (no camera assistance)")
         }
-        print("[Viewer] Running NISession with peer config (cameraAssistance=\(config.isCameraAssistanceEnabled))")
         niSession.run(config)
         DispatchQueue.main.async {
             self.isRanging = true
@@ -310,6 +321,8 @@ extension ViewerSessionManager: MCSessionDelegate {
                 self.reading = nil
                 self.niSession?.invalidate()
                 self.niSession = nil
+                self.arSession?.pause()
+                self.arSession = nil
                 self.status = "Disconnected — searching..."
             case .connecting:
                 self.status = "Connecting..."
