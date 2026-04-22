@@ -120,6 +120,18 @@ extension TagSessionManager: NISessionDelegate {
         // Tag app doesn't need to process position updates — just keep ranging
     }
 
+    @available(iOS 16.0, *)
+    func session(_ session: NISession, didUpdateAlgorithmConvergence convergence: NIAlgorithmConvergence, for object: NINearbyObject?) {
+        guard object != nil else { return }
+        DispatchQueue.main.async {
+            if case .converged = convergence.status {
+                self.status = "Direction locked — UWB ranging active"
+            } else {
+                self.status = "Slowly sweep phone left/right to calibrate direction"
+            }
+        }
+    }
+
     func session(_ session: NISession, didRemove nearbyObjects: [NINearbyObject], reason: NINearbyObject.RemovalReason) {
         DispatchQueue.main.async {
             self.isRanging = false

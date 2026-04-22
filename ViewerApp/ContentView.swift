@@ -57,33 +57,52 @@ struct ViewerRootView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 24)
                 }
-                HStack(spacing: 16) {
-                    Button {
-                        manager.zeroDistance()
-                    } label: {
-                        Label("Set Zero", systemImage: "scope")
-                            .font(.caption.bold())
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(Color.blue.opacity(0.15))
-                            .foregroundStyle(.blue)
-                            .clipShape(Capsule())
+                if manager.isCalibrating {
+                    VStack(spacing: 6) {
+                        ZStack {
+                            Circle()
+                                .stroke(Color.secondary.opacity(0.2), lineWidth: 4)
+                            Circle()
+                                .trim(from: 0, to: manager.calibrationProgress)
+                                .stroke(Color.blue, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                                .rotationEffect(.degrees(-90))
+                                .animation(.linear(duration: 0.1), value: manager.calibrationProgress)
+                        }
+                        .frame(width: 36, height: 36)
+                        Text("Hold phones together…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    if manager.calibrationOffset != 0 {
+                    .padding(.bottom, 32)
+                } else {
+                    HStack(spacing: 16) {
                         Button {
-                            manager.resetCalibration()
+                            manager.beginCalibration()
                         } label: {
-                            Label("Reset", systemImage: "arrow.counterclockwise")
-                                .font(.caption)
+                            Label("Set Zero", systemImage: "scope")
+                                .font(.caption.bold())
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 7)
-                                .background(Color.secondary.opacity(0.12))
-                                .foregroundStyle(.secondary)
+                                .background(Color.blue.opacity(0.15))
+                                .foregroundStyle(.blue)
                                 .clipShape(Capsule())
                         }
+                        if manager.calibrationOffset != 0 {
+                            Button {
+                                manager.resetCalibration()
+                            } label: {
+                                Label("Reset", systemImage: "arrow.counterclockwise")
+                                    .font(.caption)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 7)
+                                    .background(Color.secondary.opacity(0.12))
+                                    .foregroundStyle(.secondary)
+                                    .clipShape(Capsule())
+                            }
+                        }
                     }
+                    .padding(.bottom, 32)
                 }
-                .padding(.bottom, 32)
             } else {
                 Text(manager.isConnected ? "Waiting for UWB signal..." : "Waiting for connection...")
                     .foregroundStyle(.secondary)

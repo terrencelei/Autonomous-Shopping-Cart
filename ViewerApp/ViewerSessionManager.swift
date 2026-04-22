@@ -31,6 +31,8 @@ class ViewerSessionManager: NSObject, ObservableObject {
     @Published var isRanging = false
     @Published var convergenceHint: String? = nil
     @Published private(set) var calibrationOffset: Float
+    @Published var isCalibrating = false
+    @Published var calibrationProgress: Double = 0
 
     // MARK: - NearbyInteraction
 
@@ -111,16 +113,21 @@ class ViewerSessionManager: NSObject, ObservableObject {
 
     // MARK: - Distance Calibration
 
-    /// Call with the phones held together to zero out the hardware distance offset.
-    func zeroDistance() {
-        guard let r = reading else { return }
-        // r.distance is already calibrated (raw - currentOffset),
-        // so the new offset = currentOffset + r.distance removes the remaining gap.
-        calibrationOffset += r.distance
-        UserDefaults.standard.set(calibrationOffset, forKey: "uwb_calibration_offset")
+    private var calibrationSamples: [Float] = []
+    private let calibrationSampleCount = 20
+
+    /// Hold phones together then call this. Collects samples over ~2 s and averages them.
+    func beginCalibration() {
+        guard isRanging, !isCalibrating else { return }
+        calibrationSamples = []
+        calibrationProgress = 0
+        isCalibrating = true
     }
 
     func resetCalibration() {
+        isCalibrating = false
+        calibrationSamples = []
+        calibrationProgress = 0
         calibrationOffset = 0
         UserDefaults.standard.removeObject(forKey: "uwb_calibration_offset")
     }
@@ -171,6 +178,22 @@ extension ViewerSessionManager: NISessionDelegate {
         }
 
         DispatchQueue.main.async {
+            // Accumulate raw samples during calibration
+            if self.isCalibrating {
+                self.calibrationSamples.append(rawDist)
+                self.calibrationProgress = Double(self.calibrationSamples.count) / Double(self.calibrationSampleCount)
+                if self.calibrationSamples.count >= self.calibrationSampleCount {
+                    let avg = self.calibrationSamples.reduce(0, +) / Float(self.calibrationSamples.count)
+                    self.calibrationOffset = avg
+                    UserDefaults.standard.set(avg, forKey: "uwb_calibration_offset")
+                    self.isCalibrating = false
+                    self.calibrationSamples = []
+                    self.calibrationProgress = 0
+                    self.status = "Distance zeroed"
+                }
+                return
+            }
+
             self.reading = TagReading(
                 distance: dist,
                 direction: obj.direction,
