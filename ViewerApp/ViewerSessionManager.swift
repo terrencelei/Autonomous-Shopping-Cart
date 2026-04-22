@@ -118,6 +118,33 @@ class ViewerSessionManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Smoothing
+
+    private let smoothingWindow = 5
+    private var distanceBuffer: [Float] = []
+    private var hAngleBuffer: [Float] = []
+
+    private func smoothedDistance(_ raw: Float) -> Float {
+        distanceBuffer.append(raw)
+        if distanceBuffer.count > smoothingWindow { distanceBuffer.removeFirst() }
+        return distanceBuffer.reduce(0, +) / Float(distanceBuffer.count)
+    }
+
+    private func smoothedHAngle(_ raw: Float?) -> Float? {
+        guard let raw else {
+            // Don't clear the buffer on a single nil — keep last good average
+            return hAngleBuffer.isEmpty ? nil : hAngleBuffer.reduce(0, +) / Float(hAngleBuffer.count)
+        }
+        hAngleBuffer.append(raw)
+        if hAngleBuffer.count > smoothingWindow { hAngleBuffer.removeFirst() }
+        return hAngleBuffer.reduce(0, +) / Float(hAngleBuffer.count)
+    }
+
+    private func clearSmoothingBuffers() {
+        distanceBuffer.removeAll()
+        hAngleBuffer.removeAll()
+    }
+
     // MARK: - Distance Calibration
 
     private var calibrationSamples: [Float] = []
@@ -182,25 +209,27 @@ extension ViewerSessionManager: NISessionDelegate {
             return
         }
 
-        let dirStr   = obj.direction.map { "(\(String(format: "%.2f", $0.x)), \(String(format: "%.2f", $0.y)), \(String(format: "%.2f", $0.z)))" } ?? "nil"
+        let dirStr    = obj.direction.map { "(\(String(format: "%.2f", $0.x)), \(String(format: "%.2f", $0.y)), \(String(format: "%.2f", $0.z)))" } ?? "nil"
         let hAngleStr = obj.horizontalAngle.map { String(format: "%.3f rad (%.1f°)", $0, $0 * 180 / .pi) } ?? "nil"
         print("[Viewer] dist=\(String(format: "%.2f", rawDist))m  dir=\(dirStr)  hAngle=\(hAngleStr)  vert=\(obj.verticalDirectionEstimate.rawValue)")
 
-        let dist = max(0, rawDist - calibrationOffset)
+        let smoothDist  = max(0, smoothedDistance(rawDist) - calibrationOffset)
+        let smoothAngle = smoothedHAngle(obj.horizontalAngle)
+
         var screenX: Float = 0
-        var screenY: Float = dist
+        var screenY: Float = smoothDist
 
         if let dir = obj.direction {
-            screenX = dist * dir.x
-            screenY = dist * (-dir.z)
-        } else if let h = obj.horizontalAngle {
-            screenX = dist * sin(h)
-            screenY = dist * cos(h)
+            screenX = smoothDist * dir.x
+            screenY = smoothDist * (-dir.z)
+        } else if let h = smoothAngle {
+            screenX = smoothDist * sin(h)
+            screenY = smoothDist * cos(h)
         }
 
         DispatchQueue.main.async {
             if self.isCalibrating {
-                self.calibrationSamples.append(rawDist)
+                self.calibrationSamples.append(rawDist)  // calibrate against raw, not smoothed
                 self.calibrationProgress = Double(self.calibrationSamples.count) / Double(self.calibrationSampleCount)
                 if self.calibrationSamples.count >= self.calibrationSampleCount {
                     let avg = self.calibrationSamples.reduce(0, +) / Float(self.calibrationSamples.count)
@@ -215,17 +244,17 @@ extension ViewerSessionManager: NISessionDelegate {
             }
 
             self.reading = TagReading(
-                distance: dist,
+                distance: smoothDist,
                 direction: obj.direction,
-                horizontalAngle: obj.horizontalAngle,
+                horizontalAngle: smoothAngle,
                 x: screenX,
                 y: screenY
             )
 
             if let deg = self.reading?.angleDegrees {
-                self.status = String(format: "%.2fm  %+.0f°", dist, deg)
+                self.status = String(format: "%.2fm  %+.0f°", smoothDist, deg)
             } else {
-                self.status = String(format: "%.2fm  (no angle)", dist)
+                self.status = String(format: "%.2fm  (no angle)", smoothDist)
             }
         }
     }
@@ -235,6 +264,7 @@ extension ViewerSessionManager: NISessionDelegate {
         DispatchQueue.main.async {
             self.isRanging = false
             self.reading = nil
+            self.clearSmoothingBuffers()
             if reason == .timeout {
                 self.status = "Peer out of range — waiting..."
                 if !self.mcSession.connectedPeers.isEmpty { self.startNISession() }
@@ -247,6 +277,7 @@ extension ViewerSessionManager: NISessionDelegate {
         DispatchQueue.main.async {
             self.isRanging = false
             self.reading = nil
+            self.clearSmoothingBuffers()
             self.status = "Session error: \(error.localizedDescription)"
             if !self.mcSession.connectedPeers.isEmpty { self.startNISession() }
         }
@@ -300,6 +331,7 @@ extension ViewerSessionManager: MCSessionDelegate {
                 self.isConnected = false
                 self.isRanging = false
                 self.reading = nil
+                self.clearSmoothingBuffers()
                 self.niSession?.invalidate()
                 self.niSession = nil
                 self.status = "Disconnected — searching..."
