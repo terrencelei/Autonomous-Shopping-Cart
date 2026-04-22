@@ -57,6 +57,7 @@ class ViewerSessionManager: NSObject, ObservableObject {
 
     private var niSession: NISession?
     private var peerDiscoveryToken: NIDiscoveryToken?
+    private var connectedPeerID: MCPeerID?
 
     // MARK: - MultipeerConnectivity
 
@@ -120,9 +121,13 @@ class ViewerSessionManager: NSObject, ObservableObject {
             DispatchQueue.main.async { self.status = "Token error — restart app" }
             return
         }
+        guard let peer = connectedPeerID else {
+            print("[Viewer] ERROR: No connected peer to send token to")
+            return
+        }
         do {
-            try mcSession.send(data, toPeers: mcSession.connectedPeers, with: .reliable)
-            print("[Viewer] Sent discovery token to \(mcSession.connectedPeers.count) peer(s)")
+            try mcSession.send(data, toPeers: [peer], with: .reliable)
+            print("[Viewer] Sent discovery token to \(peer.displayName)")
         } catch {
             print("[Viewer] ERROR: Failed to send token: \(error.localizedDescription)")
             DispatchQueue.main.async { self.status = "Send failed — retrying..." }
@@ -283,7 +288,7 @@ extension ViewerSessionManager: NISessionDelegate {
             self.clearSmoothingBuffers()
             if reason == .timeout {
                 self.status = "Peer out of range — waiting..."
-                if !self.mcSession.connectedPeers.isEmpty { self.startNISession() }
+                if self.connectedPeerID != nil { self.startNISession() }
             }
         }
     }
@@ -295,7 +300,7 @@ extension ViewerSessionManager: NISessionDelegate {
             self.reading = nil
             self.clearSmoothingBuffers()
             self.status = "Session error: \(error.localizedDescription)"
-            if !self.mcSession.connectedPeers.isEmpty { self.startNISession() }
+            if self.connectedPeerID != nil { self.startNISession() }
         }
     }
 
@@ -340,10 +345,12 @@ extension ViewerSessionManager: MCSessionDelegate {
         DispatchQueue.main.async {
             switch state {
             case .connected:
+                self.connectedPeerID = peerID
                 self.isConnected = true
                 self.status = "Connected — starting UWB"
                 self.startNISession()
             case .notConnected:
+                self.connectedPeerID = nil
                 self.isConnected = false
                 self.isRanging = false
                 self.reading = nil

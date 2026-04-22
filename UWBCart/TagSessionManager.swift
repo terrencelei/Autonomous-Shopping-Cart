@@ -24,6 +24,7 @@ class TagSessionManager: NSObject, ObservableObject {
 
     private var niSession: NISession?
     private var peerDiscoveryToken: NIDiscoveryToken?
+    private var connectedPeerID: MCPeerID?
 
     // MARK: - MultipeerConnectivity
 
@@ -90,9 +91,13 @@ class TagSessionManager: NSObject, ObservableObject {
             return
         }
 
+        guard let peer = connectedPeerID else {
+            print("[Tag] ERROR: No connected peer to send token to")
+            return
+        }
         do {
-            try mcSession.send(data, toPeers: mcSession.connectedPeers, with: .reliable)
-            print("[Tag] Sent discovery token to \(mcSession.connectedPeers.count) peer(s)")
+            try mcSession.send(data, toPeers: [peer], with: .reliable)
+            print("[Tag] Sent discovery token to \(peer.displayName)")
         } catch {
             print("[Tag] ERROR: Failed to send discovery token: \(error.localizedDescription)")
             DispatchQueue.main.async {
@@ -136,7 +141,7 @@ extension TagSessionManager: NISessionDelegate {
             if reason == .timeout {
                 self.status = "Peer out of range — waiting..."
                 // Restart the NI session to resume ranging when peer comes back
-                if !self.mcSession.connectedPeers.isEmpty {
+                if self.connectedPeerID != nil {
                     self.startNISession()
                 }
             }
@@ -198,10 +203,12 @@ extension TagSessionManager: MCSessionDelegate {
         DispatchQueue.main.async {
             switch state {
             case .connected:
+                self.connectedPeerID = peerID
                 self.connectedPeer = peerID.displayName
                 self.status = "Connected to \(peerID.displayName)"
                 self.startNISession()
             case .notConnected:
+                self.connectedPeerID = nil
                 self.connectedPeer = nil
                 self.isRanging = false
                 self.niSession?.invalidate()
