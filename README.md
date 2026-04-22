@@ -17,9 +17,8 @@ Runs on the **shopper's iPhone**. Advertises itself over the local network and a
 Runs on the **cart's iPhone**. Discovers the Shopper, connects, and displays a live radar showing:
 - Shopper's relative position (orange dot on top-down radar)
 - Distance in metres (calibrated)
-- Angle in degrees (once direction is locked)
+- Angle in degrees (when direction is available from UWB AoA)
 - Auto-scaling range rings
-- Convergence guidance while direction is calibrating
 
 ## Connection Flow
 
@@ -31,17 +30,9 @@ Runs on the **cart's iPhone**. Discovers the Shopper, connects, and displays a l
 6. CartView receives distance and direction updates via `NISessionDelegate`
 7. Sessions automatically restart if the peer goes out of range or the app is suspended
 
-## Direction & Camera Assistance
+## Direction
 
-Direction (`NINearbyObject.direction`) requires the NI algorithm to converge before it produces a reliable angle. On supported devices (iOS 16+), both apps enable `isCameraAssistanceEnabled`, which activates a sensor fusion pipeline combining:
-
-- **UWB phased array** — angle-of-arrival from the U1/U2 antenna array
-- **IMU** — device orientation and motion
-- **Camera** — ego-motion estimation for stable world-space direction
-
-No camera UI is shown. The CartView status bar guides convergence ("Slowly sweep phone left/right…") and shows **"Direction locked"** when the algorithm has converged and angle data is available.
-
-On devices where `supportsCameraAssistance` is `false`, the session falls back to distance-only mode.
+Direction (`NINearbyObject.direction`) is optionally populated by the U1/U2 chip's angle-of-arrival phased antenna array — no camera assistance required. When the peer is within the chip's field of view, the direction vector is provided as a `simd_float3`. When unavailable (peer outside AoA coverage or signal geometry insufficient), the angle readout shows `—` and the radar shows the shopper directly ahead at the measured distance.
 
 ## Distance Calibration
 
@@ -49,8 +40,9 @@ UWB time-of-flight measurements include a fixed hardware offset from antenna pos
 
 1. Hold both phones together at your chosen zero reference point
 2. Tap **Set Zero** in the CartView UI
-3. All subsequent distance readings subtract the offset (clamped to 0)
-4. Tap **Reset** to clear the calibration
+3. CartView samples 20 readings over ~2 seconds and averages them as the offset
+4. All subsequent distance readings subtract the offset (clamped to 0)
+5. Tap **Reset** to clear the calibration
 
 The offset is stored in UserDefaults and persists across app launches.
 
@@ -69,7 +61,6 @@ Both apps declare the following in their Info.plist:
 | `NSLocalNetworkUsageDescription` | MultipeerConnectivity device discovery |
 | `NSBonjourServices` | Bonjour service registration (`_uwb-cart._tcp`) |
 | `NSNearbyInteractionUsageDescription` | UWB distance and direction measurement |
-| `NSCameraUsageDescription` | Camera assistance for UWB direction convergence |
 
 ## Project Structure
 
@@ -90,3 +81,18 @@ UWBCart/
 ├── ViewerAppTests/
 └── ViewerAppUITests/
 ```
+
+## Troubleshooting
+
+**"Executable is not codesigned" when running ViewerApp:**
+1. In Xcode: **Product → Clean Build Folder** (⇧⌘K)
+2. On the iPhone: **Settings → General → VPN & Device Management → [your Apple ID] → Trust**
+3. Reconnect the iPhone and run again from Xcode
+
+NearbyInteraction does not require any special entitlement — Xcode's automatic signing handles it.
+
+**Direction never appears:**
+Direction requires the peer to be within the UWB chip's AoA field of view (roughly in front of the device). Hold the cart phone facing the shopper with a clear line of sight.
+
+**UWB session disconnects frequently:**
+Keep both phones within ~10m. Walls and metal carts can attenuate the UWB signal. The session auto-restarts on reconnect.
