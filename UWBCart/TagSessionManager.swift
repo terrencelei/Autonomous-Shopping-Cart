@@ -56,7 +56,10 @@ class TagSessionManager: NSObject, ObservableObject {
     // MARK: - NI Session Setup
 
     private func startNISession() {
-        guard NISession.deviceCapabilities.supportsPreciseDistanceMeasurement else {
+        let caps = NISession.deviceCapabilities
+        print("[Tag] Device capabilities — preciseDist=\(caps.supportsPreciseDistanceMeasurement)  cameraAssistance=\(caps.supportsCameraAssistance)")
+
+        guard caps.supportsPreciseDistanceMeasurement else {
             status = "Connected (UWB not available on this device)"
             return
         }
@@ -104,6 +107,10 @@ class TagSessionManager: NSObject, ObservableObject {
             return
         }
         let config = NINearbyPeerConfiguration(peerToken: peerToken)
+        if NISession.deviceCapabilities.supportsCameraAssistance {
+            config.isCameraAssistanceEnabled = true
+            print("[Tag] Camera assistance enabled for direction")
+        }
         print("[Tag] Running NISession with peer config")
         niSession.run(config)
         DispatchQueue.main.async {
