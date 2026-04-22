@@ -140,11 +140,8 @@ class ViewerSessionManager: NSObject, ObservableObject {
             return
         }
         let config = NINearbyPeerConfiguration(peerToken: peerToken)
-        if NISession.deviceCapabilities.supportsCameraAssistance {
-            config.isCameraAssistanceEnabled = true
-            print("[Viewer] Camera assistance enabled for direction")
-        }
-        print("[Viewer] Running NISession with peer config")
+        // Pure UWB — U2 chip (iPhone 14 Pro+) provides direction natively, no camera needed
+        print("[Viewer] Running NISession — pure UWB, isCameraAssistanceEnabled=\(config.isCameraAssistanceEnabled)")
         niSession.run(config)
         DispatchQueue.main.async {
             self.isRanging = true
@@ -170,7 +167,11 @@ extension ViewerSessionManager: NISessionDelegate {
             return
         }
 
-        print("[Viewer] didUpdate: distance=\(rawDist)m  direction=\(obj.direction.map { "\($0)" } ?? "nil")")
+        if let dir = obj.direction {
+            print("[Viewer] didUpdate: distance=\(rawDist)m  direction=(\(dir.x), \(dir.y), \(dir.z))")
+        } else {
+            print("[Viewer] didUpdate: distance=\(rawDist)m  direction=NIL ← peer outside AoA field of view")
+        }
 
         // Apply calibration offset and clamp so display never goes negative.
         let dist = max(0, rawDist - calibrationOffset)

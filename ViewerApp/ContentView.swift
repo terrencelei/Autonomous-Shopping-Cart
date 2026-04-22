@@ -84,7 +84,7 @@ private struct ReadoutView: View {
                         Text("—")
                             .font(.system(.title, design: .monospaced).bold())
                             .foregroundStyle(.secondary)
-                        Text("face phones together")
+                        Text("move phone slowly for direction")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

@@ -620,7 +620,6 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = UWBCart/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Shopper;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Camera is used to improve UWB direction accuracy.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "UWBCart uses the local network to discover the cart device for UWB ranging.";
 				INFOPLIST_KEY_NSNearbyInteractionUsageDescription = "UWBCart uses Nearby Interaction to measure distance and direction between devices.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -658,7 +657,6 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = UWBCart/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Shopper;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Camera is used to improve UWB direction accuracy.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "UWBCart uses the local network to discover the cart device for UWB ranging.";
 				INFOPLIST_KEY_NSNearbyInteractionUsageDescription = "UWBCart uses Nearby Interaction to measure distance and direction between devices.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -780,7 +778,6 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ViewerApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CartView;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Camera is used to improve UWB direction accuracy.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "CartView uses the local network to discover nearby devices for UWB ranging.";
 				INFOPLIST_KEY_NSNearbyInteractionUsageDescription = "CartView uses Nearby Interaction to track the position of nearby devices.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -818,7 +815,6 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ViewerApp/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CartView;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Camera is used to improve UWB direction accuracy.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "CartView uses the local network to discover nearby devices for UWB ranging.";
 				INFOPLIST_KEY_NSNearbyInteractionUsageDescription = "CartView uses Nearby Interaction to track the position of nearby devices.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

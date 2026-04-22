@@ -107,11 +107,8 @@ class TagSessionManager: NSObject, ObservableObject {
             return
         }
         let config = NINearbyPeerConfiguration(peerToken: peerToken)
-        if NISession.deviceCapabilities.supportsCameraAssistance {
-            config.isCameraAssistanceEnabled = true
-            print("[Tag] Camera assistance enabled for direction")
-        }
-        print("[Tag] Running NISession with peer config")
+        // Pure UWB — no camera assistance
+        print("[Tag] Running NISession — pure UWB, isCameraAssistanceEnabled=\(config.isCameraAssistanceEnabled)")
         niSession.run(config)
         DispatchQueue.main.async {
             self.isRanging = true
