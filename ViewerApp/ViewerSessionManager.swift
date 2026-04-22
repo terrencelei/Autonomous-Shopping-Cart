@@ -202,9 +202,15 @@ extension ViewerSessionManager: NISessionDelegate {
     // If this never prints, camera assistance is not activating.
     func session(_ session: NISession, didUpdateAlgorithmConvergence convergence: NIAlgorithmConvergence, peer: NINearbyObject?) {
         if case .converged = convergence.status {
-            print("[Viewer] Convergence: CONVERGED ✓ — direction should now be available")
+            print("[Viewer] Convergence: CONVERGED ✓")
+            DispatchQueue.main.async {
+                if self.isRanging { self.status = "Angle locked" }
+            }
         } else {
             print("[Viewer] Convergence: not yet — \(convergence.status)")
+            DispatchQueue.main.async {
+                if self.isRanging { self.status = "Move phone to establish angle…" }
+            }
         }
     }
 
