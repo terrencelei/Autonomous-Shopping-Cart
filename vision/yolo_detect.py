@@ -17,13 +17,17 @@ import cv2
 import numpy as np
 import supervision as sv
 from ultralytics import YOLO
+from pathlib import Path
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-PERSON_MODEL_PATH = "yolo11n.pt"
-CART_MODEL_PATH   = "cart.pt"
-CONFIDENCE        = 0.45
-DEFAULT_IMAGE     = "Inside_Costco_Perth.jpg"
+_DIR = Path(__file__).parent
+
+PERSON_MODEL_PATH = _DIR / "yolo26n.pt"
+CART_MODEL_PATH   = _DIR / "cart.pt"
+PERSON_CONFIDENCE = 0.45
+CART_CONFIDENCE   = 0.30
+DEFAULT_IMAGE     = str(_DIR / "Inside_Costco_Perth.jpg")
 
 PERSON_HEIGHT_M  = 1.7
 H_FOV_DEG        = 60.0
@@ -32,7 +36,7 @@ DISTANCE_OFFSET_M = 3.0   # calibration offset — subtract from computed distan
 CLASS_ID   = {"person": 0, "cart": 1}
 CLASS_NAME = {0: "person", 1: "cart"}
 
-COLOR_TARGET   = (0, 255, 255)   # cyan  — locked shopper
+COLOR_TARGET   = (0, 255, 0)     # green — locked shopper
 COLOR_OBSTACLE = (0, 0, 255)     # red   — everyone/everything else
 
 MAP_SIZE    = 500    # pixels per side for the overhead map
@@ -76,7 +80,7 @@ def infer_frame(person_model, cart_model, frame):
     all_xyxy, all_conf, all_cls = [], [], []
 
     # --- person model (COCO class 0 only) ---
-    p_res = person_model(frame, conf=CONFIDENCE, classes=[0], verbose=False)[0]
+    p_res = person_model(frame, conf=PERSON_CONFIDENCE, classes=[0], verbose=False)[0]
     if len(p_res.boxes):
         all_xyxy.append(p_res.boxes.xyxy.cpu().numpy())
         all_conf.append(p_res.boxes.conf.cpu().numpy())
@@ -84,7 +88,7 @@ def infer_frame(person_model, cart_model, frame):
 
     # --- cart model (all its classes map to our 'cart' id) ---
     if cart_model is not None:
-        c_res = cart_model(frame, conf=CONFIDENCE, verbose=False)[0]
+        c_res = cart_model(frame, conf=CART_CONFIDENCE, augment=True, verbose=False)[0]
         if len(c_res.boxes):
             all_xyxy.append(c_res.boxes.xyxy.cpu().numpy())
             all_conf.append(c_res.boxes.conf.cpu().numpy())
@@ -126,7 +130,8 @@ def annotate_frame(frame, detections: sv.Detections):
         thickness = 3 if is_target else 2
         cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
 
-        label = f"{role} {label_id} {dist:.1f}m {angle:+.1f}°"
+        display_role = role if is_target else class_tag.upper()
+        label = f"{display_role} {label_id} {dist:.1f}m {angle:+.1f}deg"
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
         top = max(int(y1) - 10, th + 4)
         cv2.rectangle(out, (int(x1), top - th - 4), (int(x1) + tw, top), color, -1)
@@ -174,11 +179,21 @@ def draw_map(rows):
     for role, label_id, class_tag, conf, dist, angle in rows:
         color = COLOR_TARGET if role == "TARGET" else COLOR_OBSTACLE
         px, py = to_px(dist, angle)
-        radius = 10 if role == "TARGET" else 7
-        cv2.circle(img, (px, py), radius, color, -1)
-        tag = f"{label_id}"
+        if role == "TARGET":
+            radius = 10
+            cv2.circle(img, (px, py), radius, color, -1)
+        elif class_tag == "cart":
+            # draw a square for carts
+            half = 7
+            cv2.rectangle(img, (px - half, py - half), (px + half, py + half), color, -1)
+            radius = half
+        else:
+            radius = 7
+            cv2.circle(img, (px, py), radius, color, -1)
+        display_role = role if role == "TARGET" else class_tag.upper()
+        tag = f"{display_role} {label_id}"
         cv2.putText(img, tag, (px + radius + 2, py + 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, color, 1)
 
     # Camera icon
     pts = np.array([
