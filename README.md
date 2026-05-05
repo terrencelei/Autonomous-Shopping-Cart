@@ -4,7 +4,7 @@ A self-following shopping cart that tracks a designated shopper and treats all o
 
 | System | Role | Technology |
 |--------|------|------------|
-| **Vision** | Primary | YOLO11 + ByteTrack, camera-based detection |
+| **Vision** | Primary | YOLO26n + ByteTrack, camera-based detection |
 | **UWB** | Backup / redundancy | Apple Ultra-Wideband, iPhone-to-iPhone ranging |
 
 The vision system handles detection and scene understanding — identifying the target shopper and classifying obstacles. The UWB system provides a precise distance and angle fallback when the camera view is obstructed or the target is temporarily lost.
@@ -13,7 +13,7 @@ The vision system handles detection and scene understanding — identifying the 
 
 ## Vision System (Primary)
 
-A YOLO11-based pipeline that detects people and shopping carts from a live camera feed, locks onto the shopper closest to the center of the frame, and maps everything else as an obstacle.
+A YOLO26n-based pipeline that detects people and shopping carts from a live camera feed, locks onto the closest centred shopper, and maps everything else as an obstacle.
 
 ### Setup
 
@@ -25,16 +25,15 @@ pip install -r requirements.txt
 ### Usage
 
 ```bash
-python3 yolo_detect.py                  # test image
+python3 yolo_detect.py image.jpg        # image file
 python3 yolo_detect.py video.mp4        # video file
-python3 yolo_detect.py 0                # webcam
 ```
 
 Press **Q** to quit.
 
 ### Target Locking
 
-The person whose bounding box center is closest to the frame center is locked as **TARGET** (cyan box). All other detections — people and carts — are labelled **OBSTACLE** (red box). The lock updates every frame as people move.
+Each frame, every detected person is scored by `distance_m + 0.3 × |angle_deg|`. The person with the lowest score is locked as **TARGET** (green box) — favouring whoever is closest and most centred. All other detections are labelled **OBSTACLE** (red box). The lock updates every frame as people move.
 
 ### Output
 
@@ -46,7 +45,7 @@ Two windows run simultaneously:
 
 | Model | Purpose |
 |-------|---------|
-| `yolo11n.pt` | COCO pretrained — person detection only |
+| `yolo26n.pt` | COCO pretrained — person detection only |
 | `cart.pt` | Fine-tuned on shopping cart dataset — cart detection |
 
 Both pre-trained models are included. To retrain the cart model:
@@ -120,9 +119,8 @@ autonomous-shopping-cart/
 │   ├── yolo_detect.py              # Detection + tracking + overhead map
 │   ├── train_cart.py               # Fine-tune cart detector
 │   ├── cart.pt                     # Trained cart detection model
-│   ├── yolo11n.pt                  # Base COCO model (person detection)
-│   ├── requirements.txt
-│   └── Inside_Costco_Perth.jpg     # Test image
+│   ├── yolo26n.pt                  # Base COCO model (person detection)
+│   └── requirements.txt
 ├── uwb/                            # Backup: UWB positioning
 │   ├── UWBCart/                    # Shopper app source
 │   ├── ViewerApp/                  # CartView app source
