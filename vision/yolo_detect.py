@@ -2,13 +2,12 @@
 Detect people and shopping carts, track each with ByteTrack.
 
 Models:
-  yolo11n.pt  — COCO model, used only for 'person' (class 0)
+  yolo26n.pt  — COCO model, used only for 'person' (class 0)
   cart.pt     — fine-tuned model from train_cart.py, detects 'shopping-cart'
 
 Usage:
-  python3 yolo_detect.py                     # default image
+  python3 yolo_detect.py image.jpg           # image file
   python3 yolo_detect.py video.mp4           # video file
-  python3 yolo_detect.py 0                   # webcam
 """
 
 import sys
@@ -27,7 +26,6 @@ PERSON_MODEL_PATH = _DIR / "yolo26n.pt"
 CART_MODEL_PATH   = _DIR / "cart.pt"
 PERSON_CONFIDENCE = 0.45
 CART_CONFIDENCE   = 0.30
-DEFAULT_IMAGE     = str(_DIR / "Inside_Costco_Perth.jpg")
 
 PERSON_HEIGHT_M  = 1.7
 H_FOV_DEG        = 60.0
@@ -42,6 +40,9 @@ COLOR_OBSTACLE = (0, 0, 255)     # red   — everyone/everything else
 MAP_SIZE    = 500    # pixels per side for the overhead map
 MAP_RANGE_M = 10.0   # meters shown front-to-back
 
+TARGET_DIST_WEIGHT  = 1.0   # metres weight in target score
+TARGET_ANGLE_WEIGHT = 0.3   # degrees weight in target score (1 deg ≈ 0.3 m penalty)
+
 
 def focal_length_px(dim, fov_deg):
     return (dim / 2) / np.tan(np.radians(fov_deg / 2))
@@ -54,17 +55,20 @@ def estimate_distance(bbox_h, img_h, img_w):
 
 
 def find_target_idx(detections, img_w, img_h):
-    """Return index of the person detection whose center is closest to the frame center."""
-    best_idx, best_dist = None, float("inf")
+    """Return index of the person with the lowest distance + angle score."""
+    best_idx, best_score = None, float("inf")
     for i, ((x1, y1, x2, y2), cls_id) in enumerate(
         zip(detections.xyxy, detections.class_id)
     ):
         if cls_id != CLASS_ID["person"]:
             continue
-        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-        d = (cx - img_w / 2) ** 2 + (cy - img_h / 2) ** 2
-        if d < best_dist:
-            best_dist, best_idx = d, i
+        bbox_h  = y2 - y1
+        bbox_cx = (x1 + x2) / 2
+        dist    = estimate_distance(bbox_h, img_h, img_w) if bbox_h > 0 else float("inf")
+        angle   = abs(estimate_angle(bbox_cx, img_w))
+        score   = TARGET_DIST_WEIGHT * dist + TARGET_ANGLE_WEIGHT * angle
+        if score < best_score:
+            best_score, best_idx = score, i
     return best_idx
 
 
@@ -302,7 +306,10 @@ def run_video(source, person_model, cart_model):
 
 
 def run():
-    source = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_IMAGE
+    if len(sys.argv) < 2:
+        print("Usage: python3 yolo_detect.py <image|video|webcam_id>")
+        sys.exit(1)
+    source = sys.argv[1]
     person_model, cart_model = load_models()
 
     is_image = isinstance(source, str) and source.lower().endswith(
