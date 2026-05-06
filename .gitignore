@@ -19,9 +19,12 @@ __pycache__/
 *.pyc
 *.pyo
 
-# vision — exclude dataset, training runs, and output videos/images
+# vision — exclude dataset, training runs, output videos/images, and large weights
 vision/Shopping-Cart-1/
 vision/runs/
 vision/*_tracked.jpg
 vision/*_tracked.mp4
+vision/*.weights
+vision/Test_Photo.jpg
+vision/Test_Video.mp4
 

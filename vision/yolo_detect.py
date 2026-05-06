@@ -28,9 +28,10 @@ PERSON_CONFIDENCE = 0.45
 CART_CONFIDENCE   = 0.30
 
 PERSON_HEIGHT_M  = 1.7
-H_FOV_DEG        = 60.0
+H_FOV_DEG        = 54.0
 DISTANCE_OFFSET_M = 3.0   # calibration offset — subtract from computed distance
 DISTANCE_SCALE    = 0.5   # multiply final distance estimate
+ANGLE_SCALE       = 2.0   # multiply final angle estimate
 
 CLASS_ID   = {"person": 0, "cart": 1}
 CLASS_NAME = {0: "person", 1: "cart"}
@@ -44,15 +45,20 @@ MAP_RANGE_M = 10.0   # meters shown front-to-back
 TARGET_DIST_WEIGHT  = 1.0   # metres weight in target score
 TARGET_ANGLE_WEIGHT = 0.3   # degrees weight in target score (1 deg ≈ 0.3 m penalty)
 
+DIST_EMA_ALPHA = 0.4   # EMA smoothing factor for distance (lower = smoother)
+
 
 def focal_length_px(dim, fov_deg):
     return (dim / 2) / np.tan(np.radians(fov_deg / 2))
 
 
-def estimate_distance(bbox_h, img_h, img_w):
+def estimate_distance(bbox_h, bbox_cx, img_h, img_w):
     v_fov = H_FOV_DEG * (img_h / img_w)
-    fl = focal_length_px(img_h, v_fov)
-    return max(0.0, ((PERSON_HEIGHT_M * fl) / bbox_h - DISTANCE_OFFSET_M) * DISTANCE_SCALE)
+    fl_v  = focal_length_px(img_h, v_fov)
+    raw_depth     = (PERSON_HEIGHT_M * fl_v) / bbox_h
+    raw_angle_rad = np.arctan((bbox_cx - img_w / 2) / focal_length_px(img_w, H_FOV_DEG))
+    slant = raw_depth / np.cos(raw_angle_rad)
+    return max(0.0, (slant - DISTANCE_OFFSET_M) * DISTANCE_SCALE)
 
 
 def find_target_idx(detections, img_w, img_h):
@@ -65,7 +71,7 @@ def find_target_idx(detections, img_w, img_h):
             continue
         bbox_h  = y2 - y1
         bbox_cx = (x1 + x2) / 2
-        dist    = estimate_distance(bbox_h, img_h, img_w) if bbox_h > 0 else float("inf")
+        dist    = estimate_distance(bbox_h, bbox_cx, img_h, img_w) if bbox_h > 0 else float("inf")
         angle   = abs(estimate_angle(bbox_cx, img_w))
         score   = TARGET_DIST_WEIGHT * dist + TARGET_ANGLE_WEIGHT * angle
         if score < best_score:
@@ -75,7 +81,7 @@ def find_target_idx(detections, img_w, img_h):
 
 def estimate_angle(bbox_cx, img_w):
     fl = focal_length_px(img_w, H_FOV_DEG)
-    return np.degrees(np.arctan((bbox_cx - img_w / 2) / fl))
+    return np.degrees(np.arctan((bbox_cx - img_w / 2) / fl)) * ANGLE_SCALE
 
 
 def infer_frame(person_model, cart_model, frame):
@@ -109,7 +115,7 @@ def infer_frame(person_model, cart_model, frame):
     )
 
 
-def annotate_frame(frame, detections: sv.Detections):
+def annotate_frame(frame, detections: sv.Detections, smooth_state: dict):
     img_h, img_w = frame.shape[:2]
     out = frame.copy()
 
@@ -129,7 +135,13 @@ def annotate_frame(frame, detections: sv.Detections):
         bbox_h  = y2 - y1
         bbox_cx = (x1 + x2) / 2
 
-        dist  = estimate_distance(bbox_h, img_h, img_w) if bbox_h > 0 else 0
+        raw_dist = estimate_distance(bbox_h, bbox_cx, img_h, img_w) if bbox_h > 0 else 0
+        if tid is not None:
+            prev = smooth_state.get(tid, raw_dist)
+            dist = DIST_EMA_ALPHA * raw_dist + (1 - DIST_EMA_ALPHA) * prev
+            smooth_state[tid] = dist
+        else:
+            dist = raw_dist
         angle = estimate_angle(bbox_cx, img_w)
 
         thickness = 3 if is_target else 2
@@ -240,7 +252,7 @@ def run_image(source, person_model, cart_model):
     tracker = sv.ByteTrack()
     dets    = infer_frame(person_model, cart_model, frame)
     tracked = tracker.update_with_detections(dets)
-    out, rows = annotate_frame(frame, tracked)
+    out, rows = annotate_frame(frame, tracked, {})
 
     print(f"\n{source} — {len(rows)} object(s) detected")
     print_header()
@@ -267,7 +279,8 @@ def run_video(source, person_model, cart_model):
     w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    tracker = sv.ByteTrack()
+    tracker      = sv.ByteTrack()
+    smooth_state = {}
 
     writer = None
     if isinstance(source, str):
@@ -285,7 +298,7 @@ def run_video(source, person_model, cart_model):
 
         dets    = infer_frame(person_model, cart_model, frame)
         tracked = tracker.update_with_detections(dets)
-        out, rows = annotate_frame(frame, tracked)
+        out, rows = annotate_frame(frame, tracked, smooth_state)
 
         for role, label_id, class_tag, conf, dist, angle in rows:
             print(f"{role:<10} {label_id:<8} {class_tag:<10} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
