@@ -1,55 +1,57 @@
-import matplotlib
-matplotlib.use("Agg")
-
 import numpy as np
 import heapq
 import random
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from IPython.display import Video
 
-# ================= Robot / map settings =================
+# ================= Map settings =================
 
 chunk_size = 0.1
 map_size = [20, 20]
 
-robot_pos = [0.5, 0.5]
-
 FREE = 1
 BLOCKED = 0
 
-# ================= Moving target settings =================
-
-MAX_SPEED_MPH = 4
-MAX_SPEED_MPS = MAX_SPEED_MPH * 0.44704
-
-TARGET_STEP_TIME = 0.1
-MAX_TARGET_STEP = MAX_SPEED_MPS * TARGET_STEP_TIME
-
-target_pos = [3.0, 1.5]
-
-# ================= Generate chunk map =================
-
 aisle_width = 1
 aisle_amount = 10
-gap_width = (map_size[1] - aisle_width * aisle_amount) / (aisle_amount - 1)
 
 cols = int(map_size[0] / chunk_size)
 rows = int(map_size[1] / chunk_size)
+
+gap_width = (map_size[1] - aisle_width * aisle_amount) / (aisle_amount - 1)
 
 chunk_map = np.zeros((rows, cols), dtype=int)
 
 for row in range(rows):
     for col in range(cols):
+        x = col * chunk_size
         y = row * chunk_size
 
-        if y < aisle_width:
+        if x < aisle_width:
+            chunk_map[row, col] = FREE
+        elif x > map_size[0] - aisle_width:
+            chunk_map[row, col] = FREE
+        elif y < aisle_width:
             chunk_map[row, col] = FREE
         elif y > map_size[1] - aisle_width:
             chunk_map[row, col] = FREE
         elif (y % (aisle_width + gap_width)) < aisle_width:
             chunk_map[row, col] = FREE
 
-# ================= Helpers =================
+
+# ================= Robot / target settings =================
+
+robot_pos = [0.5, 0.5]
+
+robot_speed_mps = 2.0
+TARGET_SPEED_MPS = 1.8
+
+TARGET_STEP_TIME = 0.1
+BUBBLE_RADIUS = 0.5
+
+
+# ================= Helper functions =================
 
 def world_to_chunk(pos):
     x, y = pos
@@ -67,8 +69,12 @@ def chunk_to_world(chunk):
 
 def is_valid_chunk(chunk):
     row, col = chunk
-    if row < 0 or row >= rows or col < 0 or col >= cols:
+
+    if row < 0 or row >= rows:
         return False
+    if col < 0 or col >= cols:
+        return False
+
     return chunk_map[row, col] == FREE
 
 
@@ -91,6 +97,44 @@ def direct_path_clear(start_pos, end_pos):
             return False
 
     return True
+
+
+def get_bubble_chase_point(robot_pos, target_pos, bubble_radius=BUBBLE_RADIUS):
+    robot = np.array(robot_pos, dtype=float)
+    target = np.array(target_pos, dtype=float)
+
+    direction = robot - target
+    distance = np.linalg.norm(direction)
+
+    if distance <= bubble_radius:
+        return robot_pos
+
+    direction = direction / distance
+
+    chase_point = target + direction * bubble_radius
+    chase_point = [chase_point[0], chase_point[1]]
+
+    if is_valid_chunk(world_to_chunk(chase_point)):
+        return chase_point
+
+    best_point = target_pos
+    best_dist = float("inf")
+
+    for angle in np.linspace(0, 2 * np.pi, 72):
+        candidate = [
+            target[0] + bubble_radius * np.cos(angle),
+            target[1] + bubble_radius * np.sin(angle),
+        ]
+
+        if is_valid_chunk(world_to_chunk(candidate)):
+            d = distance_between(robot_pos, candidate)
+
+            if d < best_dist:
+                best_dist = d
+                best_point = candidate
+
+    return best_point
+
 
 # ================= A* pathfinding =================
 
@@ -164,58 +208,59 @@ def build_route(start_pos, goal_pos):
 
     return [chunk_to_world(c) for c in chunk_path]
 
-# ================= Movement simulation =================
+
+# ================= Movement functions =================
 
 def move_along_route(current_pos, route, speed_mps, dt):
     if len(route) < 2:
-        return current_pos
+        return current_pos, route
 
-    target = np.array(route[1])
-    current = np.array(current_pos)
-
-    direction = target - current
-    distance = np.linalg.norm(direction)
-
-    if distance < 0.001:
-        return route[1]
-
+    current = np.array(current_pos, dtype=float)
     max_step = speed_mps * dt
 
-    if max_step >= distance:
-        return route[1]
+    while len(route) >= 2 and max_step > 0:
+        next_point = np.array(route[1], dtype=float)
+        direction = next_point - current
+        distance = np.linalg.norm(direction)
 
-    direction = direction / distance
-    new_pos = current + direction * max_step
+        if distance < 0.001:
+            route = route[1:]
+            continue
 
-    return [new_pos[0], new_pos[1]]
+        if max_step >= distance:
+            current = next_point
+            max_step -= distance
+            route = route[1:]
+        else:
+            direction = direction / distance
+            current = current + direction * max_step
+            max_step = 0
+
+    return [current[0], current[1]], route
 
 
-def random_valid_target_move(current_pos):
-    for _ in range(100):
-        angle = random.uniform(0, 2 * np.pi)
-        distance = random.uniform(0, MAX_TARGET_STEP)
+def random_valid_position():
+    while True:
+        row = random.randint(0, rows - 1)
+        col = random.randint(0, cols - 1)
 
-        new_pos = [
-            current_pos[0] + distance * np.cos(angle),
-            current_pos[1] + distance * np.sin(angle),
-        ]
+        if is_valid_chunk((row, col)):
+            return chunk_to_world((row, col))
 
-        if is_valid_chunk(world_to_chunk(new_pos)):
-            return new_pos
 
-    return current_pos
+# ================= Initialize target =================
 
-# ================= Validate starting positions =================
+target_pos = random_valid_position()
+target_goal = random_valid_position()
+target_route = build_route(target_pos, target_goal)
 
 if not is_valid_chunk(world_to_chunk(robot_pos)):
     raise ValueError("Robot starts in blocked space.")
 
-if not is_valid_chunk(world_to_chunk(target_pos)):
-    raise ValueError("Target starts in blocked space.")
 
 # ================= Plot setup =================
 
-fig, ax = plt.subplots(figsize=(8, 8))
+fig, ax = plt.subplots(figsize=(6, 6))
 
 ax.imshow(
     chunk_map,
@@ -224,64 +269,116 @@ ax.imshow(
     interpolation="nearest",
 )
 
-robot_dot, = ax.plot([], [], "o", markersize=10, label="Robot")
-target_dot, = ax.plot([], [], "x", markersize=10, label="Target")
-route_line, = ax.plot([], [], linewidth=2, label="Route")
+robot_dot, = ax.plot([], [], "o", markersize=9, label="Robot")
+target_dot, = ax.plot([], [], "x", markersize=9, label="Moving Target")
+target_goal_dot, = ax.plot([], [], "*", markersize=8, label="Target Goal")
+robot_goal_dot, = ax.plot([], [], ".", markersize=10, label="Robot Bubble Goal")
+
+robot_route_line, = ax.plot([], [], linewidth=2, label="Robot Route")
+target_route_line, = ax.plot([], [], linewidth=1, linestyle="--", label="Target Route")
+
+bubble_circle = plt.Circle(
+    target_pos,
+    BUBBLE_RADIUS,
+    fill=False,
+    linestyle=":",
+    linewidth=1.5,
+)
+
+ax.add_patch(bubble_circle)
 
 ax.set_xlim(0, map_size[0])
 ax.set_ylim(0, map_size[1])
 ax.set_xlabel("x position, meters")
 ax.set_ylabel("y position, meters")
-ax.set_title("Robot Pathfinding Simulation")
-ax.legend()
+ax.set_title("Robot Chasing 0.5 m Bubble Around Moving Target")
+ax.legend(loc="upper right")
 
-robot_speed_mps = 1.0
-route = build_route(robot_pos, target_pos)
 
 # ================= Animation update =================
 
 def update(frame):
-    global robot_pos, target_pos, route
+    global robot_pos, target_pos, target_goal, target_route
 
-    target_pos = random_valid_target_move(target_pos)
+    if distance_between(target_pos, target_goal) < 0.15 or len(target_route) < 2:
+        target_goal = random_valid_position()
+        target_route = build_route(target_pos, target_goal)
 
-    route = build_route(robot_pos, target_pos)
+    if frame % 10 == 0:
+        target_route = build_route(target_pos, target_goal)
 
-    robot_pos = move_along_route(
+    target_pos, target_route = move_along_route(
+        target_pos,
+        target_route,
+        TARGET_SPEED_MPS,
+        TARGET_STEP_TIME,
+    )
+
+    robot_goal = get_bubble_chase_point(
         robot_pos,
-        route,
+        target_pos,
+        bubble_radius=BUBBLE_RADIUS,
+    )
+
+    robot_route = build_route(robot_pos, robot_goal)
+
+    robot_pos, robot_route = move_along_route(
+        robot_pos,
+        robot_route,
         robot_speed_mps,
         TARGET_STEP_TIME,
     )
 
-    route = build_route(robot_pos, target_pos)
+    robot_goal = get_bubble_chase_point(
+        robot_pos,
+        target_pos,
+        bubble_radius=BUBBLE_RADIUS,
+    )
 
-    route_x = [p[0] for p in route]
-    route_y = [p[1] for p in route]
+    robot_route = build_route(robot_pos, robot_goal)
+
+    robot_route_x = [p[0] for p in robot_route]
+    robot_route_y = [p[1] for p in robot_route]
+
+    target_route_x = [p[0] for p in target_route]
+    target_route_y = [p[1] for p in target_route]
 
     robot_dot.set_data([robot_pos[0]], [robot_pos[1]])
     target_dot.set_data([target_pos[0]], [target_pos[1]])
-    route_line.set_data(route_x, route_y)
+    target_goal_dot.set_data([target_goal[0]], [target_goal[1]])
+    robot_goal_dot.set_data([robot_goal[0]], [robot_goal[1]])
 
-    return robot_dot, target_dot, route_line
+    robot_route_line.set_data(robot_route_x, robot_route_y)
+    target_route_line.set_data(target_route_x, target_route_y)
+
+    bubble_circle.center = target_pos
+
+    return (
+        robot_dot,
+        target_dot,
+        target_goal_dot,
+        robot_goal_dot,
+        robot_route_line,
+        target_route_line,
+        bubble_circle,
+    )
+
 
 # ================= Save animation =================
 
 ani = FuncAnimation(
     fig,
     update,
-    frames=1000,
+    frames=300,
     interval=int(TARGET_STEP_TIME * 1000),
     blit=True,
 )
 
-print("Saving animation...")
-
 ani.save(
     "pathfinding_sim.mp4",
     writer="ffmpeg",
-    fps=int(1 / TARGET_STEP_TIME),
-    dpi=150,
+    fps=10,
+    dpi=60,
 )
 
-print("Saved as pathfinding_sim.mp4")
+Video("pathfinding_sim.mp4", embed=True)
