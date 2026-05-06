@@ -30,6 +30,7 @@ CART_CONFIDENCE   = 0.30
 PERSON_HEIGHT_M  = 1.7
 H_FOV_DEG        = 60.0
 DISTANCE_OFFSET_M = 3.0   # calibration offset — subtract from computed distance
+DISTANCE_SCALE    = 0.5   # multiply final distance estimate
 
 CLASS_ID   = {"person": 0, "cart": 1}
 CLASS_NAME = {0: "person", 1: "cart"}
@@ -51,7 +52,7 @@ def focal_length_px(dim, fov_deg):
 def estimate_distance(bbox_h, img_h, img_w):
     v_fov = H_FOV_DEG * (img_h / img_w)
     fl = focal_length_px(img_h, v_fov)
-    return max(0.0, (PERSON_HEIGHT_M * fl) / bbox_h - DISTANCE_OFFSET_M)
+    return max(0.0, ((PERSON_HEIGHT_M * fl) / bbox_h - DISTANCE_OFFSET_M) * DISTANCE_SCALE)
 
 
 def find_target_idx(detections, img_w, img_h):
