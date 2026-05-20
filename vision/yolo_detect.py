@@ -369,9 +369,6 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
     smooth_state = {}
 
     writer = None
-    if isinstance(source, str) and not use_picamera:
-        out_path = source.rsplit(".", 1)[0] + "_tracked.mp4"
-        writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
 
     frame_idx   = 0
     frame_times = []
@@ -402,9 +399,6 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
         for role, label_id, conf, dist, angle in rows:
             print(f"{role:<10} {label_id:<8} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
 
-        if writer:
-            writer.write(out)
-
         if not no_display:
             cv2.imshow("ByteTrack", out)
             cv2.imshow("Overhead Map", draw_map(rows))
@@ -414,9 +408,6 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
         frame_idx += 1
 
     cap.release()
-    if writer:
-        writer.release()
-        print(f"\nSaved: {out_path}")
     if not no_display:
         cv2.destroyAllWindows()
 
