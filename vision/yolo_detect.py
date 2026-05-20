@@ -410,7 +410,7 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
         for role, label_id, conf, dist, angle in rows:
             print(f"{role:<10} {label_id:<8} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
 
-        if not no_display:
+        if not no_display and frame_idx % 2 == 0:
             overlay_map(out, rows)
             cv2.imshow("Cart View", out)
             if cv2.waitKey(1) & 0xFF == ord("q"):
