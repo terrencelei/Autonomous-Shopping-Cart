@@ -156,7 +156,7 @@ class IMX500Capture:
         # convert_inference_coords maps normalized inference xywh → display-frame pixels xywh
         xyxy = []
         for box in boxes_raw:
-            x, y, w, h = self._imx500.convert_inference_coords(box, self._cfg, self._picam2)
+            x, y, w, h = self._imx500.convert_inference_coords(box, self._meta, self._picam2)
             xyxy.append([x, y, x + w, y + h])
 
         return sv.Detections(
