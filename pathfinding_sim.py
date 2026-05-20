@@ -3,7 +3,6 @@ import heapq
 import random
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from IPython.display import Video
 
 # ================= Map settings =================
 
@@ -381,4 +380,5 @@ ani.save(
     dpi=60,
 )
 
-Video("pathfinding_sim.mp4", embed=True)
+import subprocess
+subprocess.Popen(["open", "pathfinding_sim.mp4"])

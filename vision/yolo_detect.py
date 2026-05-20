@@ -1,19 +1,24 @@
 """
-Detect people (and optionally shopping carts), track each with ByteTrack.
-
-Models:
-  yolo26n.pt  — COCO pretrained, person-only mode (default)
-  combined.pt — YOLOv11n trained on COCO persons + Roboflow carts
-                Switch MODEL_PATH and set PERSON_ONLY = False to enable cart detection.
-                Train with: python3 train_combined.py --api-key <KEY>
+Detect and track people with ByteTrack.
 
 Usage:
-  python3 yolo_detect.py image.jpg           # image file
-  python3 yolo_detect.py video.mp4           # video file
-  python3 yolo_detect.py 0                   # webcam
+  python3 yolo_detect.py image.jpg                   # image file
+  python3 yolo_detect.py video.mp4                   # video file
+  python3 yolo_detect.py 0                           # webcam index
+  python3 yolo_detect.py --picamera                  # Pi AI Camera, YOLO on Pi CPU
+  python3 yolo_detect.py --npu                       # Pi AI Camera, YOLO on IMX500 NPU
+  python3 yolo_detect.py --npu --npu-model my.rpk    # NPU with custom .rpk model
+  python3 yolo_detect.py --npu --no-display          # headless NPU (SSH)
+
+NPU notes:
+  --npu uses the IMX500's on-chip neural processor — no YOLO inference on the Pi CPU.
+  Requires a .rpk model. Default: /usr/share/imx500-models/imx500_network_yolov8n_pp.rpk
+  Install pre-built models: sudo apt install imx500-models
+  To convert yolo26n.pt → RPK: export to ONNX then run imx500-convert (Sony MCT toolchain).
 """
 
 import sys
+import argparse
 import warnings
 import cv2
 import numpy as np
@@ -21,23 +26,29 @@ import supervision as sv
 from ultralytics import YOLO
 from pathlib import Path
 
+try:
+    from picamera2 import Picamera2
+    _PICAMERA2_AVAILABLE = True
+except ImportError:
+    _PICAMERA2_AVAILABLE = False
+
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 _DIR = Path(__file__).parent
 
-MODEL_PATH        = _DIR / "yolo26n.pt"   # switch to combined.pt for cart detection
-PERSON_ONLY       = True                  # set False when using combined.pt
-PERSON_CONFIDENCE = 0.35
-CART_CONFIDENCE   = 0.30
+MODEL_PATH        = _DIR / "yolo26n.pt"
+NPU_MODEL_PATH    = Path("/usr/share/imx500-models/imx500_network_yolov8n_pp.rpk")
+PERSON_CONFIDENCE = 0.55
 
 PERSON_HEIGHT_M   = 1.7
-H_FOV_DEG         = 54.0
+WEBCAM_H_FOV_DEG  = 54.0
+PICAM_H_FOV_DEG   = 66.0
+H_FOV_DEG         = WEBCAM_H_FOV_DEG   # overridden at runtime for --picamera
 DISTANCE_OFFSET_M = 3.0   # calibration offset — subtract from computed distance
 DISTANCE_SCALE    = 1.0   # multiply final distance estimate
 ANGLE_SCALE       = 1.0   # multiply final angle estimate
 
-CLASS_ID   = {"person": 0, "cart": 1}
-CLASS_NAME = {0: "person", 1: "cart"}
+PERSON_CLASS_ID = 0
 
 COLOR_TARGET   = (0, 255, 0)
 COLOR_OBSTACLE = (0, 0, 255)
@@ -49,6 +60,121 @@ TARGET_DIST_WEIGHT  = 1.0
 TARGET_ANGLE_WEIGHT = 0.3
 
 DIST_EMA_ALPHA = 0.4
+
+
+class PiCameraCapture:
+    """picamera2 wrapper with a cv2.VideoCapture-compatible interface."""
+
+    def __init__(self, width=640, height=480, fps=30):
+        if not _PICAMERA2_AVAILABLE:
+            raise RuntimeError("picamera2 is not installed — run: pip install picamera2")
+        self._cam = Picamera2(camera_num=0)  # CAM/DISP 0 port
+        cfg = self._cam.create_preview_configuration(
+            main={"format": "BGR888", "size": (width, height)},
+            controls={"FrameRate": fps},
+        )
+        self._cam.configure(cfg)
+        self._cam.start()
+        self._w, self._h, self._fps = width, height, fps
+
+    def isOpened(self):
+        return True
+
+    def read(self):
+        return True, self._cam.capture_array("main")
+
+    def get(self, prop):
+        return {
+            cv2.CAP_PROP_FPS:          self._fps,
+            cv2.CAP_PROP_FRAME_WIDTH:  self._w,
+            cv2.CAP_PROP_FRAME_HEIGHT: self._h,
+        }.get(prop, 0)
+
+    def release(self):
+        self._cam.stop()
+        self._cam.close()
+
+
+class IMX500Capture:
+    """Pi AI Camera with YOLO inference running entirely on the IMX500 NPU.
+
+    Loads an .rpk model onto the sensor at startup. Each call to read() returns
+    the current BGR frame; call get_npu_detections() immediately after to get
+    the corresponding inference results from the same request's metadata.
+    """
+
+    def __init__(self, model_path, width=640, height=480, fps=30):
+        if not _PICAMERA2_AVAILABLE:
+            raise RuntimeError("picamera2 is not installed — run: pip install picamera2")
+        from picamera2.devices.imx500 import IMX500, NetworkIntrinsics
+
+        self._imx500 = IMX500(str(model_path))
+        intrinsics = self._imx500.network_intrinsics or NetworkIntrinsics()
+        intrinsics.task = "object detection"
+        self._intrinsics = intrinsics
+
+        self._picam2 = Picamera2(self._imx500.camera_num)  # camera_num=0 → CAM/DISP 0
+        self._cfg = self._picam2.create_preview_configuration(
+            main={"format": "BGR888", "size": (width, height)},
+            controls={"FrameRate": fps},
+            buffer_count=12,
+        )
+        self._imx500.show_network_fw_progress_bar()
+        self._picam2.start(self._cfg)
+        self._meta = None
+        self._w, self._h, self._fps = width, height, fps
+
+    def isOpened(self):
+        return True
+
+    def read(self):
+        req = self._picam2.capture_request()
+        frame = req.make_array("main")
+        self._meta = req.get_metadata()
+        req.release()
+        return True, frame
+
+    def get_npu_detections(self):
+        """Parse IMX500 output tensors from the last read() into sv.Detections."""
+        if self._meta is None:
+            return sv.Detections.empty()
+        np_outputs = self._imx500.get_outputs(self._meta, add_batch=True)
+        if np_outputs is None:
+            return sv.Detections.empty()
+
+        # YOLOv8n_pp output layout: [boxes (N,4), scores (N,), classes (N,)]
+        # boxes are normalized (x, y, w, h) in inference-input space
+        boxes_raw = np_outputs[0][0]
+        scores    = np_outputs[1][0]
+        classes   = np_outputs[2][0].astype(int)
+
+        keep = (scores >= PERSON_CONFIDENCE) & (classes == PERSON_CLASS_ID)
+        if not keep.any():
+            return sv.Detections.empty()
+        boxes_raw, scores, classes = boxes_raw[keep], scores[keep], classes[keep]
+
+        # convert_inference_coords maps normalized inference xywh → display-frame pixels xywh
+        xyxy = []
+        for box in boxes_raw:
+            x, y, w, h = self._imx500.convert_inference_coords(box, self._cfg, self._picam2)
+            xyxy.append([x, y, x + w, y + h])
+
+        return sv.Detections(
+            xyxy=np.array(xyxy, dtype=float),
+            confidence=scores,
+            class_id=classes,
+        )
+
+    def get(self, prop):
+        return {
+            cv2.CAP_PROP_FPS:          self._fps,
+            cv2.CAP_PROP_FRAME_WIDTH:  self._w,
+            cv2.CAP_PROP_FRAME_HEIGHT: self._h,
+        }.get(prop, 0)
+
+    def release(self):
+        self._picam2.stop()
+        self._picam2.close()
 
 
 def focal_length_px(dim, fov_deg):
@@ -71,11 +197,7 @@ def estimate_angle(bbox_cx, img_w):
 
 def find_target_idx(detections, img_w, img_h):
     best_idx, best_score = None, float("inf")
-    for i, ((x1, y1, x2, y2), cls_id) in enumerate(
-        zip(detections.xyxy, detections.class_id)
-    ):
-        if cls_id != CLASS_ID["person"]:
-            continue
+    for i, (x1, y1, x2, y2) in enumerate(detections.xyxy):
         bbox_h  = y2 - y1
         bbox_cx = (x1 + x2) / 2
         dist    = estimate_distance(bbox_h, bbox_cx, img_h, img_w) if bbox_h > 0 else float("inf")
@@ -87,19 +209,15 @@ def find_target_idx(detections, img_w, img_h):
 
 
 def infer_frame(model, frame):
-    results = model(frame, verbose=False, conf=0.1)[0]
+    results = model(frame, verbose=False, conf=PERSON_CONFIDENCE)[0]
     if not len(results.boxes):
         return sv.Detections.empty()
 
-    xyxy     = results.boxes.xyxy.cpu().numpy()
-    conf     = results.boxes.conf.cpu().numpy()
-    cls_ids  = results.boxes.cls.cpu().numpy().astype(int)
+    xyxy    = results.boxes.xyxy.cpu().numpy()
+    conf    = results.boxes.conf.cpu().numpy()
+    cls_ids = results.boxes.cls.cpu().numpy().astype(int)
 
-    # Apply per-class confidence thresholds
-    thresholds = np.where(cls_ids == CLASS_ID["person"], PERSON_CONFIDENCE, CART_CONFIDENCE)
-    keep = conf >= thresholds
-    if PERSON_ONLY:
-        keep &= cls_ids == CLASS_ID["person"]
+    keep = cls_ids == PERSON_CLASS_ID
     if not keep.any():
         return sv.Detections.empty()
 
@@ -118,14 +236,13 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict):
     ids = detections.tracker_id if detections.tracker_id is not None else [None] * len(detections)
 
     rows = []
-    for i, ((x1, y1, x2, y2), cls_id, conf, tid) in enumerate(zip(
-        detections.xyxy, detections.class_id, detections.confidence, ids
+    for i, ((x1, y1, x2, y2), conf, tid) in enumerate(zip(
+        detections.xyxy, detections.confidence, ids
     )):
         is_target = (i == target_idx)
         color     = COLOR_TARGET if is_target else COLOR_OBSTACLE
         role      = "TARGET" if is_target else "OBSTACLE"
         label_id  = f"ID{tid}" if tid is not None else "?"
-        class_tag = CLASS_NAME.get(cls_id, str(cls_id))
 
         bbox_h  = y2 - y1
         bbox_cx = (x1 + x2) / 2
@@ -142,15 +259,14 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict):
         thickness = 3 if is_target else 2
         cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
 
-        display_role = role if is_target else class_tag.upper()
-        label = f"{display_role} {label_id} {dist:.1f}m {angle:+.1f}deg"
+        label = f"{role} {label_id} {dist:.1f}m {angle:+.1f}deg"
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
         top = max(int(y1) - 10, th + 4)
         cv2.rectangle(out, (int(x1), top - th - 4), (int(x1) + tw, top), color, -1)
         cv2.putText(out, label, (int(x1), top - 2),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
 
-        rows.append((role, label_id, class_tag, conf, dist, angle))
+        rows.append((role, label_id, conf, dist, angle))
 
     return out, rows
 
@@ -177,18 +293,12 @@ def draw_map(rows):
         cv2.line(img, (cam_px, cam_py), to_px(MAP_RANGE_M, side * H_FOV_DEG / 2), (40, 40, 40), 1)
     cv2.line(img, (cam_px, cam_py), (cam_px, cam_py - int(MAP_RANGE_M * scale)), (40, 40, 40), 1)
 
-    for role, label_id, class_tag, conf, dist, angle in rows:
+    for role, label_id, conf, dist, angle in rows:
         color = COLOR_TARGET if role == "TARGET" else COLOR_OBSTACLE
         px, py = to_px(dist, angle)
-        if class_tag == "cart":
-            half = 7
-            cv2.rectangle(img, (px - half, py - half), (px + half, py + half), color, -1)
-            r = half
-        else:
-            r = 10 if role == "TARGET" else 7
-            cv2.circle(img, (px, py), r, color, -1)
-        display = role if role == "TARGET" else class_tag.upper()
-        cv2.putText(img, f"{display} {label_id}", (px + r + 2, py + 4),
+        r = 10 if role == "TARGET" else 7
+        cv2.circle(img, (px, py), r, color, -1)
+        cv2.putText(img, f"{role} {label_id}", (px + r + 2, py + 4),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.38, color, 1)
 
     pts = np.array([[cam_px, cam_py - 12], [cam_px - 10, cam_py + 6],
@@ -199,8 +309,8 @@ def draw_map(rows):
 
 
 def print_header():
-    print(f"\n{'Role':<10} {'ID':<8} {'Class':<10} {'Conf':>6}  {'Distance':>10}  {'Angle':>8}")
-    print("-" * 60)
+    print(f"\n{'Role':<10} {'ID':<8} {'Conf':>6}  {'Distance':>10}  {'Angle':>8}")
+    print("-" * 52)
 
 
 def run_image(source, model):
@@ -216,21 +326,29 @@ def run_image(source, model):
 
     print(f"\n{source} — {len(rows)} object(s) detected")
     print_header()
-    for role, label_id, class_tag, conf, dist, angle in rows:
-        print(f"{role:<10} {label_id:<8} {class_tag:<10} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°")
+    for role, label_id, conf, dist, angle in rows:
+        print(f"{role:<10} {label_id:<8} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°")
 
     out_path = source.rsplit(".", 1)[0] + "_tracked.jpg"
     cv2.imwrite(out_path, out)
     print(f"\nSaved: {out_path}")
 
 
-def run_video(source, model):
-    try:
-        source = int(source)
-    except (ValueError, TypeError):
-        pass
+def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, no_display=False):
+    global H_FOV_DEG
+    H_FOV_DEG = PICAM_H_FOV_DEG if (use_picamera or use_npu) else WEBCAM_H_FOV_DEG
 
-    cap = cv2.VideoCapture(source)
+    if use_npu:
+        cap = IMX500Capture(model_path=npu_model or NPU_MODEL_PATH, width=640, height=480, fps=30)
+    elif use_picamera:
+        cap = PiCameraCapture(width=640, height=480, fps=30)
+    else:
+        try:
+            source = int(source)
+        except (ValueError, TypeError):
+            pass
+        cap = cv2.VideoCapture(source)
+
     if not cap.isOpened():
         print(f"Could not open: {source}")
         return
@@ -243,12 +361,13 @@ def run_video(source, model):
     smooth_state = {}
 
     writer = None
-    if isinstance(source, str):
+    if isinstance(source, str) and not use_picamera:
         out_path = source.rsplit(".", 1)[0] + "_tracked.mp4"
         writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
 
     frame_idx = 0
-    print("\nTracking — press Q to quit\n")
+    quit_msg = "" if no_display else " — press Q to quit"
+    print(f"\nTracking{quit_msg}\n")
     print_header()
 
     while True:
@@ -256,19 +375,21 @@ def run_video(source, model):
         if not ret:
             break
 
-        dets    = infer_frame(model, frame)
+        dets    = cap.get_npu_detections() if use_npu else infer_frame(model, frame)
         tracked = tracker.update_with_detections(dets)
         out, rows = annotate_frame(frame, tracked, smooth_state)
 
-        for role, label_id, class_tag, conf, dist, angle in rows:
-            print(f"{role:<10} {label_id:<8} {class_tag:<10} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
+        for role, label_id, conf, dist, angle in rows:
+            print(f"{role:<10} {label_id:<8} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
 
         if writer:
             writer.write(out)
-        cv2.imshow("ByteTrack", out)
-        cv2.imshow("Overhead Map", draw_map(rows))
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
+
+        if not no_display:
+            cv2.imshow("ByteTrack", out)
+            cv2.imshow("Overhead Map", draw_map(rows))
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
 
         frame_idx += 1
 
@@ -276,31 +397,53 @@ def run_video(source, model):
     if writer:
         writer.release()
         print(f"\nSaved: {out_path}")
-    cv2.destroyAllWindows()
+    if not no_display:
+        cv2.destroyAllWindows()
 
 
 def run():
-    if len(sys.argv) < 2:
-        print("Usage: python3 yolo_detect.py <image|video|webcam_id>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="YOLO person tracker with ByteTrack")
+    parser.add_argument("source", nargs="?", default=None,
+                        help="image, video file, or webcam index (default: 0)")
+    parser.add_argument("--picamera", action="store_true",
+                        help="use Pi AI Camera via picamera2 (YOLO runs on Pi CPU)")
+    parser.add_argument("--npu", action="store_true",
+                        help="use Pi AI Camera with YOLO inference on IMX500 NPU")
+    parser.add_argument("--npu-model", dest="npu_model", default=None,
+                        help=f"path to .rpk model for NPU (default: {NPU_MODEL_PATH})")
+    parser.add_argument("--no-display", dest="no_display", action="store_true",
+                        help="suppress cv2 windows (headless / SSH use)")
+    args = parser.parse_args()
+
+    use_npu      = args.npu
+    use_picamera = args.picamera or (not use_npu and _PICAMERA2_AVAILABLE and args.source is None)
+
+    if not use_npu and not use_picamera and args.source is None:
+        parser.error("provide a source (image, video, or webcam index) or use --picamera / --npu")
+
+    if use_npu:
+        npu_path = Path(args.npu_model) if args.npu_model else NPU_MODEL_PATH
+        if not npu_path.exists():
+            print(f"ERROR: NPU model not found: {npu_path}")
+            print("Install pre-built models: sudo apt install imx500-models")
+            sys.exit(1)
+        run_video(args.source or "0", model=None, use_npu=True,
+                  npu_model=npu_path, no_display=args.no_display)
+        return
 
     if not MODEL_PATH.exists():
         print(f"ERROR: {MODEL_PATH} not found.")
-        if not PERSON_ONLY:
-            print("Train the combined model first:")
-            print("  python3 train_combined.py --api-key <YOUR_ROBOFLOW_KEY>")
         sys.exit(1)
 
-    model = YOLO(MODEL_PATH)
-    source = sys.argv[1]
+    model  = YOLO(MODEL_PATH)
+    source = args.source or "0"
 
-    is_image = isinstance(source, str) and source.lower().endswith(
-        (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
-    )
+    is_image = (not use_picamera and isinstance(source, str) and
+                source.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")))
     if is_image:
         run_image(source, model)
     else:
-        run_video(source, model)
+        run_video(source, model, use_picamera=use_picamera, no_display=args.no_display)
 
 
 if __name__ == "__main__":
