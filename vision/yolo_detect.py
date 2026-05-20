@@ -83,7 +83,8 @@ class PiCameraCapture:
         return True
 
     def read(self):
-        return True, self._cam.capture_array("main")
+        frame = self._cam.capture_array("main")
+        return True, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
     def get(self, prop):
         return {
@@ -134,7 +135,7 @@ class IMX500Capture:
         frame = req.make_array("main")
         self._meta = req.get_metadata()
         req.release()
-        return True, frame
+        return True, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
     def get_npu_detections(self):
         """Parse IMX500 output tensors from the last read() into sv.Detections."""
