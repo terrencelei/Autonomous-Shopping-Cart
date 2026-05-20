@@ -404,7 +404,8 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
 
         if not no_display:
             cv2.imshow("ByteTrack", out)
-            cv2.imshow("Overhead Map", draw_map(rows))
+            if frame_idx % 3 == 0:
+                cv2.imshow("Overhead Map", draw_map(rows))
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
