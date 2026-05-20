@@ -270,7 +270,7 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict):
         top = max(int(y1) - 10, th + 4)
         cv2.rectangle(out, (int(x1), top - th - 4), (int(x1) + tw, top), color, -1)
         cv2.putText(out, label, (int(x1), top - 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
 
         rows.append((role, label_id, conf, dist, angle))
 
@@ -407,7 +407,7 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
         fps_disp = (len(display_times) - 1) / (display_times[-1] - display_times[0]) if len(display_times) > 1 else 0.0
         mode_str = "NPU" if use_npu else ("PiCam" if use_picamera else "CPU")
         cv2.putText(out, f"{mode_str}  Inf: {fps_inf:.1f}fps  Disp: {fps_disp:.1f}fps  {latency_ms:.0f}ms",
-                    (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                    (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
 
         for role, label_id, conf, dist, angle in rows:
             print(f"{role:<10} {label_id:<8} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
