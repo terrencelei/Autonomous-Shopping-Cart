@@ -1,10 +1,10 @@
 # Autonomous Shopping Cart
 
-A self-following shopping cart that tracks a designated shopper and treats all other people and carts as obstacles. Two independent sensing systems provide redundancy:
+A self-following shopping cart that tracks a designated shopper and treats all other people as obstacles. Two independent sensing systems provide redundancy:
 
 | System | Role | Technology |
 |--------|------|------------|
-| **Vision** | Primary | YOLO26n + ByteTrack, camera-based detection |
+| **Vision** | Primary | YOLO11n + ByteTrack, Raspberry Pi AI Camera |
 | **UWB** | Backup / redundancy | Apple Ultra-Wideband, iPhone-to-iPhone ranging |
 
 The vision system handles detection and scene understanding — identifying the target shopper and classifying obstacles. The UWB system provides a precise distance and angle fallback when the camera view is obstructed or the target is temporarily lost.
@@ -13,62 +13,90 @@ The vision system handles detection and scene understanding — identifying the 
 
 ## Vision System (Primary)
 
-A YOLO26n-based pipeline that detects people and shopping carts from a live camera feed, locks onto the closest centred shopper, and maps everything else as an obstacle.
+A YOLO11n-based pipeline running on a Raspberry Pi 5 with the Pi AI Camera (IMX500). Detects people from a live camera feed, locks onto the closest centred shopper, and classifies all others as obstacles.
 
-### Setup
+### Setup (Raspberry Pi)
 
 ```bash
-cd vision
-pip install -r requirements.txt
+sudo apt install -y python3-pip python3-opencv imx500-all imx500-models
+pip3 install ultralytics supervision --break-system-packages
 ```
 
 ### Usage
 
 ```bash
-python3 yolo_detect.py image.jpg        # image file
-python3 yolo_detect.py video.mp4        # video file
+# NPU mode — YOLO inference on IMX500 chip (~30 FPS)
+python3 vision/yolo_detect.py --npu --npu-model /path/to/model.rpk
+
+# Pi Camera mode — YOLO inference on Pi CPU (~5-15 FPS)
+python3 vision/yolo_detect.py --picamera
+
+# Headless (no display, SSH)
+python3 vision/yolo_detect.py --npu --npu-model /path/to/model.rpk --no-display
 ```
 
 Press **Q** to quit.
 
 ### Target Locking
 
-Each frame, every detected person is scored by `distance_m + 0.3 × |angle_deg|`. The person with the lowest score is locked as **TARGET** (green box) — favouring whoever is closest and most centred. All other detections are labelled **OBSTACLE** (red box). The lock updates every frame as people move.
+Each frame, every detected person is scored by `distance_m + 0.3 × |angle_deg|`. The person with the lowest score is locked as **TARGET** (green box) — favouring whoever is closest and most centred. All others are labelled **OBSTACLE** (red box). The lock updates every frame as people move.
 
 ### Output
 
-Two windows run simultaneously:
-- **ByteTrack** — annotated camera feed with bounding boxes, per-object distance and angle
-- **Overhead Map** — live top-down 2D map of all detections relative to the camera, with distance rings and FOV cone
+A single **Cart View** window shows:
+- Annotated camera feed with bounding boxes, per-object distance and angle
+- Mini overhead map (picture-in-picture, top-right corner) showing all detections relative to the cart
+- FPS and latency overlay
 
 ### Models
 
 | Model | Purpose |
 |-------|---------|
-| `yolo26n.pt` | COCO pretrained — person detection only |
-| `cart.pt` | Fine-tuned on shopping cart dataset — cart detection |
+| `yolo11n.pt` | COCO pretrained — person detection, runs on Pi CPU |
+| `yolo11n.rpk` | YOLO11n converted for IMX500 NPU — runs on-sensor |
 
-Both pre-trained models are included. To retrain the cart model:
+To convert `yolo11n.pt` to `.rpk` for NPU use (requires Linux x86 — use Google Colab):
 
-```bash
-python3 train_cart.py --api-key <YOUR_ROBOFLOW_KEY>
+```python
+from ultralytics import YOLO
+YOLO('yolo11n.pt').export(format='imx500', imgsz=640)
 ```
 
-Dataset: [Shopping Cart — Roboflow](https://universe.roboflow.com/furkan-bakkal/shopping-cart-1r48s) (215 train / 61 val images)
+---
 
-### Cart Model Performance
+## Pathfinding Simulation
 
-| Metric | Value |
-|--------|-------|
-| mAP50 | 0.793 |
-| Precision | 88.5% |
-| Recall | 70.6% |
+`pathfinding_sim.py` is a standalone 2D simulation of the cart's chase behaviour on a store map. It does not use the camera — it simulates what the motor controller should do given a known target position.
+
+### What It Does
+
+- Generates a 20×20 metre store map with 10 aisles
+- Simulates a **moving target** (shopper) navigating the aisles at 1.8 m/s
+- The **robot** (cart) chases using a **bubble chase** algorithm: it always aims for a point 0.5 m behind the target rather than the target itself, avoiding collisions
+- Uses **A\* pathfinding** to navigate around shelving obstacles
+- Replans every 10 frames to adapt to target movement
+- Outputs a 300-frame MP4 animation (`pathfinding_sim.mp4`)
+
+### Algorithm
+
+```
+score = distance + 0.3 × |angle|   ← target selection (vision)
+chase_point = target + 0.5m bubble ← motor goal
+path = A*(robot, chase_point)       ← obstacle-aware routing
+```
+
+### Usage
+
+```bash
+pip install matplotlib numpy
+python3 pathfinding_sim.py
+```
 
 ---
 
 ## UWB System (Backup / Redundancy)
 
-Two iPhones use Apple's Ultra-Wideband chip to maintain a precise distance and angle measurement between the shopper and the cart, independent of the camera. This serves as a fallback when the vision system loses the target.
+Two iPhones use Apple's Ultra-Wideband chip to maintain a precise distance and angle measurement between the shopper and the cart, independent of the camera.
 
 ### Apps
 
@@ -89,10 +117,6 @@ Runs on the **cart's iPhone**. Displays:
 3. Both devices exchange NearbyInteraction discovery tokens
 4. UWB ranging begins — distance and angle update continuously
 5. Sessions auto-restart if the peer goes out of range
-
-### Angle Measurement
-
-Uses `NINearbyObject.horizontalAngle` with `isCameraAssistanceEnabled = true` on the cart phone. This activates an ARKit world-tracking session that compensates for cart movement — **the camera does not need to point at the shopper.**
 
 ### Smoothing & Calibration
 
@@ -117,18 +141,14 @@ Offsets persist in UserDefaults across launches.
 autonomous-shopping-cart/
 ├── vision/                         # Primary: camera-based detection
 │   ├── yolo_detect.py              # Detection + tracking + overhead map
-│   ├── train_cart.py               # Fine-tune cart detector
-│   ├── cart.pt                     # Trained cart detection model
-│   ├── yolo26n.pt                  # Base COCO model (person detection)
+│   ├── yolo11n.rpk                 # YOLO11n converted for IMX500 NPU
+│   ├── throttle_watch.sh           # Mac thermal monitor for training runs
 │   └── requirements.txt
 ├── uwb/                            # Backup: UWB positioning
 │   ├── UWBCart/                    # Shopper app source
 │   ├── ViewerApp/                  # CartView app source
-│   ├── UWBCart.xcodeproj
-│   ├── UWBCartTests/
-│   ├── UWBCartUITests/
-│   ├── ViewerAppTests/
-│   └── ViewerAppUITests/
+│   └── UWBCart.xcodeproj
+├── pathfinding_sim.py              # 2D pathfinding simulation (A* + bubble chase)
 └── README.md
 ```
 
@@ -136,8 +156,14 @@ autonomous-shopping-cart/
 
 ## Troubleshooting
 
-**Camera permission denied (vision system):**
-Open **System Settings → Privacy & Security → Camera** and enable access for your terminal app.
+**Camera busy error on Pi:**
+A previous process is still holding the camera. Kill it:
+```bash
+sudo pkill -f yolo_detect.py
+```
+
+**NPU model not found:**
+Install pre-built models: `sudo apt install imx500-models`
 
 **Xcode "Executable is not codesigned":**
 1. **Product → Clean Build Folder** (⇧⌘K)
