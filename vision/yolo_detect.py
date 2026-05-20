@@ -55,7 +55,7 @@ PERSON_CLASS_ID = 0
 COLOR_TARGET   = (0, 255, 0)
 COLOR_OBSTACLE = (0, 0, 255)
 
-MAP_SIZE    = 500
+MAP_SIZE    = 200
 MAP_RANGE_M = 10.0
 
 TARGET_DIST_WEIGHT  = 1.0
@@ -281,37 +281,45 @@ def draw_map(rows):
     s      = MAP_SIZE
     img    = np.zeros((s, s, 3), dtype=np.uint8)
     cam_px = s // 2
-    cam_py = s - 40
-    scale  = (s - 60) / MAP_RANGE_M
+    cam_py = s - 20
+    scale  = (s - 30) / MAP_RANGE_M
 
     def to_px(dist, angle_deg):
         rad = np.radians(angle_deg)
         return (int(cam_px + dist * np.sin(rad) * scale),
                 int(cam_py - dist * np.cos(rad) * scale))
 
-    for r_m in range(2, int(MAP_RANGE_M) + 1, 2):
-        r_px = int(r_m * scale)
-        cv2.circle(img, (cam_px, cam_py), r_px, (50, 50, 50), 1)
-        cv2.putText(img, f"{r_m}m", (cam_px + r_px + 3, cam_py),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, (80, 80, 80), 1)
+    # single distance ring at 5m
+    cv2.circle(img, (cam_px, cam_py), int(5 * scale), (50, 50, 50), 1)
+    cv2.putText(img, "5m", (cam_px + int(5 * scale) + 2, cam_py),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.3, (80, 80, 80), 1)
 
     for side in (-1, 1):
         cv2.line(img, (cam_px, cam_py), to_px(MAP_RANGE_M, side * H_FOV_DEG / 2), (40, 40, 40), 1)
-    cv2.line(img, (cam_px, cam_py), (cam_px, cam_py - int(MAP_RANGE_M * scale)), (40, 40, 40), 1)
 
     for role, label_id, conf, dist, angle in rows:
         color = COLOR_TARGET if role == "TARGET" else COLOR_OBSTACLE
         px, py = to_px(dist, angle)
-        r = 10 if role == "TARGET" else 7
+        r = 7 if role == "TARGET" else 5
         cv2.circle(img, (px, py), r, color, -1)
-        cv2.putText(img, f"{role} {label_id}", (px + r + 2, py + 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, color, 1)
 
-    pts = np.array([[cam_px, cam_py - 12], [cam_px - 10, cam_py + 6],
-                    [cam_px + 10, cam_py + 6]], np.int32)
+    pts = np.array([[cam_px, cam_py - 8], [cam_px - 6, cam_py + 4],
+                    [cam_px + 6, cam_py + 4]], np.int32)
     cv2.fillPoly(img, [pts], (200, 200, 200))
-    cv2.putText(img, "OVERHEAD MAP", (8, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (160, 160, 160), 1)
     return img
+
+
+def overlay_map(frame, rows):
+    """Draw the mini map as a picture-in-picture in the top-right corner."""
+    m = draw_map(rows)
+    h, w = frame.shape[:2]
+    pad = 8
+    y1, y2 = pad, pad + MAP_SIZE
+    x1, x2 = w - MAP_SIZE - pad, w - pad
+    # dim the background slightly
+    frame[y1:y2, x1:x2] = (frame[y1:y2, x1:x2] * 0.3 + m * 0.7).astype(np.uint8)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (80, 80, 80), 1)
+    return frame
 
 
 def print_header():
@@ -403,9 +411,8 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
             print(f"{role:<10} {label_id:<8} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
 
         if not no_display:
-            cv2.imshow("ByteTrack", out)
-            if frame_idx % 3 == 0:
-                cv2.imshow("Overhead Map", draw_map(rows))
+            overlay_map(out, rows)
+            cv2.imshow("Cart View", out)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
