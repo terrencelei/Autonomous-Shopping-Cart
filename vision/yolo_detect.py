@@ -36,7 +36,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 _DIR = Path(__file__).parent
 
-MODEL_PATH        = _DIR / "yolo26n.pt"
+MODEL_PATH        = _DIR / "yolo11n.pt"
 NPU_MODEL_PATH    = _DIR / "yolo26n.rpk"
 PERSON_CONFIDENCE = 0.55
 
