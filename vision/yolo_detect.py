@@ -124,7 +124,8 @@ class IMX500Capture:
         )
         self._imx500.show_network_fw_progress_bar()
         self._picam2.start(self._cfg)
-        self._meta = None
+        self._meta      = None
+        self._last_dets = sv.Detections.empty()
         self._w, self._h, self._fps = width, height, fps
 
     def isOpened(self):
@@ -140,10 +141,10 @@ class IMX500Capture:
     def get_npu_detections(self):
         """Parse IMX500 output tensors from the last read() into sv.Detections."""
         if self._meta is None:
-            return sv.Detections.empty()
+            return self._last_dets
         np_outputs = self._imx500.get_outputs(self._meta, add_batch=True)
         if np_outputs is None:
-            return sv.Detections.empty()
+            return self._last_dets  # reuse last result between NPU inference cycles
 
         # YOLOv8n_pp output layout: [boxes (N,4), scores (N,), classes (N,)]
         # boxes are normalized (x, y, w, h) in inference-input space
@@ -153,7 +154,8 @@ class IMX500Capture:
 
         keep = (scores >= PERSON_CONFIDENCE_NPU) & (classes == PERSON_CLASS_ID)
         if not keep.any():
-            return sv.Detections.empty()
+            self._last_dets = sv.Detections.empty()
+            return self._last_dets
         boxes_raw, scores, classes = boxes_raw[keep], scores[keep], classes[keep]
 
         # convert_inference_coords maps normalized inference xywh → display-frame pixels xywh
@@ -162,11 +164,12 @@ class IMX500Capture:
             x, y, w, h = self._imx500.convert_inference_coords(box, self._meta, self._picam2)
             xyxy.append([x, y, x + w, y + h])
 
-        return sv.Detections(
+        self._last_dets = sv.Detections(
             xyxy=np.array(xyxy, dtype=float),
             confidence=scores,
             class_id=classes,
         )
+        return self._last_dets
 
     def get(self, prop):
         return {
