@@ -18,6 +18,7 @@ NPU notes:
 """
 
 import sys
+import time
 import argparse
 import warnings
 import cv2
@@ -365,12 +366,14 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
         out_path = source.rsplit(".", 1)[0] + "_tracked.mp4"
         writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
 
-    frame_idx = 0
+    frame_idx   = 0
+    frame_times = []
     quit_msg = "" if no_display else " — press Q to quit"
     print(f"\nTracking{quit_msg}\n")
     print_header()
 
     while True:
+        t0 = time.time()
         ret, frame = cap.read()
         if not ret:
             break
@@ -378,6 +381,15 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
         dets    = cap.get_npu_detections() if use_npu else infer_frame(model, frame)
         tracked = tracker.update_with_detections(dets)
         out, rows = annotate_frame(frame, tracked, smooth_state)
+
+        t1 = time.time()
+        latency_ms = (t1 - t0) * 1000
+        frame_times.append(t1)
+        if len(frame_times) > 30:
+            frame_times.pop(0)
+        fps_live = (len(frame_times) - 1) / (frame_times[-1] - frame_times[0]) if len(frame_times) > 1 else 0.0
+        cv2.putText(out, f"FPS: {fps_live:.1f}  Latency: {latency_ms:.0f}ms",
+                    (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
         for role, label_id, conf, dist, angle in rows:
             print(f"{role:<10} {label_id:<8} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
