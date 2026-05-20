@@ -39,7 +39,8 @@ _DIR = Path(__file__).parent
 
 MODEL_PATH        = _DIR / "yolo11n.pt"
 NPU_MODEL_PATH    = _DIR / "yolo11n.rpk"
-PERSON_CONFIDENCE = 0.55
+PERSON_CONFIDENCE     = 0.35
+PERSON_CONFIDENCE_NPU = 0.25   # INT8 quantization lowers raw confidence scores
 
 PERSON_HEIGHT_M   = 1.7
 WEBCAM_H_FOV_DEG  = 54.0
@@ -149,7 +150,7 @@ class IMX500Capture:
         scores    = np_outputs[1][0]
         classes   = np_outputs[2][0].astype(int)
 
-        keep = (scores >= PERSON_CONFIDENCE) & (classes == PERSON_CLASS_ID)
+        keep = (scores >= PERSON_CONFIDENCE_NPU) & (classes == PERSON_CLASS_ID)
         if not keep.any():
             return sv.Detections.empty()
         boxes_raw, scores, classes = boxes_raw[keep], scores[keep], classes[keep]
@@ -358,7 +359,12 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
     w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    tracker      = sv.ByteTrack()
+    tracker = sv.ByteTrack(
+        track_activation_threshold=0.25,
+        lost_track_buffer=60,   # remember lost tracks for 2s at 30fps
+        minimum_matching_threshold=0.8,
+        frame_rate=30,
+    )
     smooth_state = {}
 
     writer = None
@@ -388,7 +394,8 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
         if len(frame_times) > 30:
             frame_times.pop(0)
         fps_live = (len(frame_times) - 1) / (frame_times[-1] - frame_times[0]) if len(frame_times) > 1 else 0.0
-        cv2.putText(out, f"FPS: {fps_live:.1f}  Latency: {latency_ms:.0f}ms",
+        mode_str = "NPU" if use_npu else ("PiCam" if use_picamera else "CPU")
+        cv2.putText(out, f"{mode_str}  FPS: {fps_live:.1f}  Latency: {latency_ms:.0f}ms",
                     (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
         for role, label_id, conf, dist, angle in rows:
