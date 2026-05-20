@@ -270,7 +270,7 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict):
         top = max(int(y1) - 10, th + 4)
         cv2.rectangle(out, (int(x1), top - th - 4), (int(x1) + tw, top), color, -1)
         cv2.putText(out, label, (int(x1), top - 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 2)
 
         rows.append((role, label_id, conf, dist, angle))
 
@@ -381,8 +381,9 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
 
     writer = None
 
-    frame_idx   = 0
-    frame_times = []
+    frame_idx    = 0
+    frame_times  = []
+    display_times = []
     quit_msg = "" if no_display else " — press Q to quit"
     print(f"\nTracking{quit_msg}\n")
     print_header()
@@ -402,15 +403,19 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
         frame_times.append(t1)
         if len(frame_times) > 30:
             frame_times.pop(0)
-        fps_live = (len(frame_times) - 1) / (frame_times[-1] - frame_times[0]) if len(frame_times) > 1 else 0.0
+        fps_inf = (len(frame_times) - 1) / (frame_times[-1] - frame_times[0]) if len(frame_times) > 1 else 0.0
+        fps_disp = (len(display_times) - 1) / (display_times[-1] - display_times[0]) if len(display_times) > 1 else 0.0
         mode_str = "NPU" if use_npu else ("PiCam" if use_picamera else "CPU")
-        cv2.putText(out, f"{mode_str}  FPS: {fps_live:.1f}  Latency: {latency_ms:.0f}ms",
-                    (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        cv2.putText(out, f"{mode_str}  Inf: {fps_inf:.1f}fps  Disp: {fps_disp:.1f}fps  {latency_ms:.0f}ms",
+                    (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
         for role, label_id, conf, dist, angle in rows:
             print(f"{role:<10} {label_id:<8} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
 
         if not no_display and frame_idx % 2 == 0:
+            display_times.append(time.time())
+            if len(display_times) > 30:
+                display_times.pop(0)
             overlay_map(out, rows)
             cv2.imshow("Cart View", out)
             if cv2.waitKey(1) & 0xFF == ord("q"):
