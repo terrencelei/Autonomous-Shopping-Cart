@@ -37,7 +37,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 _DIR = Path(__file__).parent
 
 MODEL_PATH        = _DIR / "yolo26n.pt"
-NPU_MODEL_PATH    = Path("/usr/share/imx500-models/imx500_network_yolov8n_pp.rpk")
+NPU_MODEL_PATH    = _DIR / "yolo26n.rpk"
 PERSON_CONFIDENCE = 0.55
 
 PERSON_HEIGHT_M   = 1.7
@@ -415,8 +415,9 @@ def run():
                         help="suppress cv2 windows (headless / SSH use)")
     args = parser.parse_args()
 
-    use_npu      = args.npu
-    use_picamera = args.picamera or (not use_npu and _PICAMERA2_AVAILABLE and args.source is None)
+    _no_explicit_source = not args.picamera and args.source is None
+    use_npu      = args.npu or (_no_explicit_source and _PICAMERA2_AVAILABLE)
+    use_picamera = args.picamera
 
     if not use_npu and not use_picamera and args.source is None:
         parser.error("provide a source (image, video, or webcam index) or use --picamera / --npu")
@@ -425,7 +426,7 @@ def run():
         npu_path = Path(args.npu_model) if args.npu_model else NPU_MODEL_PATH
         if not npu_path.exists():
             print(f"ERROR: NPU model not found: {npu_path}")
-            print("Install pre-built models: sudo apt install imx500-models")
+            print("Convert your model first: python3 -c \"from ultralytics import YOLO; YOLO('yolo26n.pt').export(format='imx500', imgsz=640)\"")
             sys.exit(1)
         run_video(args.source or "0", model=None, use_npu=True,
                   npu_model=npu_path, no_display=args.no_display)
