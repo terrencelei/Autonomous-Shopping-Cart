@@ -397,15 +397,6 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
         tracked = tracker.update_with_detections(dets)
         out, rows = annotate_frame(frame, tracked, smooth_state)
 
-        for role, label_id, conf, dist, angle in rows:
-            print(f"{role:<10} {label_id:<8} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
-
-        if not no_display:
-            overlay_map(out, rows)
-            cv2.imshow("Cart View", out)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
-
         t1 = time.time()
         latency_ms = (t1 - t0) * 1000
         frame_times.append(t1)
@@ -415,6 +406,15 @@ def run_video(source, model, use_picamera=False, use_npu=False, npu_model=None, 
         mode_str = "NPU" if use_npu else ("PiCam" if use_picamera else "CPU")
         cv2.putText(out, f"{mode_str}  FPS: {fps_live:.1f}  {latency_ms:.0f}ms",
                     (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
+
+        for role, label_id, conf, dist, angle in rows:
+            print(f"{role:<10} {label_id:<8} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
+
+        if not no_display:
+            overlay_map(out, rows)
+            cv2.imshow("Cart View", out)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
 
         frame_idx += 1
 
