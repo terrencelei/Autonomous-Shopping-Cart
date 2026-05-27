@@ -9,6 +9,7 @@ Inference runs entirely on the IMX500's on-chip neural processor; no CPU
 inference path. Requires the imx500-models apt package.
 """
 
+import os
 import time
 import argparse
 import warnings
@@ -305,6 +306,13 @@ def run(no_display=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SSD person tracker on IMX500 NPU + ByteTrack")
     parser.add_argument("--no-display", dest="no_display", action="store_true",
-                        help="suppress cv2 windows (headless / SSH use)")
+                        help="suppress cv2 windows (headless / SSH use) — auto-enabled if no DISPLAY")
     args = parser.parse_args()
+
+    # Auto-detect headless environments (e.g. SSH without X forwarding) so the
+    # script doesn't crash trying to open a Qt window.
+    if not args.no_display and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        args.no_display = True
+        print("No display detected — running headless (use --no-display to silence this message).")
+
     run(no_display=args.no_display)
