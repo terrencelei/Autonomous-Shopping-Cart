@@ -51,6 +51,10 @@ fi
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Clear any masked state from previous runs before installing fresh files.
+# (`systemctl mask` symlinks the unit to /dev/null, which prevents start.)
+systemctl unmask cart-pathfinder.service cart-vision.service cart-arc-test.service 2>/dev/null || true
+
 # Install / refresh all three unit files.
 cp "$DIR/cart-pathfinder.service" /etc/systemd/system/
 cp "$DIR/cart-vision.service"     /etc/systemd/system/
