@@ -37,6 +37,12 @@ WHEEL_TRACK_M      = WHEEL_TRACK_IN * INCH_TO_M
 GEAR_RATIO         = 5         # ← UPDATE to match your motor
 ENCODER_PPR        = 11 * 4 * GEAR_RATIO
 
+# Per-side encoder sign. Flip when a wheel reports a negative count under
+# forward motion (typically because the encoder's A/B channels are mirrored
+# relative to the other side's wiring).
+LEFT_ENC_SIGN      = -1
+RIGHT_ENC_SIGN     = +1
+
 # Encoders are wired to the ESP32, not the Pi GPIO. The ESP32 streams
 # encoder counts back over USB serial (line format: "E,<left>,<right>\n").
 # Pin numbers below are for the ESP32 sketch in firmware/cart_motor/ — kept
@@ -460,8 +466,8 @@ class MotorDriver:
 
             try:
                 _, left_s, right_s = line.split(",", 2)
-                left_count = int(left_s)
-                right_count = int(right_s)
+                left_count  = LEFT_ENC_SIGN  * int(left_s)
+                right_count = RIGHT_ENC_SIGN * int(right_s)
             except ValueError:
                 log.warning(f"Bad encoder packet: {line}")
                 continue

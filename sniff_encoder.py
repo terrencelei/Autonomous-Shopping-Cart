@@ -20,6 +20,10 @@ PORT = "/dev/ttyUSB0"
 BAUD = 115200
 DURATION_S = 20
 
+# Flip if a wheel's encoder count goes negative under forward motion.
+LEFT_SIGN  = -1
+RIGHT_SIGN = +1
+
 s = serial.Serial(PORT, BAUD, timeout=1)
 print(f"Watching {PORT} for {DURATION_S}s.")
 print("Push LEFT wheel hard for 5s, then RIGHT wheel for 5s.\n")
@@ -35,7 +39,8 @@ while time.time() < end:
     if line.startswith("E,"):
         try:
             _, l_s, r_s = line.split(",", 2)
-            l, r = int(l_s), int(r_s)
+            l = LEFT_SIGN  * int(l_s)
+            r = RIGHT_SIGN * int(r_s)
         except ValueError:
             print(f"  bad packet: {line!r}")
             continue
