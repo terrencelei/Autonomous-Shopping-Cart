@@ -64,7 +64,7 @@ Useful operations once installed:
 |---|---|
 | `systemctl status cart-pathfinder cart-vision cart-arc-test` | Health check |
 | `journalctl -fu cart-pathfinder -fu cart-vision` | Live log stream (live mode) |
-| `journalctl -u cart-arc-test --since boot` | Read the latest test run output (test mode) |
+| `journalctl -u cart-arc-test -b` | Read this-boot's test run output (test mode) |
 | `sudo systemctl start cart-pathfinder cart-vision` | Trigger live mode now (no reboot needed) |
 | `sudo systemctl start cart-arc-test` | Trigger one arc-test run now |
 | `sudo systemctl stop cart-vision cart-pathfinder` | Stop the live cart |

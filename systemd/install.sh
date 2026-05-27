@@ -12,7 +12,7 @@
 # Useful commands after install:
 #   systemctl status cart-pathfinder cart-vision cart-arc-test
 #   journalctl -fu cart-pathfinder -fu cart-vision
-#   journalctl -u  cart-arc-test --since boot
+#   journalctl -u  cart-arc-test -b
 #
 # To uninstall completely:
 #   sudo systemctl disable --now cart-pathfinder cart-vision cart-arc-test
@@ -84,7 +84,7 @@ case "$MODE" in
     echo ""
     echo "Writes pathfinding_arc_test*.png into the repo root each boot."
     echo "Run now:      sudo systemctl start cart-arc-test"
-    echo "Result log:   journalctl -u cart-arc-test --since boot"
+    echo "Result log:   journalctl -u cart-arc-test -b"
     ;;
   none)
     echo ""
