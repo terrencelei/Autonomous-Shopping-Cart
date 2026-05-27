@@ -22,18 +22,31 @@ WHEEL_DIAMETER_M   = 0.10      # metres  (e.g. 100 mm wheel)
 WHEEL_TRACK_M      = 0.35      # metres  centre-to-centre between drive wheels
 ENCODER_PPR        = 360       # pulses per full wheel revolution (after gearbox)
 
-# GPIO pin numbers (BCM numbering)
-ENCODER_LEFT_PIN_A  = 17
-ENCODER_LEFT_PIN_B  = 18
-ENCODER_RIGHT_PIN_A = 27
-ENCODER_RIGHT_PIN_B = 22
+# Encoders are wired to the ESP32, not the Pi GPIO. The ESP32 streams
+# encoder counts back over USB serial (line format: "E,<left>,<right>\n").
+# Pin numbers below are for the ESP32 sketch in firmware/cart_motor/ — kept
+# here as documentation only; the Pi does not read GPIO directly.
+ESP32_ENC_LEFT_A   = 32   # ENC_A on dual_motor_test.ino (M1)
+ESP32_ENC_LEFT_B   = 33   # ENC_B
+ESP32_ENC_RIGHT_A  = 25   # ENC_C on dual_motor_test.ino (M2)
+ESP32_ENC_RIGHT_B  = 26   # ENC_D
 
-# UART port for motor driver
-MOTOR_UART_PORT    = "/dev/serial0"
+# Serial port for the ESP32 motor controller (USB CDC over micro-USB).
+# On the Pi the ESP32 enumerates as /dev/ttyACM0 (or /dev/ttyUSB0 on some
+# adapters). Matching firmware lives in firmware/cart_motor/.
+MOTOR_UART_PORT    = "/dev/ttyACM0"
 MOTOR_UART_BAUD    = 115200
 
-# UDP port that streams target position ("x,y\n")
+# UDP port that vision streams target sightings on, formatted as
+# "<distance_m>,<angle_deg>\n" — bearing is relative to the cart's camera
+# (positive = target to the right of centre). The receiver converts to
+# absolute map coordinates using the cart's current pose.
 TARGET_UDP_PORT    = 5005
+
+# Cart's fixed starting pose on the store map. The cart is physically
+# placed here before each run; odometry integrates motion from this point.
+START_POS          = [0.5, 0.5]   # metres
+START_HEADING      = 0.0          # radians (0 = +x axis, CCW positive)
 
 # =============================================================================
 # DERIVED WHEEL CONSTANTS
@@ -448,47 +461,75 @@ class MotorDriver:
 
 class TargetReceiver:
     """
-    Listens for UDP packets of the form  "x,y\n"  on TARGET_UDP_PORT.
-    The sender might be another Pi running a camera tracker, a UWB
-    anchor system, or any other localisation source.
+    Listens for UDP packets of the form  "<distance_m>,<angle_deg>\\n"
+    on TARGET_UDP_PORT.  Sender is vision/yolo_detect.py — distance is the
+    metric range to the locked target and angle is its bearing in the
+    camera frame (positive = right of centre).
+
+    A packet is considered stale after STALE_S seconds; get() returns None
+    after that so the state machine treats the target as lost.
 
     Runs in a background thread so the control loop never blocks on I/O.
     """
 
+    STALE_S = 0.5
+
     def __init__(self):
-        self._pos  = None          # None until first packet received
-        self._lock = threading.Lock()
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._reading = None       # (dist_m, angle_deg) or None
+        self._ts      = 0.0
+        self._lock    = threading.Lock()
+        self._sock    = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.bind(("", TARGET_UDP_PORT))
-        self._sock.settimeout(0.01)
+        self._sock.settimeout(0.05)
         self._thread = threading.Thread(target=self._recv_loop, daemon=True)
         self._thread.start()
         log.info(f"Target receiver listening on UDP port {TARGET_UDP_PORT}")
 
     def get(self):
-        """Return latest [x, y] or None if no packet received yet."""
+        """Return latest (distance_m, angle_deg) or None if stale/never received."""
         with self._lock:
-            return list(self._pos) if self._pos else None
+            if self._reading is None:
+                return None
+            if time.monotonic() - self._ts > self.STALE_S:
+                return None
+            return self._reading
 
     def _recv_loop(self):
         while True:
             try:
                 data, _ = self._sock.recvfrom(64)
-                x, y    = map(float, data.decode().strip().split(","))
+                dist, ang = map(float, data.decode().strip().split(","))
                 with self._lock:
-                    self._pos = [x, y]
+                    self._reading = (dist, ang)
+                    self._ts      = time.monotonic()
             except socket.timeout:
                 pass
             except Exception as e:
                 log.warning(f"Target receiver error: {e}")
 
 
+def relative_to_absolute(reading, robot_pos, robot_heading):
+    """
+    Convert a (distance_m, angle_deg) sighting from the camera frame into
+    an absolute (x, y) on the store map.
+
+    angle_deg convention (matches yolo_detect.py): 0 = straight ahead,
+    positive = target right of camera centre (clockwise from above).
+    """
+    if reading is None:
+        return None
+    dist, angle_deg = reading
+    bearing_world = robot_heading - math.radians(angle_deg)
+    return [robot_pos[0] + dist * math.cos(bearing_world),
+            robot_pos[1] + dist * math.sin(bearing_world)]
+
+
 # =============================================================================
 # ROBOT STATE  (identical to simulation, initialised here as plain variables)
 # =============================================================================
 
-robot_pos     = [0.5, 0.5]
-robot_heading = 0.0
+robot_pos     = list(START_POS)
+robot_heading = START_HEADING
 
 target_visible         = False
 last_target_pos        = list(robot_pos)
@@ -747,7 +788,8 @@ def main():
 
             # Read sensors
             pos, heading = odometry.update(DT)
-            target_xy    = receiver.get()
+            reading      = receiver.get()              # (dist_m, angle_deg) or None
+            target_xy    = relative_to_absolute(reading, pos, heading)
 
             # Run one control tick
             v_left, v_right = tick(target_xy, pos, heading)

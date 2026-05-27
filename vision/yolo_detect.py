@@ -10,6 +10,7 @@ inference path. Requires the imx500-models apt package.
 """
 
 import os
+import socket
 import time
 import argparse
 import warnings
@@ -46,6 +47,35 @@ TARGET_DIST_WEIGHT  = 1.0
 TARGET_ANGLE_WEIGHT = 0.3
 
 DIST_EMA_ALPHA = 0.4
+
+# UDP feed to Pathfinding_algorithm.py. Each frame we send the locked
+# target's (distance_m, angle_deg) — the pathfinder converts to absolute
+# map coords using the cart's odometry pose.
+PATHFINDER_HOST = "127.0.0.1"
+PATHFINDER_PORT = 5005
+
+
+class PathfinderLink:
+    """Fire-and-forget UDP sender for target detections."""
+
+    def __init__(self, host=PATHFINDER_HOST, port=PATHFINDER_PORT):
+        self._addr = (host, port)
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.setblocking(False)
+        print(f"Streaming target detections to {host}:{port}")
+
+    def send_target(self, distance_m, angle_deg):
+        line = f"{distance_m:.3f},{angle_deg:.3f}\n".encode()
+        try:
+            self._sock.sendto(line, self._addr)
+        except OSError:
+            pass   # buffer full or no listener — drop silently
+
+    def close(self):
+        try:
+            self._sock.close()
+        except Exception:
+            pass
 
 
 class IMX500Capture:
@@ -246,7 +276,8 @@ def print_header():
     print("-" * 52)
 
 
-def run(no_display=False):
+def run(no_display=False, no_udp=False,
+        pathfinder_host=PATHFINDER_HOST, pathfinder_port=PATHFINDER_PORT):
     if not RPK_MODEL_PATH.exists():
         raise SystemExit(
             f"ERROR: {RPK_MODEL_PATH} not found. Install with: sudo apt install imx500-models"
@@ -261,6 +292,7 @@ def run(no_display=False):
         frame_rate=30,
     )
     smooth_state = {}
+    link = None if no_udp else PathfinderLink(pathfinder_host, pathfinder_port)
 
     frame_idx   = 0
     frame_times = []
@@ -268,45 +300,61 @@ def run(no_display=False):
     print(f"\nTracking{quit_msg}\n")
     print_header()
 
-    while True:
-        t0 = time.time()
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        dets    = cap.get_detections()
-        tracked = tracker.update_with_detections(dets)
-        out, rows = annotate_frame(frame, tracked, smooth_state)
-
-        t1 = time.time()
-        latency_ms = (t1 - t0) * 1000
-        frame_times.append(t1)
-        if len(frame_times) > 30:
-            frame_times.pop(0)
-        fps_live = (len(frame_times) - 1) / (frame_times[-1] - frame_times[0]) if len(frame_times) > 1 else 0.0
-        cv2.putText(out, f"NPU  FPS: {fps_live:.1f}  {latency_ms:.0f}ms",
-                    (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
-
-        for role, label_id, conf, dist, angle in rows:
-            print(f"{role:<10} {label_id:<8} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
-
-        if not no_display:
-            overlay_map(out, rows)
-            cv2.imshow("Cart View", out)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+    try:
+        while True:
+            t0 = time.time()
+            ret, frame = cap.read()
+            if not ret:
                 break
 
-        frame_idx += 1
+            dets    = cap.get_detections()
+            tracked = tracker.update_with_detections(dets)
+            out, rows = annotate_frame(frame, tracked, smooth_state)
 
-    cap.release()
-    if not no_display:
-        cv2.destroyAllWindows()
+            # Stream the locked target to the pathfinder. Only the row tagged
+            # "TARGET" goes on the wire — obstacles are drawn but not sent.
+            target_row = next((r for r in rows if r[0] == "TARGET"), None)
+            if link is not None and target_row is not None:
+                _role, _id, _conf, t_dist, t_angle = target_row
+                link.send_target(t_dist, t_angle)
+
+            t1 = time.time()
+            latency_ms = (t1 - t0) * 1000
+            frame_times.append(t1)
+            if len(frame_times) > 30:
+                frame_times.pop(0)
+            fps_live = (len(frame_times) - 1) / (frame_times[-1] - frame_times[0]) if len(frame_times) > 1 else 0.0
+            cv2.putText(out, f"NPU  FPS: {fps_live:.1f}  {latency_ms:.0f}ms",
+                        (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
+
+            for role, label_id, conf, dist, angle in rows:
+                print(f"{role:<10} {label_id:<8} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
+
+            if not no_display:
+                overlay_map(out, rows)
+                cv2.imshow("Cart View", out)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+
+            frame_idx += 1
+    finally:
+        if link is not None:
+            link.close()
+        cap.release()
+        if not no_display:
+            cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SSD person tracker on IMX500 NPU + ByteTrack")
     parser.add_argument("--no-display", dest="no_display", action="store_true",
                         help="suppress cv2 windows (headless / SSH use) — auto-enabled if no DISPLAY")
+    parser.add_argument("--no-udp", dest="no_udp", action="store_true",
+                        help="do not stream target detections over UDP to the pathfinder")
+    parser.add_argument("--pathfinder-host", default=PATHFINDER_HOST,
+                        help=f"UDP host for Pathfinding_algorithm.py (default: {PATHFINDER_HOST})")
+    parser.add_argument("--pathfinder-port", type=int, default=PATHFINDER_PORT,
+                        help=f"UDP port for Pathfinding_algorithm.py (default: {PATHFINDER_PORT})")
     args = parser.parse_args()
 
     # Auto-detect headless environments (e.g. SSH without X forwarding) so the
@@ -315,4 +363,7 @@ if __name__ == "__main__":
         args.no_display = True
         print("No display detected — running headless (use --no-display to silence this message).")
 
-    run(no_display=args.no_display)
+    run(no_display=args.no_display,
+        no_udp=args.no_udp,
+        pathfinder_host=args.pathfinder_host,
+        pathfinder_port=args.pathfinder_port)
