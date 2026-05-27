@@ -18,8 +18,17 @@ log = logging.getLogger("robot")
 # ~~HARDWARE~~  PHYSICAL PARAMETERS  — measure and set these for your robot
 # =============================================================================
 
-WHEEL_DIAMETER_M   = 0.10      # metres  (e.g. 100 mm wheel)
-WHEEL_TRACK_M      = 0.35      # metres  centre-to-centre between drive wheels
+INCH_TO_M         = 0.0254
+
+WHEEL_DIAMETER_IN  = 3.0       # inches, measured wheel diameter
+WHEEL_TRACK_IN     = 13.0      # inches, measured between inside faces of wheels
+WHEEL_DIAMETER_M   = WHEEL_DIAMETER_IN * INCH_TO_M
+
+# Differential-drive kinematics normally want centre-to-centre wheel spacing.
+# You gave inside-to-inside spacing, so this uses 13 in as the rough/effective
+# track. Replace with inside spacing + wheel/tire width when that measurement
+# is available.
+WHEEL_TRACK_M      = WHEEL_TRACK_IN * INCH_TO_M
 ENCODER_PPR        = 360       # pulses per full wheel revolution (after gearbox)
 
 # Encoders are wired to the ESP32, not the Pi GPIO. The ESP32 streams
@@ -31,12 +40,10 @@ ESP32_ENC_LEFT_B   = 33   # ENC_B
 ESP32_ENC_RIGHT_A  = 25   # ENC_C on dual_motor_test.ino (M2)
 ESP32_ENC_RIGHT_B  = 26   # ENC_D
 
-# Serial port for the ESP32 motor controller (over micro-USB).
-# Dev boards with a CP2102 / CH340 USB-UART bridge enumerate as
-# /dev/ttyUSB0; boards using the native ESP32-S2/S3 USB peripheral
-# enumerate as /dev/ttyACM0. Check `ls /dev/ttyUSB* /dev/ttyACM*` after
-# plugging in if unsure. Matching firmware: firmware/cart_motor/.
-MOTOR_UART_PORT    = "/dev/ttyUSB0"
+# Serial port for the ESP32 motor controller (USB CDC over micro-USB).
+# On the Pi the ESP32 enumerates as /dev/ttyACM0 (or /dev/ttyUSB0 on some
+# adapters). Matching firmware lives in firmware/cart_motor/.
+MOTOR_UART_PORT    = "/dev/ttyACM0"
 MOTOR_UART_BAUD    = 115200
 
 # UDP port that vision streams target sightings on, formatted as
@@ -47,30 +54,39 @@ TARGET_UDP_PORT    = 5005
 
 # Cart's fixed starting pose on the store map. The cart is physically
 # placed here before each run; odometry integrates motion from this point.
-START_POS          = [0.5, 0.5]   # metres
+START_POS          = [0.0, 0.0]   # metres; odometry integrates from this origin
 START_HEADING      = 0.0          # radians (0 = +x axis, CCW positive)
 
 # =============================================================================
 # DERIVED WHEEL CONSTANTS
 # =============================================================================
 
-WHEEL_CIRCUMFERENCE_M = math.pi * WHEEL_DIAMETER_M   # metres per revolution
+WHEEL_CIRCUMFERENCE_M = math.pi * WHEEL_DIAMETER_M   # metres per wheel revolution
 # Metres of travel per encoder pulse
 METRES_PER_PULSE      = WHEEL_CIRCUMFERENCE_M / ENCODER_PPR
-# For a point turn: robot rotates (arc_length / track) radians
-# arc_length per pulse on one wheel = METRES_PER_PULSE
-RADIANS_PER_PULSE     = METRES_PER_PULSE / (WHEEL_TRACK_M / 2.0)
+
+# Robot rotation calibration for point turns. For a differential drive with
+# equal and opposite wheel motion:
+#   wheel_rotations_per_robot_degree = wheel_track / (360 * wheel_diameter)
+# With 13 in effective track and 3 in wheels, this is about 0.012037 rev/deg.
+WHEEL_ROTATIONS_PER_ROBOT_DEGREE = WHEEL_TRACK_IN / (360.0 * WHEEL_DIAMETER_IN)
+WHEEL_ROTATIONS_PER_90_DEGREES   = WHEEL_ROTATIONS_PER_ROBOT_DEGREE * 90.0
+PULSES_PER_ROBOT_DEGREE          = WHEEL_ROTATIONS_PER_ROBOT_DEGREE * ENCODER_PPR
+
+# For counter-rotating wheels, robot radians per equal/opposite wheel pulse.
+RADIANS_PER_COUNTERROTATION_PULSE = (2.0 * METRES_PER_PULSE) / WHEEL_TRACK_M
 
 # =============================================================================
 # MAP SETTINGS  (must match your physical warehouse layout)
 # =============================================================================
 
 chunk_size   = 0.1          # metres per chunk cell
-map_size     = [20, 20]     # [width, height] in metres
+map_size     = [5, 5]     # [width, height] in metres
 FREE         = 1
 BLOCKED      = 0
 aisle_width  = 1.0          # metres
-aisle_amount = 10
+aisle_amount = 3
+PEEK_SWEEP_RAD = math.radians(90.0)
 
 cols = int(map_size[0] / chunk_size)
 rows = int(map_size[1] / chunk_size)
@@ -119,10 +135,9 @@ AISLE_Y_CENTRES = sorted(set(AISLE_Y_CENTRES))
 
 ROBOT_SPEED_MPS  = 1.5              # maximum forward speed  m/s
 TURN_SPEED_RAD   = math.radians(180.0)   # maximum turn rate  rad/s
-FOV_DEG          = 60.0
-FOV_RAD          = math.radians(FOV_DEG)
+# Used only for aisle peek/sweep behavior.
 DT               = 0.1              # control loop period  seconds
-ARRIVE_THRESH    = 0.18             # waypoint arrival radius  metres
+ARRIVE_THRESH    = 1.5             # waypoint arrival radius  metres
 ALIGN_THRESH_RAD = math.radians(5.0)  # must be within this to start moving
 
 # =============================================================================
@@ -165,26 +180,6 @@ def angle_diff(a, b):
 def bearing_to(frm, to):
     return math.atan2(to[1] - frm[1], to[0] - frm[0])
 
-def line_of_sight_clear(from_pos, to_pos):
-    fx, fy = from_pos
-    tx, ty = to_pos
-    dist = math.hypot(tx - fx, ty - fy)
-    if dist < 1e-6:
-        return True
-    steps = max(int(dist / (chunk_size * 0.5)), 2)
-    for i in range(steps + 1):
-        t  = i / steps
-        pt = [fx + t * (tx - fx), fy + t * (ty - fy)]
-        if not is_valid_chunk(world_to_chunk(pt)):
-            return False
-    return True
-
-def target_in_fov(heading_rad, robot_pos, tgt_pos):
-    b = bearing_to(robot_pos, tgt_pos)
-    if abs(angle_diff(b, heading_rad)) > FOV_RAD / 2.0:
-        return False
-    return line_of_sight_clear(robot_pos, tgt_pos)
-
 def is_on_edge(pos):
     return pos[0] < aisle_width or pos[0] > map_size[0] - aisle_width
 
@@ -220,7 +215,7 @@ def edge_x_centre(pos):
 
 def peek_sweep_bounds(edge_pos):
     perp       = inward_heading(edge_pos)
-    half_sweep = math.atan2(aisle_width / 2.0, aisle_width) + FOV_RAD / 2.0
+    half_sweep = math.atan2(aisle_width / 2.0, aisle_width) + PEEK_SWEEP_RAD / 2.0
     half_sweep = min(half_sweep, math.pi / 2.0)
     return perp - half_sweep, perp + half_sweep
 
@@ -351,22 +346,27 @@ def wheel_speed_to_rpm(v_wheel):
 
 class Odometry:
     """
-    Dead-reckoning odometry from wheel encoder pulse counts.
-    On a real Pi, read encoder ticks from GPIO interrupts or a
-    dedicated encoder library (e.g. pigpio, RPi.GPIO).
+    Dead-reckoning odometry from signed wheel encoder counts.
 
-    This class is a stub — replace _read_encoder_deltas() with
-    real GPIO reads.
+    The ESP32 is expected to stream encoder data over the same serial link as
+    the motor commands using lines like:
+
+        E,<left_count>,<right_count>
+
+    By default the counts are treated as cumulative counts since boot. If your
+    firmware sends per-loop deltas instead, set ENCODER_COUNTS_ARE_CUMULATIVE
+    to False.
     """
 
-    def __init__(self, start_pos, start_heading):
+    def __init__(self, start_pos, start_heading, encoder_reader=None):
         self.x       = start_pos[0]
         self.y       = start_pos[1]
         self.heading = start_heading   # radians
+        self._encoder_reader = encoder_reader
 
     def update(self, dt):
         """
-        Call once per tick.  Reads encoder deltas and integrates position.
+        Call once per tick. Reads encoder deltas and integrates position.
         Returns (pos, heading).
         """
         delta_left, delta_right = self._read_encoder_deltas()
@@ -379,27 +379,24 @@ class Odometry:
         d_centre = (d_left + d_right) / 2.0
         d_theta  = (d_right - d_left) / WHEEL_TRACK_M
 
-        # Integrate pose
+        # Integrate pose using midpoint heading for better accuracy during arcs.
+        mid_heading = self.heading + d_theta / 2.0
+        self.x      += d_centre * math.cos(mid_heading)
+        self.y      += d_centre * math.sin(mid_heading)
         self.heading = (self.heading + d_theta) % (2 * math.pi)
-        self.x      += d_centre * math.cos(self.heading)
-        self.y      += d_centre * math.sin(self.heading)
 
         return [self.x, self.y], self.heading
 
     def _read_encoder_deltas(self):
-        """
-        ~~HARDWARE~~
-        Return (left_pulses, right_pulses) since the last call.
-        Replace this stub with real GPIO encoder reads, e.g.:
+        if self._encoder_reader is None:
+            return 0, 0
+        return self._encoder_reader()
 
-            # Using pigpio:
-            left  = encoder_left.get_and_reset()
-            right = encoder_right.get_and_reset()
-            return left, right
-        """
-        # Stub: returns zero movement
-        return 0, 0
 
+# ESP32 encoder count interpretation.
+# True  = ESP32 sends cumulative signed counts: E,<left_total>,<right_total>
+# False = ESP32 sends signed deltas since previous packet: E,<left_delta>,<right_delta>
+ENCODER_COUNTS_ARE_CUMULATIVE = True
 
 # =============================================================================
 # ~~HARDWARE~~  MOTOR DRIVER  — replace with your UART/I2C protocol
@@ -407,42 +404,94 @@ class Odometry:
 
 class MotorDriver:
     """
-    Sends left/right velocity commands to a motor driver over UART.
+    Sends left/right velocity commands to the ESP32 over UART and reads encoder
+    count packets from the same serial connection.
 
-    Default protocol: "L<v_left_rpm> R<v_right_rpm>\n"
-    Change send_velocities() to match your driver's protocol.
+    Outbound protocol:
+        L<left_rpm> R<right_rpm>
+
+    Inbound encoder protocol:
+        E,<left_count>,<right_count>
     """
 
     def __init__(self, port, baud):
         self._port = port
         self._baud = baud
         self._ser  = None
+        self._last_left_count = None
+        self._last_right_count = None
+        self._pending_left_delta = 0
+        self._pending_right_delta = 0
         self._connect()
 
     def _connect(self):
         try:
             import serial
-            self._ser = serial.Serial(self._port, self._baud, timeout=0.05)
-            log.info(f"Motor driver connected on {self._port} at {self._baud} baud")
+            self._ser = serial.Serial(self._port, self._baud, timeout=0.01)
+            log.info(f"ESP32 motor/encoder link connected on {self._port} at {self._baud} baud")
         except Exception as e:
-            log.warning(f"Motor driver not available ({e}) — commands will be logged only")
+            log.warning(f"ESP32 motor/encoder link not available ({e}) — commands will be logged only")
             self._ser = None
+
+    def _poll_serial(self):
+        """Read any queued encoder packets without blocking."""
+        if not (self._ser and self._ser.is_open):
+            return
+
+        while self._ser.in_waiting:
+            try:
+                line = self._ser.readline().decode(errors="ignore").strip()
+            except Exception as e:
+                log.warning(f"Serial read error: {e}")
+                return
+
+            if not line:
+                return
+
+            if not line.startswith("E,"):
+                log.debug(f"Ignoring serial line from ESP32: {line}")
+                continue
+
+            try:
+                _, left_s, right_s = line.split(",", 2)
+                left_count = int(left_s)
+                right_count = int(right_s)
+            except ValueError:
+                log.warning(f"Bad encoder packet: {line}")
+                continue
+
+            if ENCODER_COUNTS_ARE_CUMULATIVE:
+                if self._last_left_count is None or self._last_right_count is None:
+                    delta_left = 0
+                    delta_right = 0
+                else:
+                    delta_left = left_count - self._last_left_count
+                    delta_right = right_count - self._last_right_count
+                self._last_left_count = left_count
+                self._last_right_count = right_count
+            else:
+                delta_left = left_count
+                delta_right = right_count
+
+            self._pending_left_delta += delta_left
+            self._pending_right_delta += delta_right
+
+    def read_encoder_deltas(self):
+        """
+        Return signed encoder pulse deltas accumulated since the last odometry
+        update. Positive should mean the wheel moved the robot forward.
+        """
+        self._poll_serial()
+        delta_left = self._pending_left_delta
+        delta_right = self._pending_right_delta
+        self._pending_left_delta = 0
+        self._pending_right_delta = 0
+        return delta_left, delta_right
 
     def send_velocities(self, v_left_ms, v_right_ms):
         """
-        ~~HARDWARE~~
-        Convert m/s to whatever your driver expects and send it.
-
-        Example for a Roboclaw (sends RPM targets):
-            rpm_l = wheel_speed_to_rpm(v_left_ms)
-            rpm_r = wheel_speed_to_rpm(v_right_ms)
-            cmd = f"L{rpm_l:.1f} R{rpm_r:.1f}\n"
-
-        Example for PWM-only driver (you add a PID loop here):
-            duty_l = self._pid_left.update(v_left_ms, measured_left_ms)
-            duty_r = self._pid_right.update(v_right_ms, measured_right_ms)
-            GPIO.output(LEFT_PWM_PIN, duty_l)
-            ...
+        Convert left/right wheel surface speeds in m/s to wheel RPM targets.
+        Adjust signs or protocol here to match the ESP32 firmware.
         """
         rpm_l = wheel_speed_to_rpm(v_left_ms)
         rpm_r = wheel_speed_to_rpm(v_right_ms)
@@ -455,7 +504,6 @@ class MotorDriver:
 
     def stop(self):
         self.send_velocities(0.0, 0.0)
-
 
 # =============================================================================
 # ~~HARDWARE~~  TARGET POSITION RECEIVER  — replace with your localisation feed
@@ -587,16 +635,13 @@ def tick(target_xy, sensor_pos, sensor_heading):
     robot_heading = sensor_heading
 
     # -------------------------------------------------------------------------
-    # 2. SENSE — check FOV against received target position
+    # 2. SENSE — target packets are already valid sightings
     # -------------------------------------------------------------------------
-    if target_xy is not None:
-        in_fov = target_in_fov(robot_heading, robot_pos, target_xy)
-    else:
-        in_fov = False
+    # Do not re-check whether the target is inside the camera field of view.
+    # If vision sends a target packet, it is considered visible.
+    target_visible = target_xy is not None
 
-    target_visible = in_fov
-
-    if in_fov:
+    if target_visible:
         last_target_pos        = list(target_xy)
         last_seen_bearing      = bearing_to(robot_pos, target_xy)
         last_seen_angle_in_fov = angle_diff(last_seen_bearing, robot_heading)
@@ -617,7 +662,7 @@ def tick(target_xy, sensor_pos, sensor_heading):
     # -------------------------------------------------------------------------
     # 5. STATE TRANSITIONS
     # -------------------------------------------------------------------------
-    if in_fov:
+    if target_visible:
         if robot_state != S_IN_VIEW:
             lost           = False
             aisles_checked = [False] * len(AISLE_Y_CENTRES)
@@ -647,12 +692,15 @@ def tick(target_xy, sensor_pos, sensor_heading):
     new_heading = robot_heading   # heading the state machine wants next tick
 
     if robot_state == S_IN_VIEW:
-        want        = bearing_to(robot_pos, target_xy or last_target_pos)
+        visible_target = target_xy or last_target_pos
+        want        = bearing_to(robot_pos, visible_target)
         new_heading = rotate_toward(robot_heading, want, DT)
         omega       = angle_diff(new_heading, robot_heading) / DT
 
-        if abs(angle_diff(robot_heading, want)) < FOV_RAD / 2.0:
-            robot_route = build_route(robot_pos, target_xy or last_target_pos)
+        # Move only after basic heading alignment; do not use camera FOV as
+        # a second visibility check.
+        if abs(angle_diff(robot_heading, want)) < ALIGN_THRESH_RAD:
+            robot_route = build_route(robot_pos, visible_target)
             v_forward   = ROBOT_SPEED_MPS
         goal_coords = [list(target_xy)] if target_xy else goal_coords
 
@@ -774,15 +822,21 @@ def tick(target_xy, sensor_pos, sensor_heading):
 # =============================================================================
 
 def main():
-    odometry = Odometry(start_pos=robot_pos, start_heading=robot_heading)
     motors   = MotorDriver(MOTOR_UART_PORT, MOTOR_UART_BAUD)
+    odometry = Odometry(
+        start_pos=robot_pos,
+        start_heading=robot_heading,
+        encoder_reader=motors.read_encoder_deltas,
+    )
     receiver = TargetReceiver()
 
     log.info("Control loop starting.  Press Ctrl-C to stop.")
-    log.info(f"Wheel diameter : {WHEEL_DIAMETER_M*100:.0f} mm")
-    log.info(f"Wheel track    : {WHEEL_TRACK_M*100:.0f} mm  (centre to centre)")
+    log.info(f"Wheel diameter : {WHEEL_DIAMETER_IN:.2f} in ({WHEEL_DIAMETER_M*1000:.1f} mm)")
+    log.info(f"Wheel track    : {WHEEL_TRACK_IN:.2f} in effective ({WHEEL_TRACK_M*1000:.1f} mm)")
     log.info(f"Encoder PPR    : {ENCODER_PPR}")
     log.info(f"m/pulse        : {METRES_PER_PULSE*1000:.3f} mm")
+    log.info(f"wheel rev/deg  : {WHEEL_ROTATIONS_PER_ROBOT_DEGREE:.6f} rev per robot degree")
+    log.info(f"wheel rev/90°  : {WHEEL_ROTATIONS_PER_90_DEGREES:.3f} rev per wheel")
 
     try:
         while True:
