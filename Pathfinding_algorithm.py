@@ -81,10 +81,10 @@ RADIANS_PER_COUNTERROTATION_PULSE = (2.0 * METRES_PER_PULSE) / WHEEL_TRACK_M
 # =============================================================================
 
 chunk_size   = 0.1          # metres per chunk cell
-map_size     = [5, 5]     # [width, height] in metres
+map_size     = [5, 5]     # [width, height] in meters
 FREE         = 1
 BLOCKED      = 0
-aisle_width  = 1.0          # metres
+aisle_width  = 1.0          # meters
 aisle_amount = 3
 PEEK_SWEEP_RAD = math.radians(90.0)
 
@@ -133,11 +133,11 @@ AISLE_Y_CENTRES = sorted(set(AISLE_Y_CENTRES))
 # CONTROLLER PARAMETERS
 # =============================================================================
 
-ROBOT_SPEED_MPS  = 1.5              # maximum forward speed  m/s
+ROBOT_SPEED_MPS  = 0.5              # maximum forward speed  m/s
 TURN_SPEED_RAD   = math.radians(180.0)   # maximum turn rate  rad/s
 # Used only for aisle peek/sweep behavior.
 DT               = 0.1              # control loop period  seconds
-ARRIVE_THRESH    = 1.5             # waypoint arrival radius  metres
+ARRIVE_THRESH    = 1.5             # waypoint arrival radius  meters
 ALIGN_THRESH_RAD = math.radians(5.0)  # must be within this to start moving
 
 # =============================================================================
