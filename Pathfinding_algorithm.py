@@ -29,7 +29,13 @@ WHEEL_DIAMETER_M   = WHEEL_DIAMETER_IN * INCH_TO_M
 # track. Replace with inside spacing + wheel/tire width when that measurement
 # is available.
 WHEEL_TRACK_M      = WHEEL_TRACK_IN * INCH_TO_M
-ENCODER_PPR        = 360       # pulses per full wheel revolution (after gearbox)
+# Pulses per full output-shaft (wheel) revolution.
+# JGB37 motors: 11 magnetic-disc cycles per *motor* turn, × 4 because the
+# firmware quadrature-decodes (4 edges per cycle on A+B), × gearbox ratio.
+# Edit the GEAR_RATIO once you confirm yours from the sticker on the gearbox
+# (common JGB37 ratios: 5, 10, 15, 30, 50, 90, 131, 178, 270).
+GEAR_RATIO         = 5         # ← UPDATE to match your motor
+ENCODER_PPR        = 11 * 4 * GEAR_RATIO
 
 # Encoders are wired to the ESP32, not the Pi GPIO. The ESP32 streams
 # encoder counts back over USB serial (line format: "E,<left>,<right>\n").

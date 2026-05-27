@@ -48,11 +48,50 @@ TB9051FTGMotorCarrier rightMotor(RIGHT_PWM1, RIGHT_PWM2);
 volatile long leftCount  = 0;
 volatile long rightCount = 0;
 
-void IRAM_ATTR leftISR()  {
-  leftCount  += (digitalRead(LEFT_ENC_B)  == HIGH) ?  1 : -1;
+volatile uint8_t leftEncState  = 0;
+volatile uint8_t rightEncState = 0;
+
+// Flip a sign if "forward" motion produces a negative count for that wheel.
+#define LEFT_ENC_DIR   1
+#define RIGHT_ENC_DIR  1
+
+int8_t IRAM_ATTR quadratureDelta(uint8_t previous, uint8_t current) {
+  // Two-bit (A << 1 | B) state machine; valid forward / reverse transitions
+  // return +1 / -1, anything else (no movement, noisy double-edge) returns 0.
+  switch ((previous << 2) | current) {
+    case 0b0001:
+    case 0b0111:
+    case 0b1110:
+    case 0b1000:
+      return 1;
+    case 0b0010:
+    case 0b1011:
+    case 0b1101:
+    case 0b0100:
+      return -1;
+    default:
+      return 0;
+  }
 }
+
+uint8_t IRAM_ATTR readLeftEncoderState() {
+  return (digitalRead(LEFT_ENC_A) << 1) | digitalRead(LEFT_ENC_B);
+}
+
+uint8_t IRAM_ATTR readRightEncoderState() {
+  return (digitalRead(RIGHT_ENC_A) << 1) | digitalRead(RIGHT_ENC_B);
+}
+
+void IRAM_ATTR leftISR() {
+  uint8_t cur = readLeftEncoderState();
+  leftCount += LEFT_ENC_DIR * quadratureDelta(leftEncState, cur);
+  leftEncState = cur;
+}
+
 void IRAM_ATTR rightISR() {
-  rightCount += (digitalRead(RIGHT_ENC_B) == HIGH) ?  1 : -1;
+  uint8_t cur = readRightEncoderState();
+  rightCount += RIGHT_ENC_DIR * quadratureDelta(rightEncState, cur);
+  rightEncState = cur;
 }
 
 // ── Tunables ──────────────────────────────────────────────────
@@ -112,8 +151,15 @@ void setup() {
   pinMode(LEFT_ENC_B,  INPUT_PULLUP);
   pinMode(RIGHT_ENC_A, INPUT_PULLUP);
   pinMode(RIGHT_ENC_B, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(LEFT_ENC_A),  leftISR,  RISING);
-  attachInterrupt(digitalPinToInterrupt(RIGHT_ENC_A), rightISR, RISING);
+
+  // Seed the quadrature state machines with the current pin levels, then
+  // attach CHANGE-edge ISRs on all four lines for full 4x decoding.
+  leftEncState  = readLeftEncoderState();
+  rightEncState = readRightEncoderState();
+  attachInterrupt(digitalPinToInterrupt(LEFT_ENC_A),  leftISR,  CHANGE);
+  attachInterrupt(digitalPinToInterrupt(LEFT_ENC_B),  leftISR,  CHANGE);
+  attachInterrupt(digitalPinToInterrupt(RIGHT_ENC_A), rightISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(RIGHT_ENC_B), rightISR, CHANGE);
 
   stopMotors();
   Serial.println("cart_motor ready");
