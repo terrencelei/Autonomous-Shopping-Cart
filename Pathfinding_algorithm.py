@@ -31,10 +31,12 @@ ESP32_ENC_LEFT_B   = 33   # ENC_B
 ESP32_ENC_RIGHT_A  = 25   # ENC_C on dual_motor_test.ino (M2)
 ESP32_ENC_RIGHT_B  = 26   # ENC_D
 
-# Serial port for the ESP32 motor controller (USB CDC over micro-USB).
-# On the Pi the ESP32 enumerates as /dev/ttyACM0 (or /dev/ttyUSB0 on some
-# adapters). Matching firmware lives in firmware/cart_motor/.
-MOTOR_UART_PORT    = "/dev/ttyACM0"
+# Serial port for the ESP32 motor controller (over micro-USB).
+# Dev boards with a CP2102 / CH340 USB-UART bridge enumerate as
+# /dev/ttyUSB0; boards using the native ESP32-S2/S3 USB peripheral
+# enumerate as /dev/ttyACM0. Check `ls /dev/ttyUSB* /dev/ttyACM*` after
+# plugging in if unsure. Matching firmware: firmware/cart_motor/.
+MOTOR_UART_PORT    = "/dev/ttyUSB0"
 MOTOR_UART_BAUD    = 115200
 
 # UDP port that vision streams target sightings on, formatted as
