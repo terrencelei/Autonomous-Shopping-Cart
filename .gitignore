@@ -26,6 +26,7 @@ logs/
 pathfinding_sim.mp4
 pathfinding_arc_test.png
 pathfinding_arc_test_trajectory.png
+pathfinding_arc_test_motors.png
 
 # vision — exclude dataset, training runs, output videos/images, and large weights
 vision/Shopping-Cart-1/

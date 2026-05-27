@@ -109,6 +109,9 @@ def run(drive=True, port=None, countdown=3):
     v_fwds, omegas, v_lefts, v_rights = [], [], [], []
     states         = []
     in_fovs        = []
+    enc_left_cum, enc_right_cum = [], []
+    enc_left_delta, enc_right_delta = [], []
+    cum_l, cum_r = 0, 0
 
     n_steps = int(TOTAL_S / P.DT)
     try:
@@ -123,6 +126,15 @@ def run(drive=True, port=None, countdown=3):
 
         if motors is not None:
             motors.send_velocities(v_left, v_right)
+            d_l, d_r = motors.read_encoder_deltas()
+        else:
+            d_l, d_r = 0, 0
+        cum_l += d_l
+        cum_r += d_r
+        enc_left_delta.append(d_l)
+        enc_right_delta.append(d_r)
+        enc_left_cum.append(cum_l)
+        enc_right_cum.append(cum_r)
 
         # Record what was commanded for this state
         times.append(t)
@@ -158,6 +170,9 @@ def run(drive=True, port=None, countdown=3):
         v_fwd=v_fwds, omega=omegas,
         v_left=v_lefts, v_right=v_rights,
         state=states, in_fov=in_fovs,
+        enc_l_cum=enc_left_cum, enc_r_cum=enc_right_cum,
+        enc_l_delta=enc_left_delta, enc_r_delta=enc_right_delta,
+        drove=(motors is not None),
     )
 
 
@@ -276,6 +291,41 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     plt.savefig(traj_path, dpi=110, bbox_inches='tight')
     print(f"Saved: {traj_path}")
 
+    # ── Motor / encoder plot ───────────────────────────────
+    if data.get('drove'):
+        cmd_rpm_l = [P.wheel_speed_to_rpm(v) for v in data['v_left']]
+        cmd_rpm_r = [P.wheel_speed_to_rpm(v) for v in data['v_right']]
+        # Measured RPM from this tick's encoder delta
+        meas_rpm_l = [d / P.DT / P.ENCODER_PPR * 60.0
+                      for d in data['enc_l_delta']]
+        meas_rpm_r = [d / P.DT / P.ENCODER_PPR * 60.0
+                      for d in data['enc_r_delta']]
+
+        fig3, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
+        ax_cum, ax_rpm = axes
+
+        ax_cum.plot(data['t'], data['enc_l_cum'], 'b-', label='left encoder')
+        ax_cum.plot(data['t'], data['enc_r_cum'], 'r-', label='right encoder')
+        ax_cum.set_ylabel('cumulative ticks')
+        ax_cum.set_title('Encoder counts')
+        ax_cum.grid(True, alpha=0.3)
+        ax_cum.legend(fontsize=9)
+
+        ax_rpm.plot(data['t'], cmd_rpm_l,  'b--', lw=1.2, label='left commanded')
+        ax_rpm.plot(data['t'], meas_rpm_l, 'b-',  lw=1.2, label='left measured')
+        ax_rpm.plot(data['t'], cmd_rpm_r,  'r--', lw=1.2, label='right commanded')
+        ax_rpm.plot(data['t'], meas_rpm_r, 'r-',  lw=1.2, label='right measured')
+        ax_rpm.set_xlabel('time (s)')
+        ax_rpm.set_ylabel('RPM')
+        ax_rpm.set_title('Commanded vs measured wheel RPM')
+        ax_rpm.grid(True, alpha=0.3)
+        ax_rpm.legend(fontsize=8, ncol=2)
+
+        motors_path = out_path.replace('.png', '_motors.png')
+        plt.tight_layout()
+        plt.savefig(motors_path, dpi=110, bbox_inches='tight')
+        print(f"Saved: {motors_path}")
+
     # Numerical summary
     in_view_pct = 100.0 * sum(data['in_fov']) / len(data['in_fov'])
     print(f"\nSummary over {TOTAL_S:.1f} s, {len(data['t'])} ticks:")
@@ -285,6 +335,11 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     print(f"  mean v_forward (when commanded) : "
           f"{np.mean([v for v in data['v_fwd'] if v > 0.01]):.2f} m/s")
     print(f"  max  |omega|          : {math.degrees(max(abs(w) for w in data['omega'])):.1f} deg/s")
+    if data.get('drove'):
+        rev_l = data['enc_l_cum'][-1] / P.ENCODER_PPR
+        rev_r = data['enc_r_cum'][-1] / P.ENCODER_PPR
+        print(f"  left wheel revolutions : {rev_l:+.2f}  ({data['enc_l_cum'][-1]:+d} ticks)")
+        print(f"  right wheel revolutions: {rev_r:+.2f}  ({data['enc_r_cum'][-1]:+d} ticks)")
 
 
 if __name__ == "__main__":
