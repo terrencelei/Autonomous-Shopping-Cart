@@ -184,6 +184,47 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     plt.savefig(out_path, dpi=100, bbox_inches='tight')
     print(f"Saved: {out_path}")
 
+    # Standalone trajectory plot ────────────────────────────
+    fig2, ax2 = plt.subplots(figsize=(7, 7))
+    arc_circle = plt.Circle(ARC_CENTRE, ARC_RADIUS,
+                             color='crimson', fill=False, ls=':', alpha=0.4,
+                             label='target arc')
+    ax2.add_patch(arc_circle)
+    ax2.plot(data['tx'], data['ty'], 'r--', lw=1.2, label='target path')
+    ax2.plot(data['rx'], data['ry'], 'b-',  lw=2.0, label='cart path')
+    ax2.scatter([data['rx'][0]], [data['ry'][0]], c='blue',  marker='o', s=90,
+                label='cart start', zorder=5)
+    ax2.scatter([data['rx'][-1]], [data['ry'][-1]], c='blue', marker='s', s=90,
+                label='cart end',   zorder=5)
+    ax2.scatter([data['tx'][0]], [data['ty'][0]], c='red',   marker='x', s=90,
+                label='target start', zorder=5)
+
+    every = max(1, int(1.0 / P.DT))   # 1 s heading samples
+    for i in range(0, len(data['t']), every):
+        x, y, th = data['rx'][i], data['ry'][i], data['rt'][i]
+        ax2.annotate('', xy=(x + 0.3*math.cos(th), y + 0.3*math.sin(th)),
+                     xytext=(x, y),
+                     arrowprops=dict(arrowstyle='->', color='royalblue',
+                                     lw=1.2, alpha=0.55))
+
+    ax2.set_aspect('equal')
+    pad = 1.0
+    xs = data['rx'] + data['tx']; ys = data['ry'] + data['ty']
+    ax2.set_xlim(min(xs) - pad, max(xs) + pad)
+    ax2.set_ylim(min(ys) - pad, max(ys) + pad)
+    ax2.set_xlabel('x (m)'); ax2.set_ylabel('y (m)')
+    ax2.set_title(
+        f'Cart trajectory  (cart cap {P.ROBOT_SPEED_MPS} m/s,  '
+        f'target {ARC_OMEGA*ARC_RADIUS:.2f} m/s on arc r={ARC_RADIUS}m)'
+    )
+    ax2.legend(loc='upper right', fontsize=9)
+    ax2.grid(True, alpha=0.3)
+
+    traj_path = out_path.replace('.png', '_trajectory.png')
+    plt.tight_layout()
+    plt.savefig(traj_path, dpi=110, bbox_inches='tight')
+    print(f"Saved: {traj_path}")
+
     # Numerical summary
     in_view_pct = 100.0 * sum(data['in_fov']) / len(data['in_fov'])
     print(f"\nSummary over {TOTAL_S:.1f} s, {len(data['t'])} ticks:")
