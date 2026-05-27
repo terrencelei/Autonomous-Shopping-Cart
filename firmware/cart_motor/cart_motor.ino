@@ -104,10 +104,14 @@ void setup() {
   leftMotor.enable();
   rightMotor.enable();
 
-  pinMode(LEFT_ENC_A,  INPUT);
-  pinMode(LEFT_ENC_B,  INPUT);
-  pinMode(RIGHT_ENC_A, INPUT);
-  pinMode(RIGHT_ENC_B, INPUT);
+  // INPUT_PULLUP — not plain INPUT — so a disconnected or open-drain
+  // encoder doesn't pick up PWM noise from neighbouring motor pins as
+  // phantom edges. Replace with INPUT if you're using a push-pull
+  // (totem-pole) encoder with its own external pull-down.
+  pinMode(LEFT_ENC_A,  INPUT_PULLUP);
+  pinMode(LEFT_ENC_B,  INPUT_PULLUP);
+  pinMode(RIGHT_ENC_A, INPUT_PULLUP);
+  pinMode(RIGHT_ENC_B, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(LEFT_ENC_A),  leftISR,  RISING);
   attachInterrupt(digitalPinToInterrupt(RIGHT_ENC_A), rightISR, RISING);
 
