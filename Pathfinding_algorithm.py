@@ -134,7 +134,7 @@ AISLE_Y_CENTRES = sorted(set(AISLE_Y_CENTRES))
 # =============================================================================
 
 ROBOT_SPEED_MPS  = 0.5              # maximum forward speed  m/s
-TURN_SPEED_RAD   = math.radians(180.0)   # maximum turn rate  rad/s
+TURN_SPEED_RAD   = math.radians(90.0)   # maximum turn rate  rad/s
 # Used only for aisle peek/sweep behavior.
 DT               = 0.1              # control loop period  seconds
 ARRIVE_THRESH    = 1.5             # waypoint arrival radius  meters
