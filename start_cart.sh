@@ -57,7 +57,7 @@ sleep 2
 
 echo "Starting vision     → $VISION_LOG"
 ( cd vision && setsid python3 -u yolo_detect.py $YOLO_FLAGS \
-    > "../$VISION_LOG" 2>&1 < /dev/null & echo $! > "../$VISION_PID_FILE" )
+    > "../$VISION_LOG" 2>&1 < /dev/null & echo $! > "$VISION_PID_FILE" )
 
 echo ""
 echo "Running:"
