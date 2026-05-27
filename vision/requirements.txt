@@ -1,2 +1,3 @@
 opencv-python
 supervision
+pyserial    # used by Pathfinding_algorithm.py to talk to the ESP32

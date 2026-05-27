@@ -19,6 +19,9 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Runtime logs from start_cart.sh
+logs/
+
 # vision — exclude dataset, training runs, output videos/images, and large weights
 vision/Shopping-Cart-1/
 vision/combined_dataset/

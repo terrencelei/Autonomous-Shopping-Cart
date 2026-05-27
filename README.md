@@ -19,6 +19,28 @@ yolo_detect.py ─UDP "dist,ang"─► Pathfinding_algorithm.py ─USB "L<rpm> R
 
 The vision system handles detection and target locking; it streams the locked shopper's distance and bearing over UDP to the pathfinder. The pathfinder converts that to map coordinates using the cart's known starting pose plus odometry, runs A\* around shelving obstacles, and sends wheel-velocity commands over USB serial to the ESP32, which drives the motors. The UWB system provides a precise distance/angle fallback when the camera view is obstructed.
 
+### Running the cart (one command)
+
+`start_cart.sh` launches both Python processes detached from your SSH session, so they keep running after you log out:
+
+```bash
+ssh pi
+cd Autonomous-Shopping-Cart
+./start_cart.sh             # place cart at the start pose FIRST
+exit                        # safe to disconnect — cart keeps going
+```
+
+To stop:
+
+```bash
+ssh pi
+./stop_cart.sh
+```
+
+Logs are written to `logs/<timestamp>-pathfinder.log` and `logs/<timestamp>-vision.log`. Tail them while connected: `tail -f logs/*pathfinder.log`. Pass `--display` to `start_cart.sh` if you're sitting at the Pi's own desktop and want the OpenCV preview window.
+
+> **Important:** the cart starts driving the moment `start_cart.sh` finishes — place it at `START_POS` (default `[0.5, 0.5]`, heading `0`) before running.
+
 ---
 
 ## Vision System (Primary)
@@ -212,6 +234,7 @@ autonomous-shopping-cart/
 │   └── requirements.txt
 ├── Pathfinding_algorithm.py        # Live A* pathfinder (UDP in → USB out)
 ├── pathfinding_sim.py              # 2D simulator used to design the planner
+├── start_cart.sh / stop_cart.sh    # Launch / stop the full stack detached from SSH
 ├── firmware/
 │   └── cart_motor/
 │       └── cart_motor.ino          # ESP32 motor controller (TB9051FTG)
