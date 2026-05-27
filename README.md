@@ -39,7 +39,37 @@ ssh pi
 
 Logs are written to `logs/<timestamp>-pathfinder.log` and `logs/<timestamp>-vision.log`. Tail them while connected: `tail -f logs/*pathfinder.log`. Pass `--display` to `start_cart.sh` if you're sitting at the Pi's own desktop and want the OpenCV preview window.
 
-> **Important:** the cart starts driving the moment `start_cart.sh` finishes — place it at `START_POS` (default `[0.5, 0.5]`, heading `0`) before running.
+> **Important:** the cart starts driving the moment `start_cart.sh` finishes — place it at `START_POS` (default `[0.0, 0.0]`, heading `0`) before running.
+
+### Autostart on boot (optional)
+
+To have the cart run automatically every time the Pi powers up, install the systemd services:
+
+```bash
+cd Autonomous-Shopping-Cart
+sudo ./systemd/install.sh                # install + enable autostart
+sudo ./systemd/install.sh --no-enable    # install but don't autostart yet
+```
+
+Then either reboot (`sudo reboot`) or start the services now:
+
+```bash
+sudo systemctl start cart-pathfinder cart-vision
+```
+
+Useful operations:
+
+| Command | Effect |
+|---|---|
+| `systemctl status cart-pathfinder cart-vision` | One-shot health check |
+| `journalctl -fu cart-pathfinder -fu cart-vision` | Live merged log stream |
+| `sudo systemctl stop cart-vision cart-pathfinder` | Stop now (boot autostart unchanged) |
+| `sudo systemctl disable cart-pathfinder cart-vision` | Remove from boot — manual launch only |
+| `sudo systemctl enable cart-pathfinder cart-vision` | Restore autostart |
+
+> **Safety:** autostart means the cart drives the moment the Pi finishes booting. Either always place it on the start coordinate before powering on, or leave autostart disabled and use `./start_cart.sh` manually.
+
+When autostart is enabled, **don't also run `./start_cart.sh`** — both copies would fight for `/dev/ttyUSB0` and the IMX500 camera. Pick one launch method per boot.
 
 ---
 

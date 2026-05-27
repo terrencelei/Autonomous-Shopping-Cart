@@ -1,0 +1,20 @@
+[Unit]
+Description=Autonomous Shopping Cart — vision (yolo_detect)
+After=cart-pathfinder.service
+Requires=cart-pathfinder.service
+
+[Service]
+Type=simple
+User=terrencelei
+WorkingDirectory=/home/terrencelei/Autonomous-Shopping-Cart/vision
+ExecStart=/usr/bin/python3 -u yolo_detect.py --no-display
+# Give the pathfinder a moment to open its UDP socket before vision
+# starts blasting packets. Mirrors the sleep in start_cart.sh.
+ExecStartPre=/bin/sleep 2
+KillSignal=SIGINT
+TimeoutStopSec=3
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
