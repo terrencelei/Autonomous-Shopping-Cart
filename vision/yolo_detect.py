@@ -30,7 +30,7 @@ RPK_MODEL_PATH = Path(
 PERSON_CONFIDENCE = 0.6
 PERSON_CLASS_ID   = 0   # COCO "person" in the labels shipped with imx500-models
 
-PERSON_HEIGHT_M   = 1.7
+PERSON_HEIGHT_M   = 1.8
 H_FOV_DEG         = 66.0   # Pi AI Camera horizontal field of view
 DISTANCE_OFFSET_M = 1.3
 DISTANCE_SCALE    = 1.8
