@@ -4,35 +4,30 @@ A self-following shopping cart that tracks a designated shopper and treats all o
 
 | System | Role | Technology |
 |--------|------|------------|
-| **Vision** | Primary | YOLO11n + ByteTrack, Raspberry Pi AI Camera |
+| **Vision** | Primary | SSD-MobileNetV2 on IMX500 NPU + ByteTrack |
 | **UWB** | Backup / redundancy | Apple Ultra-Wideband, iPhone-to-iPhone ranging |
 
-The vision system handles detection and scene understanding — identifying the target shopper and classifying obstacles. The UWB system provides a precise distance and angle fallback when the camera view is obstructed or the target is temporarily lost.
+The vision system handles detection and scene understanding — identifying the target shopper and classifying other people as obstacles. The UWB system provides a precise distance and angle fallback when the camera view is obstructed or the target is temporarily lost.
 
 ---
 
 ## Vision System (Primary)
 
-A YOLO11n-based pipeline running on a Raspberry Pi 5 with the Pi AI Camera (IMX500). Detects people from a live camera feed, locks onto the closest centred shopper, and classifies all others as obstacles.
+A detection pipeline that runs entirely on the Raspberry Pi AI Camera (IMX500). The SSD-MobileNetV2 object detector executes on the IMX500's on-chip neural processor — no inference on the Pi CPU — and the result is streamed back over CSI alongside each frame. The host then runs ByteTrack to assign stable track IDs, locks onto the closest centred shopper, and maps everyone else as an obstacle.
 
 ### Setup (Raspberry Pi)
 
 ```bash
-sudo apt install -y python3-pip python3-opencv imx500-all imx500-models
-pip3 install ultralytics supervision --break-system-packages
+sudo apt install imx500-models python3-picamera2
+cd vision
+pip install -r requirements.txt
 ```
 
 ### Usage
 
 ```bash
-# NPU mode — YOLO inference on IMX500 chip (~30 FPS)
-python3 vision/yolo_detect.py --npu --npu-model /path/to/model.rpk
-
-# Pi Camera mode — YOLO inference on Pi CPU (~5-15 FPS)
-python3 vision/yolo_detect.py --picamera
-
-# Headless (no display, SSH)
-python3 vision/yolo_detect.py --npu --npu-model /path/to/model.rpk --no-display
+python3 yolo_detect.py                # live camera, GUI windows
+python3 yolo_detect.py --no-display   # headless (SSH)
 ```
 
 Press **Q** to quit.
@@ -48,19 +43,13 @@ A single **Cart View** window shows:
 - Mini overhead map (picture-in-picture, top-right corner) showing all detections relative to the cart
 - FPS and latency overlay
 
-### Models
+### Model
 
 | Model | Purpose |
 |-------|---------|
-| `yolo11n.pt` | COCO pretrained — person detection, runs on Pi CPU |
-| `yolo11n.rpk` | YOLO11n converted for IMX500 NPU — runs on-sensor |
+| `imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk` | COCO-pretrained SSD-MobileNetV2 detector, runs on the IMX500 NPU |
 
-To convert `yolo11n.pt` to `.rpk` for NPU use (requires Linux x86 — use Google Colab):
-
-```python
-from ultralytics import YOLO
-YOLO('yolo11n.pt').export(format='imx500', imgsz=640)
-```
+Shipped by the `imx500-models` apt package and loaded from `/usr/share/imx500-models/`. The `.rpk` is uploaded over CSI to the sensor at startup (~3 s).
 
 ---
 
@@ -141,8 +130,7 @@ Offsets persist in UserDefaults across launches.
 autonomous-shopping-cart/
 ├── vision/                         # Primary: camera-based detection
 │   ├── yolo_detect.py              # Detection + tracking + overhead map
-│   ├── yolo11n.rpk                 # YOLO11n converted for IMX500 NPU
-│   ├── throttle_watch.sh           # Mac thermal monitor for training runs
+│   ├── throttle_watch.sh           # CPU/thermal throttle monitor
 │   └── requirements.txt
 ├── uwb/                            # Backup: UWB positioning
 │   ├── UWBCart/                    # Shopper app source
@@ -164,6 +152,12 @@ sudo pkill -f yolo_detect.py
 
 **NPU model not found:**
 Install pre-built models: `sudo apt install imx500-models`
+
+**`qt.qpa.xcb: could not connect to display` over SSH:**
+Run with `--no-display`, or run from the Pi's own desktop terminal.
+
+**`imx500_transition_to_network: unable to apply register writes from firmware` (in dmesg):**
+The `.rpk` is incompatible with the current `imx500-firmware`. Reinstall the matching model package: `sudo apt install --reinstall imx500-models`.
 
 **Xcode "Executable is not codesigned":**
 1. **Product → Clean Build Folder** (⇧⌘K)

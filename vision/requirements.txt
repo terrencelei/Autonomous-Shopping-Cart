@@ -1,3 +1,2 @@
-ultralytics
 opencv-python
 supervision
