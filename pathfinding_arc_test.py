@@ -1,25 +1,32 @@
 """
 Closed-loop test of Pathfinding_algorithm.tick() chasing a target that
-moves along a circular arc.
+moves along a circular arc. Drives the real motors via the ESP32 by
+default; pass --no-drive for pure simulation (e.g. on the Mac).
 
-For each simulated tick we:
+For each tick:
   1. Place the target at its scripted position on the arc
-  2. Call tick() with the current robot pose — same call the live main
-     loop makes after converting a UDP packet to absolute coords
-  3. Take the returned (v_left, v_right), integrate differential-drive
-     kinematics, and update the robot's pose
-  4. Log everything for the plot
+  2. Call tick() with the cart's current simulated pose
+  3. Send (v_left, v_right) to the ESP32 over USB serial
+  4. Integrate differential-drive kinematics in software to advance the
+     simulated pose for the next tick (the cart has no closed-loop
+     odometry yet, so the simulated pose is what tick() sees)
 
-Output: pathfinding_arc_test.png
-
-To tune the test, edit the CONFIG block below.
+Outputs (always written, even when motors are driven):
+  pathfinding_arc_test.png             — 4-panel diagnostic figure
+  pathfinding_arc_test_trajectory.png  — trajectory only
 
 Usage:
-    pip install matplotlib numpy
-    python3 pathfinding_arc_test.py
+    pip install matplotlib numpy pyserial
+    python3 pathfinding_arc_test.py            # drives motors
+    python3 pathfinding_arc_test.py --no-drive # pure sim, no serial
+    python3 pathfinding_arc_test.py --port /dev/ttyUSB0
 """
 
+import argparse
 import math
+import os
+import time
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -64,9 +71,37 @@ def integrate_kinematics(pos, heading, v_left, v_right, dt):
     return [new_x, new_y], new_heading, v_fwd, omega
 
 
-def run():
+def find_serial_port(preferred):
+    """Return the first existing /dev/tty* candidate, preferring the named one."""
+    candidates = [preferred, '/dev/ttyACM0', '/dev/ttyUSB0',
+                  '/dev/ttyACM1', '/dev/ttyUSB1']
+    seen = set()
+    for c in candidates:
+        if not c or c in seen:
+            continue
+        seen.add(c)
+        if os.path.exists(c):
+            return c
+    return preferred
+
+
+def run(drive=True, port=None, countdown=3):
     P.robot_pos     = list(START_POS)
     P.robot_heading = START_HEADING
+
+    motors = None
+    if drive:
+        chosen = port or find_serial_port(P.MOTOR_UART_PORT)
+        if chosen != P.MOTOR_UART_PORT:
+            print(f"Note: using {chosen} "
+                  f"(Pathfinding_algorithm.MOTOR_UART_PORT = {P.MOTOR_UART_PORT})")
+        motors = P.MotorDriver(chosen, P.MOTOR_UART_BAUD)
+        if countdown > 0:
+            print(f"\n*** Cart will start driving in {countdown}s ***")
+            for k in range(countdown, 0, -1):
+                print(f"  {k}...")
+                time.sleep(1)
+            print("  GO!\n")
 
     times          = []
     target_xs, target_ys = [], []
@@ -76,13 +111,18 @@ def run():
     in_fovs        = []
 
     n_steps = int(TOTAL_S / P.DT)
-    for i in range(n_steps):
+    try:
+      for i in range(n_steps):
+        t_loop0 = time.monotonic()
         t   = i * P.DT
         tgt = target_at(t)
 
         # tick() is the same call the live main loop makes after converting
         # a UDP "<dist>,<angle>" packet to absolute coords.
         v_left, v_right = P.tick(tgt, P.robot_pos, P.robot_heading)
+
+        if motors is not None:
+            motors.send_velocities(v_left, v_right)
 
         # Record what was commanded for this state
         times.append(t)
@@ -99,6 +139,17 @@ def run():
         P.robot_pos     = new_pos
         P.robot_heading = new_heading
         v_fwds.append(v_fwd); omegas.append(omega)
+
+        # Real-time pacing when driving real motors — otherwise the cart
+        # would receive 250 commands in a fraction of a second.
+        if motors is not None:
+            elapsed = time.monotonic() - t_loop0
+            if elapsed < P.DT:
+                time.sleep(P.DT - elapsed)
+    finally:
+        if motors is not None:
+            print("\nStopping motors.")
+            motors.stop()
 
     return dict(
         t=times,
@@ -237,5 +288,17 @@ def plot(data, out_path="pathfinding_arc_test.png"):
 
 
 if __name__ == "__main__":
-    data = run()
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--no-drive", action="store_true",
+                        help="pure simulation — don't open the ESP32 serial port")
+    parser.add_argument("--port", default=None,
+                        help=f"serial port override "
+                             f"(default: {P.MOTOR_UART_PORT}, auto-falls back to /dev/ttyUSB0)")
+    parser.add_argument("--countdown", type=int, default=3,
+                        help="seconds to wait before commanding motors (default: 3)")
+    args = parser.parse_args()
+
+    data = run(drive=not args.no_drive,
+               port=args.port,
+               countdown=args.countdown)
     plot(data)
