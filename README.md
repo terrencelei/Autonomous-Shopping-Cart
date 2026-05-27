@@ -43,33 +43,35 @@ Logs are written to `logs/<timestamp>-pathfinder.log` and `logs/<timestamp>-visi
 
 ### Autostart on boot (optional)
 
-To have the cart run automatically every time the Pi powers up, install the systemd services:
+Three boot modes — pick one. `install.sh` is idempotent, so re-run it any time to switch.
 
 ```bash
 cd Autonomous-Shopping-Cart
-sudo ./systemd/install.sh                # install + enable autostart
-sudo ./systemd/install.sh --no-enable    # install but don't autostart yet
+sudo ./systemd/install.sh --test   # run pathfinding_arc_test.py once at boot
+sudo ./systemd/install.sh --live   # run the full cart stack at boot
+sudo ./systemd/install.sh --none   # install units, autostart nothing
 ```
 
-Then either reboot (`sudo reboot`) or start the services now:
+| Mode | What runs on boot | Use it for |
+|---|---|---|
+| `--test` | `pathfinding_arc_test.py` (oneshot, writes PNGs and exits) | Iterating on the controller without driving the cart |
+| `--live` | `cart-pathfinder` + `cart-vision` services | Real operation |
+| `--none` | nothing — use `./start_cart.sh` manually | When you want full control |
 
-```bash
-sudo systemctl start cart-pathfinder cart-vision
-```
-
-Useful operations:
+Useful operations once installed:
 
 | Command | Effect |
 |---|---|
-| `systemctl status cart-pathfinder cart-vision` | One-shot health check |
-| `journalctl -fu cart-pathfinder -fu cart-vision` | Live merged log stream |
-| `sudo systemctl stop cart-vision cart-pathfinder` | Stop now (boot autostart unchanged) |
-| `sudo systemctl disable cart-pathfinder cart-vision` | Remove from boot — manual launch only |
-| `sudo systemctl enable cart-pathfinder cart-vision` | Restore autostart |
+| `systemctl status cart-pathfinder cart-vision cart-arc-test` | Health check |
+| `journalctl -fu cart-pathfinder -fu cart-vision` | Live log stream (live mode) |
+| `journalctl -u cart-arc-test --since boot` | Read the latest test run output (test mode) |
+| `sudo systemctl start cart-pathfinder cart-vision` | Trigger live mode now (no reboot needed) |
+| `sudo systemctl start cart-arc-test` | Trigger one arc-test run now |
+| `sudo systemctl stop cart-vision cart-pathfinder` | Stop the live cart |
 
-> **Safety:** autostart means the cart drives the moment the Pi finishes booting. Either always place it on the start coordinate before powering on, or leave autostart disabled and use `./start_cart.sh` manually.
+> **Safety (live mode only):** the cart drives the moment the Pi finishes booting. Either always place it on the start coordinate before powering on, or stay in `--test` / `--none` mode until you're ready.
 
-When autostart is enabled, **don't also run `./start_cart.sh`** — both copies would fight for `/dev/ttyUSB0` and the IMX500 camera. Pick one launch method per boot.
+In `--live` mode, **don't also run `./start_cart.sh`** — both copies would fight for `/dev/ttyUSB0` and the IMX500 camera. Pick one launch method per boot.
 
 ---
 
