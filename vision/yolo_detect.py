@@ -27,7 +27,7 @@ RPK_MODEL_PATH = Path(
     "/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk"
 )
 
-PERSON_CONFIDENCE = 0.35
+PERSON_CONFIDENCE = 0.6
 PERSON_CLASS_ID   = 0   # COCO "person" in the labels shipped with imx500-models
 
 PERSON_HEIGHT_M   = 1.7
