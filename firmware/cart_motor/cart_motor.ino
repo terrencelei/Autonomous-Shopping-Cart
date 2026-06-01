@@ -97,7 +97,7 @@ void IRAM_ATTR rightISR() {
 // ── Tunables ──────────────────────────────────────────────────
 const float MAX_RPM = 150.0f;                 // calibrate to your hardware
 const unsigned long WATCHDOG_MS        = 500;
-const unsigned long REPORT_INTERVAL_MS = 50;  // 20 Hz encoder report
+const unsigned long REPORT_INTERVAL_MS = 20;  // 50 Hz encoder report
 
 unsigned long lastCmdMs    = 0;
 unsigned long lastReportMs = 0;
