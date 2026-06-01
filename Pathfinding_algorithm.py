@@ -56,7 +56,7 @@ AISLE_COUNT  = 3                 # number of horizontal aisles
 # Motion
 MAX_SPEED    = 0.5               # m/s forward
 MAX_TURN     = math.radians(90)  # rad/s
-DT           = 0.1               # control loop period (seconds)
+DT           = 0.02              # control loop period (seconds)
 ARRIVE       = 1.5               # waypoint arrival radius (metres)
 ALIGN        = math.radians(5)   # heading tolerance before moving (search states)
 
