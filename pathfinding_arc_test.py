@@ -62,7 +62,7 @@ def run(drive=True, port=None, countdown=3):
     if drive:
         chosen = port or find_serial_port(_MOTOR_PORT)
         if chosen != _MOTOR_PORT:
-            _MOTOR_PORT = chosen
+            P.MOTOR_PORT = chosen
         motors = P.MotorDriver()
         if countdown > 0:
             print(f"\n*** Cart will start spinning in {countdown}s ***")
