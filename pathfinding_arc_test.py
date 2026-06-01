@@ -38,12 +38,12 @@ import Pathfinding_algorithm as P
 # =============================================================================
 
 ARC_CENTRE   = (2.5, 3.0)
-ARC_RADIUS   = 0.8
+ARC_RADIUS   = 0.25
 ARC_OMEGA    = 0.3           # rad/s — how fast the target circles (0.3 ≈ 17°/s)
 TOTAL_S      = 25.0
 
 # Cart starting pose — picked to be in free space and roughly facing the arc
-START_POS     = [2.5, 0.5]
+START_POS     = [2.5, 1.5]
 START_HEADING = math.radians(90)   # facing +y toward the arc
 
 # Make the whole 20x20 map free space so the FOV / line-of-sight check
