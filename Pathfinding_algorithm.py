@@ -3,7 +3,6 @@ import math
 import heapq
 import threading
 import socket
-import struct
 import logging
 
 import numpy as np
@@ -15,88 +14,51 @@ logging.basicConfig(
 log = logging.getLogger("robot")
 
 # =============================================================================
-# ~~HARDWARE~~  PHYSICAL PARAMETERS  — measure and set these for your robot
+# PHYSICAL PARAMETERS
 # =============================================================================
 
 INCH_TO_M         = 0.0254
 
-WHEEL_DIAMETER_IN  = 3.0       # inches, measured wheel diameter
-WHEEL_TRACK_IN     = 13.0      # inches, measured between inside faces of wheels
+WHEEL_DIAMETER_IN  = 3.0
+WHEEL_TRACK_IN     = 13.0
 WHEEL_DIAMETER_M   = WHEEL_DIAMETER_IN * INCH_TO_M
+WHEEL_TRACK_M      = WHEEL_TRACK_IN    * INCH_TO_M   # inside-to-inside; replace
+                                                       # with centre-to-centre when
+                                                       # wheel width is measured
 
-# Differential-drive kinematics normally want centre-to-centre wheel spacing.
-# You gave inside-to-inside spacing, so this uses 13 in as the rough/effective
-# track. Replace with inside spacing + wheel/tire width when that measurement
-# is available.
-WHEEL_TRACK_M      = WHEEL_TRACK_IN * INCH_TO_M
-# Pulses per full output-shaft (wheel) revolution.
-# JGB37 motors: 11 magnetic-disc cycles per *motor* turn, × 4 because the
-# firmware quadrature-decodes (4 edges per cycle on A+B), × gearbox ratio.
-# Edit the GEAR_RATIO once you confirm yours from the sticker on the gearbox
-# (common JGB37 ratios: 5, 10, 15, 30, 50, 90, 131, 178, 270).
-GEAR_RATIO         = 5         # ← UPDATE to match your motor
+GEAR_RATIO         = 5         # ← UPDATE from gearbox sticker
 ENCODER_PPR        = 11 * 4 * GEAR_RATIO
 
-# Per-side encoder sign. Flip when a wheel reports a negative count under
-# forward motion (typically because the encoder's A/B channels are mirrored
-# relative to the other side's wiring).
 LEFT_ENC_SIGN      = -1
 RIGHT_ENC_SIGN     = +1
 
-# Encoders are wired to the ESP32, not the Pi GPIO. The ESP32 streams
-# encoder counts back over USB serial (line format: "E,<left>,<right>\n").
-# Pin numbers below are for the ESP32 sketch in firmware/cart_motor/ — kept
-# here as documentation only; the Pi does not read GPIO directly.
-ESP32_ENC_LEFT_A   = 32   # ENC_A on dual_motor_test.ino (M1)
-ESP32_ENC_LEFT_B   = 33   # ENC_B
-ESP32_ENC_RIGHT_A  = 25   # ENC_C on dual_motor_test.ino (M2)
-ESP32_ENC_RIGHT_B  = 26   # ENC_D
-
-# Serial port for the ESP32 motor controller (USB CDC over micro-USB).
-# On the Pi the ESP32 enumerates as /dev/ttyACM0 (or /dev/ttyUSB0 on some
-# adapters). Matching firmware lives in firmware/cart_motor/.
 MOTOR_UART_PORT    = "/dev/ttyACM0"
 MOTOR_UART_BAUD    = 115200
-
-# UDP port that vision streams target sightings on, formatted as
-# "<distance_m>,<angle_deg>\n" — bearing is relative to the cart's camera
-# (positive = target to the right of centre). The receiver converts to
-# absolute map coordinates using the cart's current pose.
 TARGET_UDP_PORT    = 5005
 
-# Cart's fixed starting pose on the store map. The cart is physically
-# placed here before each run; odometry integrates motion from this point.
-START_POS          = [0.0, 0.0]   # metres; odometry integrates from this origin
-START_HEADING      = 0.0          # radians (0 = +x axis, CCW positive)
+START_POS          = [0.0, 0.0]
+START_HEADING      = 0.0
 
 # =============================================================================
 # DERIVED WHEEL CONSTANTS
 # =============================================================================
 
-WHEEL_CIRCUMFERENCE_M = math.pi * WHEEL_DIAMETER_M   # metres per wheel revolution
-# Metres of travel per encoder pulse
-METRES_PER_PULSE      = WHEEL_CIRCUMFERENCE_M / ENCODER_PPR
-
-# Robot rotation calibration for point turns. For a differential drive with
-# equal and opposite wheel motion:
-#   wheel_rotations_per_robot_degree = wheel_track / (360 * wheel_diameter)
-# With 13 in effective track and 3 in wheels, this is about 0.012037 rev/deg.
+WHEEL_CIRCUMFERENCE_M            = math.pi * WHEEL_DIAMETER_M
+METRES_PER_PULSE                 = WHEEL_CIRCUMFERENCE_M / ENCODER_PPR
 WHEEL_ROTATIONS_PER_ROBOT_DEGREE = WHEEL_TRACK_IN / (360.0 * WHEEL_DIAMETER_IN)
 WHEEL_ROTATIONS_PER_90_DEGREES   = WHEEL_ROTATIONS_PER_ROBOT_DEGREE * 90.0
 PULSES_PER_ROBOT_DEGREE          = WHEEL_ROTATIONS_PER_ROBOT_DEGREE * ENCODER_PPR
-
-# For counter-rotating wheels, robot radians per equal/opposite wheel pulse.
 RADIANS_PER_COUNTERROTATION_PULSE = (2.0 * METRES_PER_PULSE) / WHEEL_TRACK_M
 
 # =============================================================================
-# MAP SETTINGS  (must match your physical warehouse layout)
+# MAP SETTINGS
 # =============================================================================
 
-chunk_size   = 0.1          # metres per chunk cell
-map_size     = [5, 5]     # [width, height] in meters
+chunk_size   = 0.1
+map_size     = [5, 5]
 FREE         = 1
 BLOCKED      = 0
-aisle_width  = 1.0          # meters
+aisle_width  = 1.0
 aisle_amount = 3
 PEEK_SWEEP_RAD = math.radians(90.0)
 
@@ -105,7 +67,6 @@ rows = int(map_size[1] / chunk_size)
 gap_width = (map_size[1] - aisle_width * aisle_amount) / (aisle_amount - 1)
 
 chunk_map = np.zeros((rows, cols), dtype=np.int8)
-
 for _r in range(rows):
     for _c in range(cols):
         _x = _c * chunk_size
@@ -121,7 +82,6 @@ for _r in range(rows):
         elif (_y % (aisle_width + gap_width)) < aisle_width:
             chunk_map[_r, _c] = FREE
 
-# Pre-compute aisle y-centres
 _period = aisle_width + gap_width
 AISLE_Y_CENTRES = []
 _probe = 0.0
@@ -145,12 +105,43 @@ AISLE_Y_CENTRES = sorted(set(AISLE_Y_CENTRES))
 # CONTROLLER PARAMETERS
 # =============================================================================
 
-ROBOT_SPEED_MPS  = 0.5              # maximum forward speed  m/s
-TURN_SPEED_RAD   = math.radians(90.0)   # maximum turn rate  rad/s
-# Used only for aisle peek/sweep behavior.
-DT               = 0.1              # control loop period  seconds
-ARRIVE_THRESH    = 1.5             # waypoint arrival radius  meters
-ALIGN_THRESH_RAD = math.radians(5.0)  # must be within this to start moving
+ROBOT_SPEED_MPS  = 0.5               # approach speed (full speed phase)
+TURN_SPEED_RAD   = math.radians(90.0)
+DT               = 0.1
+ARRIVE_THRESH    = 1.5
+ALIGN_THRESH_RAD = math.radians(5.0)
+
+# -----------------------------------------------------------------------------
+# TARGET TRACKING PARAMETERS
+# -----------------------------------------------------------------------------
+
+# Distance at which the robot switches from full-speed approach to PD hold
+HOLD_DIST_M      = 2.0               # metres
+
+# Centering: proportional gain on camera angle error (rad/s per degree of error)
+# Tune this first. Start low (~0.01) and increase until centering is snappy
+# without oscillation. At 0.02: a 10° offset produces 0.2 rad/s turn.
+CENTER_KP        = 0.02              # rad/s per degree of angle error
+
+# PD gains for the hold-distance controller.
+# The error signal is:  e = dist_measured - HOLD_DIST_M   (metres)
+# Positive e → too far  → move forward
+# Negative e → too close → move backward
+#
+# Kp: proportional gain (m/s per metre of error)
+#   At Kp=0.4, a 0.5 m error produces 0.2 m/s command.
+#   Increase if the robot is sluggish to correct; decrease if it oscillates.
+#
+# Kd: derivative gain (m/s per m/s of range rate)
+#   Kd dampens overshoot. de/dt = (dist_now - dist_prev) / DT is the
+#   measured range rate (positive = target moving away).
+#   At Kd=0.3, approaching at 0.5 m/s produces a 0.15 m/s braking correction.
+#   Increase if robot overshoots and oscillates; decrease if response is sluggish.
+#
+# Max hold speed caps the PD output so the robot never rushes at the target.
+HOLD_KP          = 0.4               # m/s per metre of distance error
+HOLD_KD          = 0.3               # m/s per m/s of range rate
+HOLD_MAX_SPEED   = ROBOT_SPEED_MPS   # clip PD output to this magnitude
 
 # =============================================================================
 # STATE LABELS
@@ -163,8 +154,12 @@ S_EDGE_PATROL    = "EDGE_PATROL"
 S_EDGE_PEEK      = "EDGE_PEEK"
 S_AISLE_TRAVERSE = "AISLE_TRAVERSE"
 
+# Tracking sub-states (only active inside S_IN_VIEW)
+TRACK_APPROACH   = "APPROACH"        # dist > HOLD_DIST → full speed
+TRACK_HOLD       = "HOLD"            # dist <= HOLD_DIST → PD control
+
 # =============================================================================
-# GEOMETRY & MAP HELPERS  (unchanged from simulation)
+# GEOMETRY & MAP HELPERS
 # =============================================================================
 
 def world_to_chunk(pos):
@@ -245,7 +240,7 @@ def next_unchecked_aisle(robot_y, patrol_dir, aisles_checked):
     return (min if patrol_dir > 0 else max)(candidates, key=lambda t: t[0])
 
 # =============================================================================
-# A* PATHFINDING  (unchanged from simulation)
+# A* PATHFINDING
 # =============================================================================
 
 def direct_path_clear(start_pos, end_pos):
@@ -324,24 +319,9 @@ def move_along_route(pos, route, speed, dt):
 
 def velocities_to_wheel_commands(v_forward, omega):
     """
-    Convert body-frame velocity commands to individual wheel speeds.
-
-      v_forward  : desired forward speed  (m/s, positive = forward)
-      omega      : desired angular velocity  (rad/s, positive = CCW)
-
-    Returns (v_left, v_right) in m/s.
-
-    Derivation:
-      v_right = v_forward + omega * (track / 2)
+    Body-frame → wheel surface speeds (m/s).
       v_left  = v_forward - omega * (track / 2)
-
-    The inner wheel of a turn travels a shorter arc:
-      r_inner_contact = R - track/2 - wheel_width/2
-    but for velocity commands to the motor controller, only the wheel
-    centre radius matters:
-      r_left  = R - track/2
-      r_right = R + track/2
-    which gives the formula above when combined with v = R * omega.
+      v_right = v_forward + omega * (track / 2)
     """
     half_track = WHEEL_TRACK_M / 2.0
     v_left  = v_forward - omega * half_track
@@ -349,50 +329,33 @@ def velocities_to_wheel_commands(v_forward, omega):
     return v_left, v_right
 
 def wheel_speed_to_rpm(v_wheel):
-    """Convert wheel surface speed (m/s) to motor shaft RPM."""
     return (v_wheel / WHEEL_CIRCUMFERENCE_M) * 60.0
 
 # =============================================================================
-# ~~HARDWARE~~  ODOMETRY  — replace with your encoder library
+# ODOMETRY
 # =============================================================================
 
 class Odometry:
     """
-    Dead-reckoning odometry from signed wheel encoder counts.
-
-    The ESP32 is expected to stream encoder data over the same serial link as
-    the motor commands using lines like:
-
-        E,<left_count>,<right_count>
-
-    By default the counts are treated as cumulative counts since boot. If your
-    firmware sends per-loop deltas instead, set ENCODER_COUNTS_ARE_CUMULATIVE
-    to False.
+    Dead-reckoning from signed wheel encoder counts streamed by the ESP32.
+    Uses midpoint-heading integration for better arc accuracy.
     """
 
     def __init__(self, start_pos, start_heading, encoder_reader=None):
         self.x       = start_pos[0]
         self.y       = start_pos[1]
-        self.heading = start_heading   # radians
+        self.heading = start_heading
         self._encoder_reader = encoder_reader
 
     def update(self, dt):
-        """
-        Call once per tick. Reads encoder deltas and integrates position.
-        Returns (pos, heading).
-        """
         delta_left, delta_right = self._read_encoder_deltas()
 
-        # Distance each wheel travelled this tick
-        d_left  = delta_left  * METRES_PER_PULSE
-        d_right = delta_right * METRES_PER_PULSE
-
-        # Robot-frame displacement
+        d_left   = delta_left  * METRES_PER_PULSE
+        d_right  = delta_right * METRES_PER_PULSE
         d_centre = (d_left + d_right) / 2.0
         d_theta  = (d_right - d_left) / WHEEL_TRACK_M
 
-        # Integrate pose using midpoint heading for better accuracy during arcs.
-        mid_heading = self.heading + d_theta / 2.0
+        mid_heading  = self.heading + d_theta / 2.0
         self.x      += d_centre * math.cos(mid_heading)
         self.y      += d_centre * math.sin(mid_heading)
         self.heading = (self.heading + d_theta) % (2 * math.pi)
@@ -405,34 +368,28 @@ class Odometry:
         return self._encoder_reader()
 
 
-# ESP32 encoder count interpretation.
-# True  = ESP32 sends cumulative signed counts: E,<left_total>,<right_total>
-# False = ESP32 sends signed deltas since previous packet: E,<left_delta>,<right_delta>
 ENCODER_COUNTS_ARE_CUMULATIVE = True
 
 # =============================================================================
-# ~~HARDWARE~~  MOTOR DRIVER  — replace with your UART/I2C protocol
+# MOTOR DRIVER
 # =============================================================================
 
 class MotorDriver:
     """
-    Sends left/right velocity commands to the ESP32 over UART and reads encoder
-    count packets from the same serial connection.
+    Shares one serial port with the ESP32 for both motor commands (out) and
+    encoder counts (in).
 
-    Outbound protocol:
-        L<left_rpm> R<right_rpm>
-
-    Inbound encoder protocol:
-        E,<left_count>,<right_count>
+    Outbound: "L<rpm> R<rpm>\\n"
+    Inbound:  "E,<left_count>,<right_count>\\n"
     """
 
     def __init__(self, port, baud):
         self._port = port
         self._baud = baud
         self._ser  = None
-        self._last_left_count = None
+        self._last_left_count  = None
         self._last_right_count = None
-        self._pending_left_delta = 0
+        self._pending_left_delta  = 0
         self._pending_right_delta = 0
         self._connect()
 
@@ -440,30 +397,23 @@ class MotorDriver:
         try:
             import serial
             self._ser = serial.Serial(self._port, self._baud, timeout=0.01)
-            log.info(f"ESP32 motor/encoder link connected on {self._port} at {self._baud} baud")
+            log.info(f"ESP32 link on {self._port} @ {self._baud}")
         except Exception as e:
-            log.warning(f"ESP32 motor/encoder link not available ({e}) — commands will be logged only")
+            log.warning(f"ESP32 not available ({e}) — logging only")
             self._ser = None
 
     def _poll_serial(self):
-        """Read any queued encoder packets without blocking."""
         if not (self._ser and self._ser.is_open):
             return
-
         while self._ser.in_waiting:
             try:
                 line = self._ser.readline().decode(errors="ignore").strip()
             except Exception as e:
                 log.warning(f"Serial read error: {e}")
                 return
-
-            if not line:
-                return
-
-            if not line.startswith("E,"):
-                log.debug(f"Ignoring serial line from ESP32: {line}")
+            if not line or not line.startswith("E,"):
+                log.debug(f"ESP32: {line}")
                 continue
-
             try:
                 _, left_s, right_s = line.split(",", 2)
                 left_count  = LEFT_ENC_SIGN  * int(left_s)
@@ -473,71 +423,55 @@ class MotorDriver:
                 continue
 
             if ENCODER_COUNTS_ARE_CUMULATIVE:
-                if self._last_left_count is None or self._last_right_count is None:
-                    delta_left = 0
-                    delta_right = 0
+                if self._last_left_count is None:
+                    delta_left = delta_right = 0
                 else:
-                    delta_left = left_count - self._last_left_count
+                    delta_left  = left_count  - self._last_left_count
                     delta_right = right_count - self._last_right_count
-                self._last_left_count = left_count
+                self._last_left_count  = left_count
                 self._last_right_count = right_count
             else:
-                delta_left = left_count
+                delta_left  = left_count
                 delta_right = right_count
 
-            self._pending_left_delta += delta_left
+            self._pending_left_delta  += delta_left
             self._pending_right_delta += delta_right
 
     def read_encoder_deltas(self):
-        """
-        Return signed encoder pulse deltas accumulated since the last odometry
-        update. Positive should mean the wheel moved the robot forward.
-        """
         self._poll_serial()
-        delta_left = self._pending_left_delta
-        delta_right = self._pending_right_delta
-        self._pending_left_delta = 0
+        dl = self._pending_left_delta
+        dr = self._pending_right_delta
+        self._pending_left_delta  = 0
         self._pending_right_delta = 0
-        return delta_left, delta_right
+        return dl, dr
 
     def send_velocities(self, v_left_ms, v_right_ms):
-        """
-        Convert left/right wheel surface speeds in m/s to wheel RPM targets.
-        Adjust signs or protocol here to match the ESP32 firmware.
-        """
         rpm_l = wheel_speed_to_rpm(v_left_ms)
         rpm_r = wheel_speed_to_rpm(v_right_ms)
         cmd   = f"L{rpm_l:.1f} R{rpm_r:.1f}\n".encode()
-
         if self._ser and self._ser.is_open:
             self._ser.write(cmd)
         else:
-            log.debug(f"MOTOR CMD: {cmd.decode().strip()}")
+            log.debug(f"MOTOR: {cmd.decode().strip()}")
 
     def stop(self):
         self.send_velocities(0.0, 0.0)
 
 # =============================================================================
-# ~~HARDWARE~~  TARGET POSITION RECEIVER  — replace with your localisation feed
+# TARGET RECEIVER
 # =============================================================================
 
 class TargetReceiver:
     """
-    Listens for UDP packets of the form  "<distance_m>,<angle_deg>\\n"
-    on TARGET_UDP_PORT.  Sender is vision/yolo_detect.py — distance is the
-    metric range to the locked target and angle is its bearing in the
-    camera frame (positive = right of centre).
-
-    A packet is considered stale after STALE_S seconds; get() returns None
-    after that so the state machine treats the target as lost.
-
-    Runs in a background thread so the control loop never blocks on I/O.
+    Listens on UDP for "<distance_m>,<angle_deg>\\n" packets.
+    angle_deg: 0 = centred, positive = target to the right.
+    Returns None when no fresh packet is available (target lost).
     """
 
     STALE_S = 0.5
 
     def __init__(self):
-        self._reading = None       # (dist_m, angle_deg) or None
+        self._reading = None
         self._ts      = 0.0
         self._lock    = threading.Lock()
         self._sock    = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -545,16 +479,15 @@ class TargetReceiver:
         self._sock.settimeout(0.05)
         self._thread = threading.Thread(target=self._recv_loop, daemon=True)
         self._thread.start()
-        log.info(f"Target receiver listening on UDP port {TARGET_UDP_PORT}")
+        log.info(f"Target receiver on UDP:{TARGET_UDP_PORT}")
 
     def get(self):
-        """Return latest (distance_m, angle_deg) or None if stale/never received."""
         with self._lock:
             if self._reading is None:
                 return None
             if time.monotonic() - self._ts > self.STALE_S:
                 return None
-            return self._reading
+            return self._reading   # (dist_m, angle_deg)
 
     def _recv_loop(self):
         while True:
@@ -567,17 +500,11 @@ class TargetReceiver:
             except socket.timeout:
                 pass
             except Exception as e:
-                log.warning(f"Target receiver error: {e}")
+                log.warning(f"Target receiver: {e}")
 
 
 def relative_to_absolute(reading, robot_pos, robot_heading):
-    """
-    Convert a (distance_m, angle_deg) sighting from the camera frame into
-    an absolute (x, y) on the store map.
-
-    angle_deg convention (matches yolo_detect.py): 0 = straight ahead,
-    positive = target right of camera centre (clockwise from above).
-    """
+    """Camera (dist, angle_deg) → absolute map [x, y]."""
     if reading is None:
         return None
     dist, angle_deg = reading
@@ -585,9 +512,8 @@ def relative_to_absolute(reading, robot_pos, robot_heading):
     return [robot_pos[0] + dist * math.cos(bearing_world),
             robot_pos[1] + dist * math.sin(bearing_world)]
 
-
 # =============================================================================
-# ROBOT STATE  (identical to simulation, initialised here as plain variables)
+# ROBOT STATE
 # =============================================================================
 
 robot_pos     = list(START_POS)
@@ -611,24 +537,31 @@ peek_end         = 0.0
 peek_aisle_i     = -1
 aisle_travel_dir = 1.0
 
+# Tracking sub-state and PD memory
+track_phase      = TRACK_APPROACH    # APPROACH or HOLD
+prev_target_dist = None              # distance measurement from the previous tick
+                                     # used for the derivative term: de/dt ≈ Δdist/DT
 
 # =============================================================================
-# TICK  — one control cycle (replaces animation update())
+# TICK
 # =============================================================================
 
-def tick(target_xy, sensor_pos, sensor_heading):
+def tick(reading, sensor_pos, sensor_heading):
     """
-    Run one control cycle.
+    One control cycle.
 
     Parameters
     ----------
-    target_xy      : [x, y] from TargetReceiver, or None if not yet seen
+    reading        : (dist_m, angle_deg) from TargetReceiver.get(), or None.
+                     dist_m    — range to target in metres
+                     angle_deg — camera-frame bearing: 0 = centred,
+                                 positive = target to the right
     sensor_pos     : [x, y] from Odometry.update()
-    sensor_heading : float (radians) from Odometry.update()
+    sensor_heading : float radians from Odometry.update()
 
     Returns
     -------
-    (v_left, v_right)  wheel surface speeds in m/s
+    (v_left_ms, v_right_ms)
     """
     global robot_pos, robot_heading, robot_route, robot_state
     global target_visible, last_target_pos, last_seen_bearing, last_seen_angle_in_fov
@@ -637,26 +570,31 @@ def tick(target_xy, sensor_pos, sensor_heading):
     global patrol_dir, aisles_checked
     global peek_start, peek_end, peek_aisle_i
     global aisle_travel_dir
+    global track_phase, prev_target_dist
 
     # -------------------------------------------------------------------------
-    # 1. UPDATE POSE FROM SENSORS
-    #    The simulation integrated position internally; here we trust the
-    #    odometry/localisation system instead.
+    # 1. POSE FROM ODOMETRY
     # -------------------------------------------------------------------------
     robot_pos     = list(sensor_pos)
     robot_heading = sensor_heading
 
     # -------------------------------------------------------------------------
-    # 2. SENSE — target packets are already valid sightings
+    # 2. SENSE
+    #    reading is not None  ←→  camera sees the target.
+    #    No FOV geometry recheck — camera visibility is the sole gate.
     # -------------------------------------------------------------------------
-    # Do not re-check whether the target is inside the camera field of view.
-    # If vision sends a target packet, it is considered visible.
-    target_visible = target_xy is not None
+    target_visible = (reading is not None)
 
     if target_visible:
+        dist_m, angle_deg = reading
+        target_xy = relative_to_absolute(reading, robot_pos, robot_heading)
         last_target_pos        = list(target_xy)
         last_seen_bearing      = bearing_to(robot_pos, target_xy)
         last_seen_angle_in_fov = angle_diff(last_seen_bearing, robot_heading)
+    else:
+        dist_m    = None
+        angle_deg = None
+        target_xy = None
 
     # -------------------------------------------------------------------------
     # 3. ZONE
@@ -680,69 +618,127 @@ def tick(target_xy, sensor_pos, sensor_heading):
             aisles_checked = [False] * len(AISLE_Y_CENTRES)
             goal_coords    = [list(target_xy)]
             robot_state    = S_IN_VIEW
+            # Reset PD state on fresh acquisition
+            track_phase      = TRACK_APPROACH
+            prev_target_dist = dist_m
 
     elif robot_state == S_IN_VIEW:
-        goal_coords = [list(last_target_pos)]
-        robot_state = S_FOLLOW_GOAL
+        # Camera just lost the target
+        goal_coords      = [list(last_target_pos)]
+        robot_state      = S_FOLLOW_GOAL
+        prev_target_dist = None
 
     elif robot_state == S_FOLLOW_GOAL and len(goal_coords) == 0:
         lost        = True
-        spin_dir    = math.copysign(1.0, last_seen_angle_in_fov) if last_seen_angle_in_fov != 0 else 1.0
+        spin_dir    = math.copysign(1.0, last_seen_angle_in_fov) \
+                      if last_seen_angle_in_fov != 0 else 1.0
         spin_turned = 0.0
         robot_state = S_SPIN
 
     # -------------------------------------------------------------------------
-    # 6. STATE ACTIONS — compute desired v_forward and omega
-    #    Instead of directly mutating robot_pos/heading (simulation style),
-    #    we compute the *desired* velocities and let the motor driver +
-    #    odometry close the loop on actual motion.
+    # 6. STATE ACTIONS
     # -------------------------------------------------------------------------
-
-    v_forward = 0.0    # m/s forward
-    omega     = 0.0    # rad/s CCW positive
-
-    new_heading = robot_heading   # heading the state machine wants next tick
+    v_forward = 0.0
+    omega     = 0.0
 
     if robot_state == S_IN_VIEW:
-        visible_target = target_xy or last_target_pos
-        want        = bearing_to(robot_pos, visible_target)
-        new_heading = rotate_toward(robot_heading, want, DT)
-        omega       = angle_diff(new_heading, robot_heading) / DT
+        # ----------------------------------------------------------------
+        # CENTERING
+        # Always drive omega from the raw camera angle error so that the
+        # target is kept at the centre of frame regardless of phase.
+        # angle_deg > 0 → target is to the RIGHT → we need to turn RIGHT
+        # (clockwise) → negative omega in CCW-positive convention.
+        # ----------------------------------------------------------------
+        omega = -CENTER_KP * angle_deg     # rad/s; negative = clockwise turn
 
-        # Move only after basic heading alignment; do not use camera FOV as
-        # a second visibility check.
-        if abs(angle_diff(robot_heading, want)) < ALIGN_THRESH_RAD:
-            robot_route = build_route(robot_pos, visible_target)
-            v_forward   = ROBOT_SPEED_MPS
+        # Clamp centering to the maximum turn rate
+        omega = math.copysign(min(abs(omega), TURN_SPEED_RAD), omega)
+
+        # ----------------------------------------------------------------
+        # PHASE DECISION
+        # ----------------------------------------------------------------
+        if dist_m is not None:
+            if dist_m > HOLD_DIST_M:
+                track_phase = TRACK_APPROACH
+            else:
+                track_phase = TRACK_HOLD
+
+        # ----------------------------------------------------------------
+        # APPROACH PHASE  — full speed forward until within HOLD_DIST_M
+        # ----------------------------------------------------------------
+        if track_phase == TRACK_APPROACH:
+            v_forward = ROBOT_SPEED_MPS
+
+        # ----------------------------------------------------------------
+        # HOLD PHASE  — PD controller on distance error
+        #
+        # Error:      e  = dist_measured - HOLD_DIST_M
+        #               positive → too far  → move forward
+        #               negative → too close → move backward
+        #
+        # Derivative: de/dt ≈ (dist_now - dist_prev) / DT
+        #               positive → target moving away → add forward speed
+        #               negative → target approaching → reduce speed / back up
+        #
+        # Output:     v = Kp * e + Kd * de_dt
+        #               clipped to ±HOLD_MAX_SPEED
+        # ----------------------------------------------------------------
+        elif track_phase == TRACK_HOLD:
+            if dist_m is not None:
+                e = dist_m - HOLD_DIST_M
+
+                # Derivative of distance w.r.t. time
+                if prev_target_dist is not None:
+                    de_dt = (dist_m - prev_target_dist) / DT
+                else:
+                    de_dt = 0.0
+
+                v_pd = HOLD_KP * e + HOLD_KD * de_dt
+
+                # Clip to safe speed range (allows reversing if too close)
+                v_forward = math.copysign(
+                    min(abs(v_pd), HOLD_MAX_SPEED), v_pd
+                )
+
+        # Store current distance for next tick's derivative
+        prev_target_dist = dist_m
+
+        # Keep goal_coords up to date for use when we lose the target
         goal_coords = [list(target_xy)] if target_xy else goal_coords
+
+        log.debug(
+            f"[IN_VIEW/{track_phase}]  "
+            f"dist={dist_m:.2f}m  angle={angle_deg:+.1f}°  "
+            f"vFwd={v_forward:+.3f}  omega={math.degrees(omega):+.1f}°/s"
+        )
 
     elif robot_state == S_FOLLOW_GOAL:
         if len(goal_coords) > 0:
             wp          = goal_coords[0]
             robot_route = build_route(robot_pos, wp)
             if len(robot_route) >= 2:
-                want        = bearing_to(robot_route[0], robot_route[1])
-                new_heading = rotate_toward(robot_heading, want, DT)
-                omega       = angle_diff(new_heading, robot_heading) / DT
+                want  = bearing_to(robot_route[0], robot_route[1])
+                new_h = rotate_toward(robot_heading, want, DT)
+                omega = angle_diff(new_h, robot_heading) / DT
                 if abs(angle_diff(robot_heading, want)) < ALIGN_THRESH_RAD:
                     v_forward = ROBOT_SPEED_MPS
             if distance_between(robot_pos, wp) < ARRIVE_THRESH:
                 goal_coords.pop(0)
 
     elif robot_state == S_SPIN:
-        new_heading  = rotate_step(robot_heading, spin_dir, DT)
         omega        = spin_dir * TURN_SPEED_RAD
         spin_turned += TURN_SPEED_RAD * DT
         v_forward    = 0.0
-
         if spin_turned >= 2 * math.pi:
             spin_turned = 0.0
             if on_edge:
                 robot_state = S_EDGE_PATROL
-                patrol_dir  = math.copysign(1.0, last_target_pos[1] - robot_pos[1]) or 1.0
+                patrol_dir  = math.copysign(
+                    1.0, last_target_pos[1] - robot_pos[1]) or 1.0
             else:
                 robot_state      = S_AISLE_TRAVERSE
-                aisle_travel_dir = math.copysign(1.0, last_target_pos[0] - robot_pos[0]) or 1.0
+                aisle_travel_dir = math.copysign(
+                    1.0, last_target_pos[0] - robot_pos[0]) or 1.0
 
     elif robot_state == S_EDGE_PATROL:
         if not on_edge:
@@ -750,11 +746,9 @@ def tick(target_xy, sensor_pos, sensor_heading):
         else:
             ex = edge_x_centre(robot_pos)
             cy, idx = next_unchecked_aisle(robot_pos[1], patrol_dir, aisles_checked)
-
             if cy is None:
                 patrol_dir *= -1
                 cy, idx = next_unchecked_aisle(robot_pos[1], patrol_dir, aisles_checked)
-
             if cy is None:
                 robot_state      = S_AISLE_TRAVERSE
                 aisle_travel_dir = -1.0 if ex > map_size[0] / 2 else 1.0
@@ -762,16 +756,16 @@ def tick(target_xy, sensor_pos, sensor_heading):
                 dist_to_mouth = abs(robot_pos[1] - cy)
                 if dist_to_mouth < ARRIVE_THRESH:
                     peek_start, peek_end = peek_sweep_bounds([ex, cy])
-                    new_heading  = peek_start
-                    omega        = angle_diff(new_heading, robot_heading) / DT
+                    new_h        = peek_start
+                    omega        = angle_diff(new_h, robot_heading) / DT
                     v_forward    = 0.0
                     peek_aisle_i = idx
                     robot_state  = S_EDGE_PEEK
                 else:
-                    goal        = [ex, cy]
-                    want        = bearing_to(robot_pos, goal)
-                    new_heading = rotate_toward(robot_heading, want, DT)
-                    omega       = angle_diff(new_heading, robot_heading) / DT
+                    goal  = [ex, cy]
+                    want  = bearing_to(robot_pos, goal)
+                    new_h = rotate_toward(robot_heading, want, DT)
+                    omega = angle_diff(new_h, robot_heading) / DT
                     if abs(angle_diff(robot_heading, want)) < ALIGN_THRESH_RAD:
                         robot_route = build_route(robot_pos, goal)
                         v_forward   = ROBOT_SPEED_MPS
@@ -780,10 +774,9 @@ def tick(target_xy, sensor_pos, sensor_heading):
                         patrol_dir *= -1
 
     elif robot_state == S_EDGE_PEEK:
-        new_heading = rotate_toward(robot_heading, peek_end, DT)
-        omega       = angle_diff(new_heading, robot_heading) / DT
-        v_forward   = 0.0
-
+        new_h = rotate_toward(robot_heading, peek_end, DT)
+        omega = angle_diff(new_h, robot_heading) / DT
+        v_forward = 0.0
         if abs(angle_diff(peek_end, robot_heading)) < math.radians(1.5):
             if peek_aisle_i >= 0:
                 aisles_checked[peek_aisle_i] = True
@@ -794,18 +787,14 @@ def tick(target_xy, sensor_pos, sensor_heading):
                  else aisle_width / 2.0
         goal   = [goal_x, robot_pos[1]]
         want   = 0.0 if aisle_travel_dir > 0 else math.pi
-
-        new_heading = rotate_toward(robot_heading, want, DT)
-        omega       = angle_diff(new_heading, robot_heading) / DT
-
+        new_h  = rotate_toward(robot_heading, want, DT)
+        omega  = angle_diff(new_h, robot_heading) / DT
         if abs(angle_diff(robot_heading, want)) < ALIGN_THRESH_RAD:
             robot_route = build_route(robot_pos, goal)
             v_forward   = ROBOT_SPEED_MPS
-
         ai = aisle_index_of(robot_pos)
         if ai >= 0:
             aisles_checked[ai] = True
-
         if distance_between(robot_pos, goal) < ARRIVE_THRESH or is_on_edge(robot_pos):
             robot_state      = S_SPIN
             spin_turned      = 0.0
@@ -814,9 +803,7 @@ def tick(target_xy, sensor_pos, sensor_heading):
             v_forward        = 0.0
 
     # -------------------------------------------------------------------------
-    # 7. CONVERT TO WHEEL VELOCITIES
-    #    v_left, v_right are surface speeds in m/s.
-    #    Pass these to MotorDriver.send_velocities().
+    # 7. WHEEL VELOCITIES
     # -------------------------------------------------------------------------
     v_left, v_right = velocities_to_wheel_commands(v_forward, omega)
 
@@ -827,7 +814,6 @@ def tick(target_xy, sensor_pos, sensor_heading):
     )
 
     return v_left, v_right
-
 
 # =============================================================================
 # MAIN LOOP
@@ -842,30 +828,28 @@ def main():
     )
     receiver = TargetReceiver()
 
-    log.info("Control loop starting.  Press Ctrl-C to stop.")
-    log.info(f"Wheel diameter : {WHEEL_DIAMETER_IN:.2f} in ({WHEEL_DIAMETER_M*1000:.1f} mm)")
-    log.info(f"Wheel track    : {WHEEL_TRACK_IN:.2f} in effective ({WHEEL_TRACK_M*1000:.1f} mm)")
-    log.info(f"Encoder PPR    : {ENCODER_PPR}")
-    log.info(f"m/pulse        : {METRES_PER_PULSE*1000:.3f} mm")
-    log.info(f"wheel rev/deg  : {WHEEL_ROTATIONS_PER_ROBOT_DEGREE:.6f} rev per robot degree")
-    log.info(f"wheel rev/90°  : {WHEEL_ROTATIONS_PER_90_DEGREES:.3f} rev per wheel")
+    log.info("=" * 60)
+    log.info("Robot controller starting")
+    log.info(f"  Wheel diameter   : {WHEEL_DIAMETER_IN} in ({WHEEL_DIAMETER_M*1000:.1f} mm)")
+    log.info(f"  Effective track  : {WHEEL_TRACK_IN} in ({WHEEL_TRACK_M*1000:.1f} mm)")
+    log.info(f"  Encoder PPR      : {ENCODER_PPR}")
+    log.info(f"  m / pulse        : {METRES_PER_PULSE*1000:.4f} mm")
+    log.info(f"  rev / robot deg  : {WHEEL_ROTATIONS_PER_ROBOT_DEGREE:.6f}")
+    log.info(f"  Hold distance    : {HOLD_DIST_M} m")
+    log.info(f"  Center Kp        : {CENTER_KP} rad/s per deg")
+    log.info(f"  Hold Kp / Kd     : {HOLD_KP} / {HOLD_KD}")
+    log.info("=" * 60)
 
     try:
         while True:
             t0 = time.monotonic()
 
-            # Read sensors
             pos, heading = odometry.update(DT)
-            reading      = receiver.get()              # (dist_m, angle_deg) or None
-            target_xy    = relative_to_absolute(reading, pos, heading)
+            reading      = receiver.get()          # (dist_m, angle_deg) or None
 
-            # Run one control tick
-            v_left, v_right = tick(target_xy, pos, heading)
-
-            # Send to motors
+            v_left, v_right = tick(reading, pos, heading)
             motors.send_velocities(v_left, v_right)
 
-            # Hold loop period precisely
             elapsed = time.monotonic() - t0
             sleep_t = DT - elapsed
             if sleep_t > 0:
