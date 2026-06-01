@@ -54,7 +54,7 @@ def find_serial_port(preferred):
     return preferred
 
 
-def run(drive=True, port=None, countdown=3):
+def run(drive=True, port=None, countdown=3, timeout=8.0, encoder_timeout=2.0):
     pos     = list(START_POS)
     heading = START_HEADING
 
@@ -89,6 +89,9 @@ def run(drive=True, port=None, countdown=3):
     abs_ticks_l = 0   # accumulated absolute left encoder ticks (real hardware)
     abs_ticks_r = 0   # accumulated absolute right encoder ticks (real hardware)
     turned      = 0.0 # simulated radians (--no-drive fallback)
+    aborted     = None
+    t_start     = time.monotonic()
+    printed_cmd = False
 
     # Hard-flush the serial receive buffer and reset encoder tracking
     # so packets that built up during the countdown don't count
@@ -104,6 +107,13 @@ def run(drive=True, port=None, countdown=3):
             t = i * P.DT
 
             v_left, v_right = P._wheel_commands(0.0, P.MAX_TURN)
+            if motors is not None and not printed_cmd:
+                rpm_left = v_left / P.WHEEL_CIRC * 60
+                rpm_right = v_right / P.WHEEL_CIRC * 60
+                print(f"Commanding wheel speeds: "
+                      f"L={P.LEFT_MOTOR_SIGN * rpm_left:.1f} RPM  "
+                      f"R={P.RIGHT_MOTOR_SIGN * rpm_right:.1f} RPM")
+                printed_cmd = True
 
             if motors is not None:
                 motors.send(v_left, v_right)
@@ -143,6 +153,15 @@ def run(drive=True, port=None, countdown=3):
             if motors is not None:
                 if measured_ticks >= TICKS_360:
                     break
+                elapsed_total = time.monotonic() - t_start
+                if measured_ticks == 0.0 and elapsed_total >= encoder_timeout:
+                    aborted = (
+                        f"no encoder ticks after {encoder_timeout:.1f}s"
+                    )
+                    break
+                if elapsed_total >= timeout:
+                    aborted = f"timeout after {timeout:.1f}s"
+                    break
             else:
                 if turned >= 2 * math.pi:
                     break
@@ -165,6 +184,8 @@ def run(drive=True, port=None, countdown=3):
     print(f"\nSpin complete: {measured_degrees:.1f}° encoder  |  "
           f"L={abs_ticks_l} R={abs_ticks_r} measured={measured_ticks:.0f} encoder ticks  |  "
           f"{elapsed_s:.1f} s  ({len(times)} ticks)")
+    if aborted:
+        print(f"ABORTED: {aborted}")
     if motors is not None and (abs_ticks_l == 0 or abs_ticks_r == 0):
         print("WARNING: one encoder reported 0 ticks during the spin. "
               "Check encoder wiring/signs before trusting odometry.")
@@ -178,6 +199,7 @@ def run(drive=True, port=None, countdown=3):
         enc_l_cum=enc_left_cum, enc_r_cum=enc_right_cum,
         enc_l_delta=enc_left_delta, enc_r_delta=enc_right_delta,
         drove=(motors is not None),
+        aborted=aborted,
     )
 
 
@@ -261,7 +283,13 @@ if __name__ == "__main__":
                         help=f"serial port override (default: {_MOTOR_PORT})")
     parser.add_argument("--countdown", type=int, default=3,
                         help="seconds before motors start (default: 3)")
+    parser.add_argument("--timeout", type=float, default=8.0,
+                        help="max motor runtime in seconds (default: 8)")
+    parser.add_argument("--encoder-timeout", type=float, default=2.0,
+                        help="abort if no encoder ticks arrive by this many seconds (default: 2)")
     args = parser.parse_args()
 
-    data = run(drive=not args.no_drive, port=args.port, countdown=args.countdown)
+    data = run(drive=not args.no_drive, port=args.port,
+               countdown=args.countdown, timeout=args.timeout,
+               encoder_timeout=args.encoder_timeout)
     plot(data)
