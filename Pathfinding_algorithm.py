@@ -31,11 +31,10 @@ log = logging.getLogger("robot")
 # CONFIGURE — edit these before running
 # =============================================================================
 
-# Hardware
-WHEEL_DIAMETER_IN = 2.668          # outer wheel diameter (inches) (67.78mm)
-WHEEL_TRACK_IN    = 12.99         # inside-to-inside wheel spacing (inches) (middle to middle is 36cm or 14.17in)
-  #wheel width is 26.1mm, platform to wheel is 14.1mm, platform width is 30.48cm, total inner width is 
-                                  # ← add measured wheel width when known
+# Hardware: wheel width is 26.1mm, platform to wheel is 14.1mm, platform width is 30.48cm, wheel diameter is 67.78mm
+WHEEL_DIAMETER_M = 0.06778          # outer wheel diameter (meters)
+TRACK_M    = 0.333         # inside-to-inside wheel spacing (meters)
+
 GEAR_RATIO        = 5            # motor gearbox ratio (check sticker)
 LEFT_ENC_SIGN     = -1           # flip to +1 if left wheel counts backwards
 RIGHT_ENC_SIGN    = +1
@@ -76,10 +75,8 @@ ENCODER_PPR  = 503
 # DERIVED CONSTANTS  (do not edit)
 # =============================================================================
 
-_IN          = 0.0254
-WHEEL_CIRC   = math.pi * WHEEL_DIAMETER_IN * _IN   # metres per revolution
+WHEEL_CIRC   = math.pi * WHEEL_DIAMETER_M   # metres per revolution
 M_PER_PULSE  = WHEEL_CIRC / ENCODER_PPR
-TRACK_M      = WHEEL_TRACK_IN * _IN
 
 # Wheel rotations for a robot-body degree of rotation (point turn geometry)
 ROT_PER_DEG  = WHEEL_TRACK_IN / (360.0 * WHEEL_DIAMETER_IN)
