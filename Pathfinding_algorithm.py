@@ -41,7 +41,7 @@ RIGHT_ENC_SIGN    = +1
 LEFT_MOTOR_SIGN   = -1           # flip to +1 if left motor drives wrong direction
 RIGHT_MOTOR_SIGN  = +1
 
-MOTOR_PORT  = "/dev/ttyACM0"     # or /dev/ttyUSB0 — check `ls /dev/tty*`
+MOTOR_PORT  = "/dev/ttyUSB0"     # CP2102 USB-UART bridge
 MOTOR_BAUD  = 115200
 UDP_PORT    = 5005               # vision node sends here
 UDP_STALE_S = 0.5                # seconds before a sighting is considered lost
