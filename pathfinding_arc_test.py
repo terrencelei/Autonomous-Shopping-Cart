@@ -39,7 +39,7 @@ START_POS     = [2.5, 1.5]
 START_HEADING = math.radians(90)   # facing +y toward the box
 
 # Make the whole map free space — we're testing path execution, not navigation
-P.chunk_map = np.ones_like(P.chunk_map)
+P.CHUNK_MAP = [[1] * len(P.CHUNK_MAP[0]) for _ in P.CHUNK_MAP]
 
 # =============================================================================
 
@@ -66,23 +66,23 @@ def path_step(robot_pos, robot_heading, target_pos):
     then drives forward with a small heading correction.
     Returns (v_left, v_right) in m/s.
     """
-    want = P.bearing_to(robot_pos, target_pos)
-    err  = P.angle_diff(want, robot_heading)
+    want = P._bearing(robot_pos, target_pos)
+    err  = P._adiff(want, robot_heading)
 
     if abs(err) > ALIGN_THRESH_RAD:
-        omega = math.copysign(P.TURN_SPEED_RAD, err)
+        omega = math.copysign(P.MAX_TURN, err)
         v_fwd = 0.0
     else:
-        omega = math.copysign(min(abs(err) * 2.0, P.TURN_SPEED_RAD), err)
-        v_fwd = P.ROBOT_SPEED_MPS
+        omega = math.copysign(min(abs(err) * 2.0, P.MAX_TURN), err)
+        v_fwd = P.MAX_SPEED
 
-    return P.velocities_to_wheel_commands(v_fwd, omega)
+    return P._wheel_commands(v_fwd, omega)
 
 
 def integrate_kinematics(pos, heading, v_left, v_right, dt):
     """Differential-drive forward integration (Euler at start-of-step heading)."""
     v_fwd = (v_left + v_right) / 2.0
-    omega = (v_right - v_left) / P.WHEEL_TRACK_M
+    omega = (v_right - v_left) / P.TRACK_M
     new_heading = (heading + omega * dt) % (2 * math.pi)
     new_x = pos[0] + v_fwd * math.cos(heading) * dt
     new_y = pos[1] + v_fwd * math.sin(heading) * dt
@@ -104,16 +104,17 @@ def find_serial_port(preferred):
 
 
 def run(drive=True, port=None, countdown=3):
-    P.robot_pos     = list(START_POS)
-    P.robot_heading = START_HEADING
+    P.S.pos     = list(START_POS)
+    P.S.heading = START_HEADING
 
     motors = None
     if drive:
-        chosen = port or find_serial_port(P.MOTOR_UART_PORT)
-        if chosen != P.MOTOR_UART_PORT:
+        chosen = port or find_serial_port(P.MOTOR_PORT)
+        if chosen != P.MOTOR_PORT:
             print(f"Note: using {chosen} "
-                  f"(Pathfinding_algorithm.MOTOR_UART_PORT = {P.MOTOR_UART_PORT})")
-        motors = P.MotorDriver(chosen, P.MOTOR_UART_BAUD)
+                  f"(Pathfinding_algorithm.MOTOR_PORT = {P.MOTOR_PORT})")
+            P.MOTOR_PORT = chosen
+        motors = P.MotorDriver()
         if countdown > 0:
             print(f"\n*** Cart will start driving in {countdown}s ***")
             for k in range(countdown, 0, -1):
@@ -143,8 +144,8 @@ def run(drive=True, port=None, countdown=3):
         tgt = corners[wp_idx]
 
         # Advance to next corner when close enough; stop after final corner
-        dist_to_wp = math.hypot(tgt[0] - P.robot_pos[0],
-                                tgt[1] - P.robot_pos[1])
+        dist_to_wp = math.hypot(tgt[0] - P.S.pos[0],
+                                tgt[1] - P.S.pos[1])
         if dist_to_wp < WAYPOINT_TOLERANCE:
             if wp_idx < n_corners - 1:
                 wp_idx += 1
@@ -152,10 +153,10 @@ def run(drive=True, port=None, countdown=3):
             else:
                 break   # final corner reached — done
 
-        v_left, v_right = path_step(P.robot_pos, P.robot_heading, tgt)
+        v_left, v_right = path_step(P.S.pos, P.S.heading, tgt)
 
         if motors is not None:
-            motors.send_velocities(v_left, v_right)
+            motors.send(v_left, v_right)
             d_l, d_r = motors.read_encoder_deltas()
         else:
             d_l, d_r = 0, 0
@@ -164,16 +165,16 @@ def run(drive=True, port=None, countdown=3):
         enc_left_cum.append(cum_l);  enc_right_cum.append(cum_r)
 
         times.append(t)
-        wp_xs.append(tgt[0]);          wp_ys.append(tgt[1])
-        robot_xs.append(P.robot_pos[0]); robot_ys.append(P.robot_pos[1])
-        robot_thetas.append(P.robot_heading)
+        wp_xs.append(tgt[0]);        wp_ys.append(tgt[1])
+        robot_xs.append(P.S.pos[0]); robot_ys.append(P.S.pos[1])
+        robot_thetas.append(P.S.heading)
         v_lefts.append(v_left);        v_rights.append(v_right)
         dist_to_wp_list.append(dist_to_wp)
 
         new_pos, new_heading, v_fwd, omega = integrate_kinematics(
-            P.robot_pos, P.robot_heading, v_left, v_right, P.DT)
-        P.robot_pos     = new_pos
-        P.robot_heading = new_heading
+            P.S.pos, P.S.heading, v_left, v_right, P.DT)
+        P.S.pos     = new_pos
+        P.S.heading = new_heading
         v_fwds.append(v_fwd); omegas.append(omega)
 
         if motors is not None:
@@ -239,8 +240,8 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     # ── Forward speed ──────────────────────────────────────
     ax = fig.add_subplot(gs[0, 1])
     ax.plot(data['t'], data['v_fwd'], 'b-')
-    ax.axhline(P.ROBOT_SPEED_MPS, color='gray', ls=':', alpha=0.5,
-               label=f'cap {P.ROBOT_SPEED_MPS} m/s')
+    ax.axhline(P.MAX_SPEED, color='gray', ls=':', alpha=0.5,
+               label=f'cap {P.MAX_SPEED} m/s')
     ax.set_ylabel('v_forward (m/s)')
     ax.set_title('Forward speed command')
     ax.grid(True, alpha=0.3)
@@ -249,9 +250,9 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     # ── Turn rate ──────────────────────────────────────────
     ax = fig.add_subplot(gs[1, 1])
     ax.plot(data['t'], np.degrees(data['omega']), 'b-')
-    ax.axhline( math.degrees(P.TURN_SPEED_RAD), color='gray', ls=':', alpha=0.5,
-                label=f'cap ±{math.degrees(P.TURN_SPEED_RAD):.0f}°/s')
-    ax.axhline(-math.degrees(P.TURN_SPEED_RAD), color='gray', ls=':', alpha=0.5)
+    ax.axhline( math.degrees(P.MAX_TURN), color='gray', ls=':', alpha=0.5,
+                label=f'cap ±{math.degrees(P.MAX_TURN):.0f}°/s')
+    ax.axhline(-math.degrees(P.MAX_TURN), color='gray', ls=':', alpha=0.5)
     ax.set_ylabel('omega (deg/s)')
     ax.set_title('Turn rate command')
     ax.grid(True, alpha=0.3)
@@ -298,7 +299,7 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     ax2.set_xlim(min(xs) - pad, max(xs) + pad)
     ax2.set_ylim(min(ys) - pad, max(ys) + pad)
     ax2.set_xlabel('x (m)'); ax2.set_ylabel('y (m)')
-    ax2.set_title(f'Cart path execution  ({BOX_SIDE}m box, cap {P.ROBOT_SPEED_MPS} m/s)')
+    ax2.set_title(f'Cart path execution  ({BOX_SIDE}m box, cap {P.MAX_SPEED} m/s)')
     ax2.legend(loc='upper right', fontsize=9)
     ax2.grid(True, alpha=0.3)
 
@@ -361,7 +362,7 @@ if __name__ == "__main__":
                         help="pure simulation — don't open the ESP32 serial port")
     parser.add_argument("--port", default=None,
                         help=f"serial port override "
-                             f"(default: {P.MOTOR_UART_PORT}, auto-falls back to /dev/ttyUSB0)")
+                             f"(default: {P.MOTOR_PORT}, auto-falls back to /dev/ttyUSB0)")
     parser.add_argument("--countdown", type=int, default=3,
                         help="seconds to wait before commanding motors (default: 3)")
     args = parser.parse_args()

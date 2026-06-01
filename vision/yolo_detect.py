@@ -271,12 +271,8 @@ def run(no_display=False, no_drive=False):
     smooth_state = {}
 
     # Motor driver and odometry from Pathfinding_algorithm
-    motors = None if no_drive else P.MotorDriver(P.MOTOR_UART_PORT, P.MOTOR_UART_BAUD)
-    odometry = P.Odometry(
-        start_pos     = list(P.robot_pos),
-        start_heading = P.robot_heading,
-        encoder_reader = motors.read_encoder_deltas if motors else None,
-    )
+    motors   = None if no_drive else P.MotorDriver()
+    odometry = P.Odometry(motors.read_encoder_deltas if motors else lambda: (0, 0))
 
     frame_idx   = 0
     frame_times = []
@@ -310,10 +306,10 @@ def run(no_display=False, no_drive=False):
             # Control tick at P.DT rate (independent of camera fps)
             now = time.monotonic()
             if now - t_last_tick >= P.DT:
-                pos, heading = odometry.update(P.DT)
+                pos, heading = odometry.update()
                 v_left, v_right = P.tick(latest_target, pos, heading)
                 if motors is not None:
-                    motors.send_velocities(v_left, v_right)
+                    motors.send(v_left, v_right)
                 t_last_tick = now
 
             t1 = time.time()
@@ -322,7 +318,7 @@ def run(no_display=False, no_drive=False):
             if len(frame_times) > 30:
                 frame_times.pop(0)
             fps_live = (len(frame_times) - 1) / (frame_times[-1] - frame_times[0]) if len(frame_times) > 1 else 0.0
-            cv2.putText(out, f"NPU  FPS: {fps_live:.1f}  {latency_ms:.0f}ms  [{P.robot_state}]",
+            cv2.putText(out, f"NPU  FPS: {fps_live:.1f}  {latency_ms:.0f}ms  [{P.S.mode}]",
                         (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
 
             for role, label_id, conf, dist, angle in rows:
