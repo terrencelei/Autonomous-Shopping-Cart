@@ -32,7 +32,7 @@ log = logging.getLogger("robot")
 # =============================================================================
 
 # Hardware
-WHEEL_DIAMETER_IN = 3.0          # outer wheel diameter (inches)
+WHEEL_DIAMETER_IN = 2.75          # outer wheel diameter (inches)
 WHEEL_TRACK_IN    = 13.0         # inside-to-inside wheel spacing (inches)
                                   # ← add measured wheel width when known
 GEAR_RATIO        = 5            # motor gearbox ratio (check sticker)
@@ -68,7 +68,7 @@ DIST_KP      = 0.4               # distance PD proportional gain  (m/s per metre
 DIST_KD      = 0.3               # distance PD derivative gain    (m/s per m/s)
 
 # Encoder counts per wheel revolution (quadrature × 11 cycles × gear ratio)
-ENCODER_PPR  = 11 * 4 * GEAR_RATIO
+ENCODER_PPR  = 184 #adjusted based on the first calibration
 
 # =============================================================================
 # DERIVED CONSTANTS  (do not edit)
