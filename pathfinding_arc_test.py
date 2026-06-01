@@ -73,7 +73,7 @@ def run(drive=True, port=None, countdown=3):
 
     times         = []
     robot_xs, robot_ys, robot_thetas = [], [], []
-    v_fwds, omegas = [], []
+    v_fwds, omegas, v_lefts, v_rights = [], [], [], []
     enc_left_cum, enc_right_cum = [], []
     enc_left_delta, enc_right_delta = [], []
     cum_l, cum_r = 0, 0
@@ -108,6 +108,7 @@ def run(drive=True, port=None, countdown=3):
             P.S.pos     = new_pos
             P.S.heading = new_heading
             v_fwds.append(v_fwd); omegas.append(omega)
+            v_lefts.append(v_left); v_rights.append(v_right)
 
             turned += abs(omega) * P.DT
             i += 1
@@ -129,6 +130,7 @@ def run(drive=True, port=None, countdown=3):
         t=times,
         rx=robot_xs, ry=robot_ys, rt=robot_thetas,
         v_fwd=v_fwds, omega=omegas,
+        v_left=v_lefts, v_right=v_rights,
         enc_l_cum=enc_left_cum, enc_r_cum=enc_right_cum,
         enc_l_delta=enc_left_delta, enc_r_delta=enc_right_delta,
         drove=(motors is not None),
@@ -175,11 +177,13 @@ def plot(data, out_path="pathfinding_arc_test.png"):
         ax_cum.legend(fontsize=9)
         ax_cum.grid(True, alpha=0.3)
 
-        cmd_rpm = [v / P.WHEEL_CIRC * 60 for v in data['v_fwd']]
-        ax_rpm.plot(data['t'], cmd_rpm, 'b-', label='commanded RPM')
+        rpm_l = [v / P.WHEEL_CIRC * 60 for v in data['v_left']]
+        rpm_r = [v / P.WHEEL_CIRC * 60 for v in data['v_right']]
+        ax_rpm.plot(data['t'], rpm_l, 'b-', label='left commanded RPM')
+        ax_rpm.plot(data['t'], rpm_r, 'r-', label='right commanded RPM')
         ax_rpm.set_xlabel('time (s)')
         ax_rpm.set_ylabel('RPM')
-        ax_rpm.set_title('Wheel speed command')
+        ax_rpm.set_title('Wheel speed commands')
         ax_rpm.legend(fontsize=8)
         ax_rpm.grid(True, alpha=0.3)
 
