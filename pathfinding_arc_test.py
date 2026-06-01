@@ -88,6 +88,10 @@ def run(drive=True, port=None, countdown=3):
     abs_ticks_l = 0   # accumulated absolute left encoder ticks (real hardware)
     turned      = 0.0 # simulated radians (--no-drive fallback)
 
+    # Drain any encoder packets that built up during the countdown
+    if motors is not None:
+        motors.read_encoder_deltas()
+
     i = 0
     try:
         while True:
