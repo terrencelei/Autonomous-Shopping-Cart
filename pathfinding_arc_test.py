@@ -13,6 +13,8 @@ import os
 import time
 
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')   # non-interactive backend — required on headless Pi
 import matplotlib.pyplot as plt
 
 import Pathfinding_algorithm as P
