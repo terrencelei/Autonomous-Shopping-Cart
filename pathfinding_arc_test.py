@@ -78,16 +78,22 @@ def run(drive=True, port=None, countdown=3):
     enc_left_delta, enc_right_delta = [], []
     cum_l, cum_r = 0, 0
 
-    turned = 0.0   # total radians turned so far
-    TARGET = 2 * math.pi
+    # Ticks one wheel travels during a 360° point turn:
+    #   arc = π * TRACK_M  (half-circumference of the turn circle)
+    #   ticks = arc / WHEEL_CIRC * ENCODER_PPR
+    TICKS_360 = math.pi * P.TRACK_M / P.WHEEL_CIRC * P.ENCODER_PPR
+    print(f"Target: {TICKS_360:.0f} left-encoder ticks for 360°  "
+          f"(ENCODER_PPR={P.ENCODER_PPR})")
+
+    abs_ticks_l = 0   # accumulated absolute left encoder ticks (real hardware)
+    turned      = 0.0 # simulated radians (--no-drive fallback)
 
     i = 0
     try:
-        while turned < TARGET:
+        while True:
             t_loop0 = time.monotonic()
             t = i * P.DT
 
-            # Spin at max turn rate, no forward motion
             v_left, v_right = P._wheel_commands(0.0, P.MAX_TURN)
 
             if motors is not None:
@@ -96,6 +102,7 @@ def run(drive=True, port=None, countdown=3):
             else:
                 d_l, d_r = 0, 0
             cum_l += d_l; cum_r += d_r
+            abs_ticks_l += abs(d_l)
             enc_left_delta.append(d_l);  enc_right_delta.append(d_r)
             enc_left_cum.append(cum_l);  enc_right_cum.append(cum_r)
 
@@ -111,6 +118,16 @@ def run(drive=True, port=None, countdown=3):
             v_lefts.append(v_left); v_rights.append(v_right)
 
             turned += abs(omega) * P.DT
+
+            # Stop condition: real encoder ticks when driving, simulated
+            # radians when running --no-drive
+            if motors is not None:
+                if abs_ticks_l >= TICKS_360:
+                    break
+            else:
+                if turned >= 2 * math.pi:
+                    break
+
             i += 1
 
             if motors is not None:
@@ -123,8 +140,9 @@ def run(drive=True, port=None, countdown=3):
             motors.stop()
 
     elapsed_s = times[-1] if times else 0.0
-    print(f"\nSpin complete: {math.degrees(turned):.1f}° in {elapsed_s:.1f} s "
-          f"({len(times)} ticks)")
+    print(f"\nSpin complete: {math.degrees(turned):.1f}° sim  |  "
+          f"{abs_ticks_l} left encoder ticks  |  "
+          f"{elapsed_s:.1f} s  ({len(times)} ticks)")
 
     return dict(
         t=times,
