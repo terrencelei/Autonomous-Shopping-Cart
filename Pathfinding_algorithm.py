@@ -67,8 +67,9 @@ CENTER_KP    = 0.02              # centering gain  (rad/s per degree of angle er
 DIST_KP      = 0.4               # distance PD proportional gain  (m/s per metre)
 DIST_KD      = 0.3               # distance PD derivative gain    (m/s per m/s)
 
-# Encoder counts per wheel revolution (quadrature × 11 cycles × gear ratio)
-ENCODER_PPR  = 184 #adjusted based on the first calibration
+# Encoder counts per wheel revolution reported by the ESP32 after 4x
+# quadrature decoding and gearbox reduction.
+ENCODER_PPR  = 1472
 
 # =============================================================================
 # DERIVED CONSTANTS  (do not edit)

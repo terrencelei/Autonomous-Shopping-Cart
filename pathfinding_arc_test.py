@@ -82,10 +82,11 @@ def run(drive=True, port=None, countdown=3):
     #   arc = π * TRACK_M  (half-circumference of the turn circle)
     #   ticks = arc / WHEEL_CIRC * ENCODER_PPR
     TICKS_360 = math.pi * P.TRACK_M / P.WHEEL_CIRC * P.ENCODER_PPR
-    print(f"Target: {TICKS_360:.0f} left-encoder ticks for 360°  "
+    print(f"Target: {TICKS_360:.0f} average encoder ticks for 360°  "
           f"(ENCODER_PPR={P.ENCODER_PPR})")
 
     abs_ticks_l = 0   # accumulated absolute left encoder ticks (real hardware)
+    abs_ticks_r = 0   # accumulated absolute right encoder ticks (real hardware)
     turned      = 0.0 # simulated radians (--no-drive fallback)
 
     # Hard-flush the serial receive buffer and reset encoder tracking
@@ -110,6 +111,7 @@ def run(drive=True, port=None, countdown=3):
                 d_l, d_r = 0, 0
             cum_l += d_l; cum_r += d_r
             abs_ticks_l += abs(d_l)
+            abs_ticks_r += abs(d_r)
             enc_left_delta.append(d_l);  enc_right_delta.append(d_r)
             enc_left_cum.append(cum_l);  enc_right_cum.append(cum_r)
 
@@ -129,7 +131,8 @@ def run(drive=True, port=None, countdown=3):
             # Stop condition: real encoder ticks when driving, simulated
             # radians when running --no-drive
             if motors is not None:
-                if abs_ticks_l >= TICKS_360:
+                avg_abs_ticks = (abs_ticks_l + abs_ticks_r) / 2.0
+                if avg_abs_ticks >= TICKS_360:
                     break
             else:
                 if turned >= 2 * math.pi:
@@ -146,9 +149,10 @@ def run(drive=True, port=None, countdown=3):
             print("\nStopping motors.")
             motors.stop()
 
-    elapsed_s = times[-1] if times else 0.0
+    elapsed_s = len(times) * P.DT
+    avg_abs_ticks = (abs_ticks_l + abs_ticks_r) / 2.0
     print(f"\nSpin complete: {math.degrees(turned):.1f}° sim  |  "
-          f"{abs_ticks_l} left encoder ticks  |  "
+          f"L={abs_ticks_l} R={abs_ticks_r} avg={avg_abs_ticks:.0f} encoder ticks  |  "
           f"{elapsed_s:.1f} s  ({len(times)} ticks)")
 
     return dict(
