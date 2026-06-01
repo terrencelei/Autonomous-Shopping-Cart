@@ -311,8 +311,7 @@ def run(no_display=False, no_drive=False):
             now = time.monotonic()
             if now - t_last_tick >= P.DT:
                 pos, heading = odometry.update(P.DT)
-                target_xy    = P.relative_to_absolute(latest_target, pos, heading)
-                v_left, v_right = P.tick(target_xy, pos, heading)
+                v_left, v_right = P.tick(latest_target, pos, heading)
                 if motors is not None:
                     motors.send_velocities(v_left, v_right)
                 t_last_tick = now

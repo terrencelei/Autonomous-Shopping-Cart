@@ -1,19 +1,11 @@
 """
-Closed-loop test of Pathfinding_algorithm.tick() chasing a target that
-moves along a square box path. Drives the real motors via the ESP32 by
-default; pass --no-drive for pure simulation (e.g. on the Mac).
+Closed-loop test of Pathfinding_algorithm.tick() following a scripted
+subject that walks one lap of a 0.5 m square box.
 
-For each tick:
-  1. Place the target at its scripted position on the box path
-  2. Call tick() with the cart's current simulated pose
-  3. Send (v_left, v_right) to the ESP32 over USB serial
-  4. Integrate differential-drive kinematics in software to advance the
-     simulated pose for the next tick (the cart has no closed-loop
-     odometry yet, so the simulated pose is what tick() sees)
-
-Outputs (always written, even when motors are driven):
-  pathfinding_arc_test.png             — 4-panel diagnostic figure
-  pathfinding_arc_test_trajectory.png  — trajectory only
+The subject's absolute position is converted to a camera-frame
+(dist_m, angle_deg) reading each tick — matching exactly what
+yolo_detect.py streams from the real camera — so tick() exercises the
+same code path it uses in production.
 
 Usage:
     pip install matplotlib numpy pyserial
@@ -37,14 +29,13 @@ import Pathfinding_algorithm as P
 # CONFIG  — tweak these to explore different test cases
 # =============================================================================
 
-BOX_CENTRE         = (2.5, 3.0)
-BOX_SIDE           = 0.5    # metres — length of each side
-WAYPOINT_TOLERANCE = 0.08   # metres — advance to next corner when this close
-LAPS               = 1
-TOTAL_S            = 60.0
+BOX_CENTRE  = (2.5, 3.0)
+BOX_SIDE    = 0.5    # metres — length of each side
+BOX_SPEED   = 0.15   # m/s — subject walking speed along the perimeter
+TOTAL_S     = 4 * BOX_SIDE / BOX_SPEED   # exactly one full lap
 
-# Cart starting pose — picked to be in free space and roughly facing the box
-START_POS     = [2.5, 1.5]
+# Cart starting pose — far enough from the box that the cart must approach
+START_POS     = [2.5, 0.5]
 START_HEADING = math.radians(90)   # facing +y toward the box
 
 # Make the whole 20x20 map free space so the FOV / line-of-sight check
@@ -60,11 +51,43 @@ def box_corners():
     half = BOX_SIDE / 2.0
     cx, cy = BOX_CENTRE
     return [
-        [cx - half, cy - half],   # bottom-left
-        [cx + half, cy - half],   # bottom-right
-        [cx + half, cy + half],   # top-right
-        [cx - half, cy + half],   # top-left
+        [cx - half, cy - half],   # C0 bottom-left
+        [cx + half, cy - half],   # C1 bottom-right
+        [cx + half, cy + half],   # C2 top-right
+        [cx - half, cy + half],   # C3 top-left
     ]
+
+
+def target_at(t):
+    """Subject's absolute position at time t, walking the box CCW at BOX_SPEED."""
+    perimeter = 4 * BOX_SIDE
+    dist = (BOX_SPEED * t) % perimeter
+    half = BOX_SIDE / 2.0
+    cx, cy = BOX_CENTRE
+    if dist < BOX_SIDE:
+        return [cx - half + dist, cy - half]
+    elif dist < 2 * BOX_SIDE:
+        return [cx + half, cy - half + (dist - BOX_SIDE)]
+    elif dist < 3 * BOX_SIDE:
+        return [cx + half - (dist - 2 * BOX_SIDE), cy + half]
+    else:
+        return [cx - half, cy + half - (dist - 3 * BOX_SIDE)]
+
+
+def absolute_to_reading(target_pos, robot_pos, robot_heading):
+    """Convert absolute target position to (dist_m, angle_deg) camera reading.
+
+    Inverse of Pathfinding_algorithm.relative_to_absolute().
+    angle_deg: 0 = straight ahead, positive = target to the right.
+    """
+    dx = target_pos[0] - robot_pos[0]
+    dy = target_pos[1] - robot_pos[1]
+    dist_m = math.hypot(dx, dy)
+    if dist_m < 1e-6:
+        return 0.0, 0.0
+    bearing_world = math.atan2(dy, dx)
+    angle_deg = math.degrees(robot_heading - bearing_world)
+    return dist_m, angle_deg
 
 
 def integrate_kinematics(pos, heading, v_left, v_right, dt):
@@ -109,17 +132,11 @@ def run(drive=True, port=None, countdown=3):
                 time.sleep(1)
             print("  GO!\n")
 
-    corners      = box_corners()
-    n_corners    = len(corners)
-    total_wps    = n_corners * LAPS
-    wp_idx       = 0          # which corner we're heading to
-    laps_done    = 0
-
-    times         = []
-    wp_xs, wp_ys  = [], []    # current waypoint at each tick
+    times          = []
+    target_xs, target_ys = [], []
     robot_xs, robot_ys, robot_thetas = [], [], []
     v_fwds, omegas, v_lefts, v_rights = [], [], [], []
-    wp_idxs       = []
+    dists          = []
     enc_left_cum, enc_right_cum = [], []
     enc_left_delta, enc_right_delta = [], []
     cum_l, cum_r = 0, 0
@@ -130,22 +147,11 @@ def run(drive=True, port=None, countdown=3):
         t_loop0 = time.monotonic()
         t   = i * P.DT
 
-        tgt = corners[wp_idx % n_corners]
+        # Subject walks the box; convert to camera-frame reading for tick()
+        tgt     = target_at(t)
+        reading = absolute_to_reading(tgt, P.robot_pos, P.robot_heading)
 
-        # Advance to next corner when close enough; stop when square is done
-        dist_to_wp = math.hypot(tgt[0] - P.robot_pos[0],
-                                tgt[1] - P.robot_pos[1])
-        if dist_to_wp < WAYPOINT_TOLERANCE:
-            if wp_idx < total_wps - 1:
-                wp_idx += 1
-                if wp_idx % n_corners == 0:
-                    laps_done += 1
-                tgt = corners[wp_idx % n_corners]
-            else:
-                # Final corner reached — stop
-                break
-
-        v_left, v_right = P.tick(tgt, P.robot_pos, P.robot_heading)
+        v_left, v_right = P.tick(reading, P.robot_pos, P.robot_heading)
 
         if motors is not None:
             motors.send_velocities(v_left, v_right)
@@ -160,11 +166,11 @@ def run(drive=True, port=None, countdown=3):
         enc_right_cum.append(cum_r)
 
         times.append(t)
-        wp_xs.append(tgt[0]); wp_ys.append(tgt[1])
+        target_xs.append(tgt[0]); target_ys.append(tgt[1])
         robot_xs.append(P.robot_pos[0]); robot_ys.append(P.robot_pos[1])
         robot_thetas.append(P.robot_heading)
         v_lefts.append(v_left); v_rights.append(v_right)
-        wp_idxs.append(wp_idx)
+        dists.append(reading[0])
 
         new_pos, new_heading, v_fwd, omega = integrate_kinematics(
             P.robot_pos, P.robot_heading, v_left, v_right, P.DT)
@@ -183,15 +189,14 @@ def run(drive=True, port=None, countdown=3):
 
     return dict(
         t=times,
-        wx=wp_xs, wy=wp_ys,
+        tx=target_xs, ty=target_ys,
         rx=robot_xs, ry=robot_ys, rt=robot_thetas,
         v_fwd=v_fwds, omega=omegas,
         v_left=v_lefts, v_right=v_rights,
-        wp_idx=wp_idxs,
+        dist=dists,
         enc_l_cum=enc_left_cum, enc_r_cum=enc_right_cum,
         enc_l_delta=enc_left_delta, enc_r_delta=enc_right_delta,
         drove=(motors is not None),
-        laps_done=laps_done,
     )
 
 
@@ -204,14 +209,13 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     corners = box_corners()
     box_xs = [c[0] for c in corners] + [corners[0][0]]
     box_ys = [c[1] for c in corners] + [corners[0][1]]
-    ax.plot(box_xs, box_ys, 'r:', lw=1.5, alpha=0.6, label='box path')
-    for idx, (cx, cy) in enumerate(corners):
-        ax.scatter([cx], [cy], c='crimson', marker='D', s=50, zorder=4)
-        ax.annotate(f'C{idx}', (cx, cy), textcoords='offset points',
-                    xytext=(5, 5), fontsize=7, color='crimson')
+    ax.plot(box_xs, box_ys, 'r:', lw=1.5, alpha=0.6, label='subject path')
+    ax.plot(data['tx'], data['ty'], 'r-', lw=1.0, alpha=0.35)
     ax.plot(data['rx'], data['ry'], 'b-',  lw=1.5, label='cart path')
     ax.scatter([data['rx'][0]], [data['ry'][0]], c='blue',  marker='o', s=70,
                label='cart start', zorder=5)
+    ax.scatter([data['tx'][0]], [data['ty'][0]], c='crimson', marker='x', s=70,
+               label='subject start', zorder=5)
     ax.scatter([data['rx'][-1]], [data['ry'][-1]], c='blue', marker='s', s=70,
                label='cart end',   zorder=5)
 
@@ -226,11 +230,11 @@ def plot(data, out_path="pathfinding_arc_test.png"):
 
     ax.set_aspect('equal')
     pad = 1.0
-    xs = data['rx']; ys = data['ry']
+    xs = data['rx'] + data['tx']; ys = data['ry'] + data['ty']
     ax.set_xlim(min(xs) - pad, max(xs) + pad)
     ax.set_ylim(min(ys) - pad, max(ys) + pad)
     ax.set_xlabel('x (m)'); ax.set_ylabel('y (m)')
-    ax.set_title(f'Trajectory  ({BOX_SIDE}m box, {LAPS} laps, tol={WAYPOINT_TOLERANCE}m)')
+    ax.set_title(f'Trajectory  (subject {BOX_SPEED} m/s, hold {P.HOLD_DIST_M} m)')
     ax.legend(loc='upper right', fontsize=8)
     ax.grid(True, alpha=0.3)
 
@@ -255,17 +259,14 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=8)
 
-    # ── Distance to active waypoint ────────────────────────
-    distances = [math.hypot(wx - rx, wy - ry)
-                 for wx, wy, rx, ry in zip(data['wx'], data['wy'],
-                                            data['rx'], data['ry'])]
+    # ── Distance to subject ────────────────────────────────
     ax = fig.add_subplot(gs[2, 1])
-    ax.plot(data['t'], distances, 'b-')
-    ax.axhline(WAYPOINT_TOLERANCE, color='gray', ls=':', alpha=0.6,
-               label=f'tol {WAYPOINT_TOLERANCE}m')
+    ax.plot(data['t'], data['dist'], 'b-')
+    ax.axhline(P.HOLD_DIST_M, color='gray', ls=':', alpha=0.6,
+               label=f'hold dist {P.HOLD_DIST_M} m')
     ax.set_xlabel('time (s)')
-    ax.set_ylabel('dist to waypoint (m)')
-    ax.set_title('Waypoint error')
+    ax.set_ylabel('distance to subject (m)')
+    ax.set_title('Cart–subject distance')
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
@@ -278,11 +279,12 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     corners = box_corners()
     box_xs = [c[0] for c in corners] + [corners[0][0]]
     box_ys = [c[1] for c in corners] + [corners[0][1]]
-    ax2.plot(box_xs, box_ys, 'r:', lw=2.0, alpha=0.6, label='box path')
+    ax2.plot(box_xs, box_ys, 'r:', lw=2.0, alpha=0.6, label='subject path')
+    ax2.plot(data['tx'], data['ty'], 'r-', lw=1.0, alpha=0.4)
     for idx, (cx, cy) in enumerate(corners):
-        ax2.scatter([cx], [cy], c='crimson', marker='D', s=70, zorder=4)
+        ax2.scatter([cx], [cy], c='crimson', marker='D', s=60, zorder=4)
         ax2.annotate(f'C{idx}', (cx, cy), textcoords='offset points',
-                     xytext=(6, 6), fontsize=8, color='crimson')
+                     xytext=(5, 5), fontsize=8, color='crimson')
     ax2.plot(data['rx'], data['ry'], 'b-',  lw=2.0, label='cart path')
     ax2.scatter([data['rx'][0]], [data['ry'][0]], c='blue',  marker='o', s=90,
                 label='cart start', zorder=5)
@@ -299,13 +301,13 @@ def plot(data, out_path="pathfinding_arc_test.png"):
 
     ax2.set_aspect('equal')
     pad = 1.0
-    xs = data['rx']; ys = data['ry']
+    xs = data['rx'] + data['tx']; ys = data['ry'] + data['ty']
     ax2.set_xlim(min(xs) - pad, max(xs) + pad)
     ax2.set_ylim(min(ys) - pad, max(ys) + pad)
     ax2.set_xlabel('x (m)'); ax2.set_ylabel('y (m)')
     ax2.set_title(
-        f'Cart path execution  (cap {P.ROBOT_SPEED_MPS} m/s,  '
-        f'{BOX_SIDE}m box × {LAPS} laps)'
+        f'Subject walks {BOX_SIDE}m box @ {BOX_SPEED} m/s  —  '
+        f'cart follows (hold {P.HOLD_DIST_M} m)'
     )
     ax2.legend(loc='upper right', fontsize=9)
     ax2.grid(True, alpha=0.3)
@@ -351,15 +353,13 @@ def plot(data, out_path="pathfinding_arc_test.png"):
         print(f"Saved: {motors_path}")
 
     # Numerical summary
-    distances = [math.hypot(wx - rx, wy - ry)
-                 for wx, wy, rx, ry in zip(data['wx'], data['wy'],
-                                            data['rx'], data['ry'])]
     print(f"\nSummary over {TOTAL_S:.1f} s, {len(data['t'])} ticks "
-          f"({data['laps_done']} laps completed):")
-    print(f"  mean dist to active waypoint : {np.mean(distances):.2f} m")
-    print(f"  max  dist to active waypoint : {np.max(distances):.2f} m")
+          f"(subject: one {BOX_SIDE}m lap @ {BOX_SPEED} m/s):")
+    print(f"  mean cart–subject distance   : {np.mean(data['dist']):.2f} m")
+    print(f"  min  cart–subject distance   : {np.min(data['dist']):.2f} m")
+    print(f"  hold target distance         : {P.HOLD_DIST_M:.2f} m")
     print(f"  mean v_forward (when moving) : "
-          f"{np.mean([v for v in data['v_fwd'] if v > 0.01]):.2f} m/s")
+          f"{np.mean([v for v in data['v_fwd'] if abs(v) > 0.01]):.2f} m/s")
     print(f"  max  |omega|                 : "
           f"{math.degrees(max(abs(w) for w in data['omega'])):.1f} deg/s")
     if data.get('drove'):
