@@ -28,6 +28,7 @@ _MOTOR_PORT = getattr(P, 'MOTOR_PORT', getattr(P, 'MOTOR_UART_PORT', '/dev/ttyAC
 
 START_POS     = [0.0, 0.0]
 START_HEADING = 0.0
+TEST_DT       = 0.02
 
 # =============================================================================
 
@@ -101,7 +102,7 @@ def run(drive=True, port=None, countdown=3):
     try:
         while True:
             t_loop0 = time.monotonic()
-            t = i * P.DT
+            t = i * TEST_DT
 
             v_left, v_right = P._wheel_commands(0.0, P.MAX_TURN)
 
@@ -130,13 +131,13 @@ def run(drive=True, port=None, countdown=3):
             robot_thetas.append(heading)
 
             new_pos, new_heading, v_fwd, omega = integrate_kinematics(
-                pos, heading, v_left, v_right, P.DT)
+                pos, heading, v_left, v_right, TEST_DT)
             pos     = new_pos
             heading = new_heading
             v_fwds.append(v_fwd); omegas.append(omega)
             v_lefts.append(v_left); v_rights.append(v_right)
 
-            turned += abs(omega) * P.DT
+            turned += abs(omega) * TEST_DT
 
             # Stop condition: real encoder ticks when driving, simulated
             # radians when running --no-drive
@@ -151,14 +152,14 @@ def run(drive=True, port=None, countdown=3):
 
             if motors is not None:
                 elapsed = time.monotonic() - t_loop0
-                if elapsed < P.DT:
-                    time.sleep(P.DT - elapsed)
+                if elapsed < TEST_DT:
+                    time.sleep(TEST_DT - elapsed)
     finally:
         if motors is not None:
             print("\nStopping motors.")
             motors.stop()
 
-    elapsed_s = len(times) * P.DT
+    elapsed_s = len(times) * TEST_DT
     active_ticks = [ticks for ticks in (abs_ticks_l, abs_ticks_r) if ticks > 0]
     measured_ticks = sum(active_ticks) / len(active_ticks) if active_ticks else 0.0
     measured_degrees = measured_ticks / TICKS_360 * 360.0
