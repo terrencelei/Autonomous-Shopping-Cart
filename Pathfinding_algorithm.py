@@ -32,8 +32,9 @@ log = logging.getLogger("robot")
 # =============================================================================
 
 # Hardware
-WHEEL_DIAMETER_IN = 2.75          # outer wheel diameter (inches)
-WHEEL_TRACK_IN    = 13.0         # inside-to-inside wheel spacing (inches)
+WHEEL_DIAMETER_IN = 2.668          # outer wheel diameter (inches) (67.78mm)
+WHEEL_TRACK_IN    = 12.99         # inside-to-inside wheel spacing (inches) (middle to middle is 36cm or 14.17in)
+  #wheel width is 26.1mm, platform to wheel is 14.1mm, platform width is 30.48cm, total inner width is 
                                   # ← add measured wheel width when known
 GEAR_RATIO        = 5            # motor gearbox ratio (check sticker)
 LEFT_ENC_SIGN     = -1           # flip to +1 if left wheel counts backwards
