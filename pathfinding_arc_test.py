@@ -159,7 +159,8 @@ def run(drive=True, port=None, countdown=3):
     elapsed_s = len(times) * P.DT
     active_ticks = [ticks for ticks in (abs_ticks_l, abs_ticks_r) if ticks > 0]
     measured_ticks = sum(active_ticks) / len(active_ticks) if active_ticks else 0.0
-    print(f"\nSpin complete: {math.degrees(turned):.1f}° sim  |  "
+    measured_degrees = measured_ticks / TICKS_360 * 360.0
+    print(f"\nSpin complete: {measured_degrees:.1f}° encoder  |  "
           f"L={abs_ticks_l} R={abs_ticks_r} measured={measured_ticks:.0f} encoder ticks  |  "
           f"{elapsed_s:.1f} s  ({len(times)} ticks)")
     if motors is not None and (abs_ticks_l == 0 or abs_ticks_r == 0):
