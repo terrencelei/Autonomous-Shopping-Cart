@@ -55,8 +55,8 @@ def find_serial_port(preferred):
 
 
 def run(drive=True, port=None, countdown=3):
-    P.S.pos     = list(START_POS)
-    P.S.heading = START_HEADING
+    pos     = list(START_POS)
+    heading = START_HEADING
 
     motors = None
     if drive:
@@ -116,13 +116,13 @@ def run(drive=True, port=None, countdown=3):
             enc_left_cum.append(cum_l);  enc_right_cum.append(cum_r)
 
             times.append(t)
-            robot_xs.append(P.S.pos[0]); robot_ys.append(P.S.pos[1])
-            robot_thetas.append(P.S.heading)
+            robot_xs.append(pos[0]); robot_ys.append(pos[1])
+            robot_thetas.append(heading)
 
             new_pos, new_heading, v_fwd, omega = integrate_kinematics(
-                P.S.pos, P.S.heading, v_left, v_right, P.DT)
-            P.S.pos     = new_pos
-            P.S.heading = new_heading
+                pos, heading, v_left, v_right, P.DT)
+            pos     = new_pos
+            heading = new_heading
             v_fwds.append(v_fwd); omegas.append(omega)
             v_lefts.append(v_left); v_rights.append(v_right)
 
