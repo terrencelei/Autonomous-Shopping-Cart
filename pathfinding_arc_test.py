@@ -82,7 +82,7 @@ def run(drive=True, port=None, countdown=3):
     #   arc = π * TRACK_M  (half-circumference of the turn circle)
     #   ticks = arc / WHEEL_CIRC * ENCODER_PPR
     TICKS_360 = math.pi * P.TRACK_M / P.WHEEL_CIRC * P.ENCODER_PPR
-    print(f"Target: {TICKS_360:.0f} average encoder ticks for 360°  "
+    print(f"Target: {TICKS_360:.0f} active-wheel encoder ticks for 360°  "
           f"(ENCODER_PPR={P.ENCODER_PPR})")
 
     abs_ticks_l = 0   # accumulated absolute left encoder ticks (real hardware)
@@ -131,8 +131,12 @@ def run(drive=True, port=None, countdown=3):
             # Stop condition: real encoder ticks when driving, simulated
             # radians when running --no-drive
             if motors is not None:
-                avg_abs_ticks = (abs_ticks_l + abs_ticks_r) / 2.0
-                if avg_abs_ticks >= TICKS_360:
+                active_ticks = [
+                    ticks for ticks in (abs_ticks_l, abs_ticks_r)
+                    if ticks > 0
+                ]
+                measured_ticks = sum(active_ticks) / len(active_ticks)
+                if measured_ticks >= TICKS_360:
                     break
             else:
                 if turned >= 2 * math.pi:
@@ -150,10 +154,14 @@ def run(drive=True, port=None, countdown=3):
             motors.stop()
 
     elapsed_s = len(times) * P.DT
-    avg_abs_ticks = (abs_ticks_l + abs_ticks_r) / 2.0
+    active_ticks = [ticks for ticks in (abs_ticks_l, abs_ticks_r) if ticks > 0]
+    measured_ticks = sum(active_ticks) / len(active_ticks) if active_ticks else 0.0
     print(f"\nSpin complete: {math.degrees(turned):.1f}° sim  |  "
-          f"L={abs_ticks_l} R={abs_ticks_r} avg={avg_abs_ticks:.0f} encoder ticks  |  "
+          f"L={abs_ticks_l} R={abs_ticks_r} measured={measured_ticks:.0f} encoder ticks  |  "
           f"{elapsed_s:.1f} s  ({len(times)} ticks)")
+    if motors is not None and (abs_ticks_l == 0 or abs_ticks_r == 0):
+        print("WARNING: one encoder reported 0 ticks during the spin. "
+              "Check encoder wiring/signs before trusting odometry.")
 
     return dict(
         t=times,
