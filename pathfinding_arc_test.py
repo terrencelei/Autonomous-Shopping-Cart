@@ -135,7 +135,10 @@ def run(drive=True, port=None, countdown=3):
                     ticks for ticks in (abs_ticks_l, abs_ticks_r)
                     if ticks > 0
                 ]
-                measured_ticks = sum(active_ticks) / len(active_ticks)
+                measured_ticks = (
+                    sum(active_ticks) / len(active_ticks)
+                    if active_ticks else 0.0
+                )
                 if measured_ticks >= TICKS_360:
                     break
             else:
