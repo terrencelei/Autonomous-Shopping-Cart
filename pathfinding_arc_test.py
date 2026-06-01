@@ -73,6 +73,7 @@ def run(drive=True, port=None, countdown=3):
 
     times         = []
     robot_xs, robot_ys, robot_thetas = [], [], []
+    encoder_degrees = []
     v_fwds, omegas, v_lefts, v_rights = [], [], [], []
     enc_left_cum, enc_right_cum = [], []
     enc_left_delta, enc_right_delta = [], []
@@ -112,6 +113,15 @@ def run(drive=True, port=None, countdown=3):
             cum_l += d_l; cum_r += d_r
             abs_ticks_l += abs(d_l)
             abs_ticks_r += abs(d_r)
+            active_ticks = [
+                ticks for ticks in (abs_ticks_l, abs_ticks_r)
+                if ticks > 0
+            ]
+            measured_ticks = (
+                sum(active_ticks) / len(active_ticks)
+                if active_ticks else 0.0
+            )
+            encoder_degrees.append(measured_ticks / TICKS_360 * 360.0)
             enc_left_delta.append(d_l);  enc_right_delta.append(d_r)
             enc_left_cum.append(cum_l);  enc_right_cum.append(cum_r)
 
@@ -131,14 +141,6 @@ def run(drive=True, port=None, countdown=3):
             # Stop condition: real encoder ticks when driving, simulated
             # radians when running --no-drive
             if motors is not None:
-                active_ticks = [
-                    ticks for ticks in (abs_ticks_l, abs_ticks_r)
-                    if ticks > 0
-                ]
-                measured_ticks = (
-                    sum(active_ticks) / len(active_ticks)
-                    if active_ticks else 0.0
-                )
                 if measured_ticks >= TICKS_360:
                     break
             else:
@@ -170,6 +172,7 @@ def run(drive=True, port=None, countdown=3):
     return dict(
         t=times,
         rx=robot_xs, ry=robot_ys, rt=robot_thetas,
+        encoder_degrees=encoder_degrees,
         v_fwd=v_fwds, omega=omegas,
         v_left=v_lefts, v_right=v_rights,
         enc_l_cum=enc_left_cum, enc_r_cum=enc_right_cum,
@@ -181,14 +184,21 @@ def run(drive=True, port=None, countdown=3):
 def plot(data, out_path="pathfinding_arc_test.png"):
     fig, axes = plt.subplots(1, 2, figsize=(11, 5))
 
-    # ── Heading over time ──────────────────────────────────
+    # ── Angle over time ────────────────────────────────────
     ax = axes[0]
-    headings_deg = [math.degrees(h) for h in data['rt']]
-    ax.plot(data['t'], headings_deg, 'b-')
+    if data.get('drove'):
+        angles_deg = data['encoder_degrees']
+        title = 'Encoder angle over time'
+        ylabel = 'encoder angle (deg)'
+    else:
+        angles_deg = [math.degrees(h) for h in data['rt']]
+        title = 'Sim heading over time'
+        ylabel = 'sim heading (deg)'
+    ax.plot(data['t'], angles_deg, 'b-')
     ax.axhline(360, color='gray', ls=':', alpha=0.6, label='360°')
     ax.set_xlabel('time (s)')
-    ax.set_ylabel('heading (deg)')
-    ax.set_title('Heading over time')
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
