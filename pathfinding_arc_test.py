@@ -19,6 +19,8 @@ import matplotlib.pyplot as plt
 
 import Pathfinding_algorithm as P
 
+# Handle renamed constants between versions of Pathfinding_algorithm
+_MOTOR_PORT = getattr(P, 'MOTOR_PORT', getattr(P, 'MOTOR_UART_PORT', '/dev/ttyACM0'))
 
 # =============================================================================
 # CONFIG
@@ -58,9 +60,9 @@ def run(drive=True, port=None, countdown=3):
 
     motors = None
     if drive:
-        chosen = port or find_serial_port(P.MOTOR_PORT)
-        if chosen != P.MOTOR_PORT:
-            P.MOTOR_PORT = chosen
+        chosen = port or find_serial_port(_MOTOR_PORT)
+        if chosen != _MOTOR_PORT:
+            _MOTOR_PORT = chosen
         motors = P.MotorDriver()
         if countdown > 0:
             print(f"\n*** Cart will start spinning in {countdown}s ***")
@@ -192,7 +194,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-drive", action="store_true",
                         help="simulation only — don't open the ESP32 serial port")
     parser.add_argument("--port", default=None,
-                        help=f"serial port override (default: {P.MOTOR_PORT})")
+                        help=f"serial port override (default: {_MOTOR_PORT})")
     parser.add_argument("--countdown", type=int, default=3,
                         help="seconds before motors start (default: 3)")
     args = parser.parse_args()
