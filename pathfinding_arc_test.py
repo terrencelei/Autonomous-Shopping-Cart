@@ -195,6 +195,15 @@ def plot(data, out_path="pathfinding_arc_test.png"):
         title = 'Sim heading over time'
         ylabel = 'sim heading (deg)'
     ax.plot(data['t'], angles_deg, 'b-')
+    if angles_deg and data['t']:
+        final_angle = angles_deg[-1]
+        ax.plot(data['t'][-1], final_angle, 'ko', ms=4)
+        ax.annotate(f'{final_angle:.1f}°',
+                    xy=(data['t'][-1], final_angle),
+                    xytext=(-55, 14),
+                    textcoords='offset points',
+                    fontsize=9,
+                    arrowprops=dict(arrowstyle='->', lw=0.8))
     ax.axhline(360, color='gray', ls=':', alpha=0.6, label='360°')
     ax.set_xlabel('time (s)')
     ax.set_ylabel(ylabel)
