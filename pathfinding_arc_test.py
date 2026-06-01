@@ -40,7 +40,7 @@ import Pathfinding_algorithm as P
 BOX_CENTRE         = (2.5, 3.0)
 BOX_SIDE           = 0.5    # metres — length of each side
 WAYPOINT_TOLERANCE = 0.08   # metres — advance to next corner when this close
-LAPS               = 3
+LAPS               = 1
 TOTAL_S            = 60.0
 
 # Cart starting pose — picked to be in free space and roughly facing the box
@@ -132,14 +132,18 @@ def run(drive=True, port=None, countdown=3):
 
         tgt = corners[wp_idx % n_corners]
 
-        # Advance to next corner when close enough
+        # Advance to next corner when close enough; stop when square is done
         dist_to_wp = math.hypot(tgt[0] - P.robot_pos[0],
                                 tgt[1] - P.robot_pos[1])
-        if dist_to_wp < WAYPOINT_TOLERANCE and wp_idx < total_wps - 1:
-            wp_idx += 1
-            if wp_idx % n_corners == 0:
-                laps_done += 1
-            tgt = corners[wp_idx % n_corners]
+        if dist_to_wp < WAYPOINT_TOLERANCE:
+            if wp_idx < total_wps - 1:
+                wp_idx += 1
+                if wp_idx % n_corners == 0:
+                    laps_done += 1
+                tgt = corners[wp_idx % n_corners]
+            else:
+                # Final corner reached — stop
+                break
 
         v_left, v_right = P.tick(tgt, P.robot_pos, P.robot_heading)
 
