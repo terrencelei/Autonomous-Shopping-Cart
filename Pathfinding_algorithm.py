@@ -38,6 +38,8 @@ WHEEL_TRACK_IN    = 13.0         # inside-to-inside wheel spacing (inches)
 GEAR_RATIO        = 5            # motor gearbox ratio (check sticker)
 LEFT_ENC_SIGN     = -1           # flip to +1 if left wheel counts backwards
 RIGHT_ENC_SIGN    = +1
+LEFT_MOTOR_SIGN   = -1           # flip to +1 if left motor drives wrong direction
+RIGHT_MOTOR_SIGN  = +1
 
 MOTOR_PORT  = "/dev/ttyACM0"     # or /dev/ttyUSB0 — check `ls /dev/tty*`
 MOTOR_BAUD  = 115200
@@ -344,7 +346,7 @@ class MotorDriver:
         return dl, dr
 
     def send(self, vl, vr):
-        cmd = f"L{_rpm(vl):.1f} R{_rpm(vr):.1f}\n".encode()
+        cmd = f"L{LEFT_MOTOR_SIGN * _rpm(vl):.1f} R{RIGHT_MOTOR_SIGN * _rpm(vr):.1f}\n".encode()
         if self._ser and self._ser.is_open:
             self._ser.write(cmd)
         else:
