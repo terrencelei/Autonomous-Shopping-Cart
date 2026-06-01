@@ -1,10 +1,10 @@
 """
 Closed-loop test of Pathfinding_algorithm.tick() chasing a target that
-moves along a circular arc. Drives the real motors via the ESP32 by
+moves along a square box path. Drives the real motors via the ESP32 by
 default; pass --no-drive for pure simulation (e.g. on the Mac).
 
 For each tick:
-  1. Place the target at its scripted position on the arc
+  1. Place the target at its scripted position on the box path
   2. Call tick() with the cart's current simulated pose
   3. Send (v_left, v_right) to the ESP32 over USB serial
   4. Integrate differential-drive kinematics in software to advance the
@@ -37,14 +37,14 @@ import Pathfinding_algorithm as P
 # CONFIG  — tweak these to explore different test cases
 # =============================================================================
 
-ARC_CENTRE   = (2.5, 3.0)
-ARC_RADIUS   = 0.25
-ARC_OMEGA    = 0.3           # rad/s — how fast the target circles (0.3 ≈ 17°/s)
-TOTAL_S      = 25.0
+BOX_CENTRE  = (2.5, 3.0)
+BOX_SIDE    = 0.5            # metres — length of each side
+BOX_SPEED   = 0.15           # m/s along the perimeter
+TOTAL_S     = 40.0           # longer run so we see multiple laps
 
-# Cart starting pose — picked to be in free space and roughly facing the arc
+# Cart starting pose — picked to be in free space and roughly facing the box
 START_POS     = [2.5, 1.5]
-START_HEADING = math.radians(90)   # facing +y toward the arc
+START_HEADING = math.radians(90)   # facing +y toward the box
 
 # Make the whole 20x20 map free space so the FOV / line-of-sight check
 # never spuriously blocks the chase.  We're testing the controller, not
@@ -55,10 +55,19 @@ P.chunk_map = np.ones_like(P.chunk_map)
 
 
 def target_at(t):
-    """Where the target is at time t (anti-clockwise from +x of ARC_CENTRE)."""
-    theta = ARC_OMEGA * t
-    return [ARC_CENTRE[0] + ARC_RADIUS * math.cos(theta),
-            ARC_CENTRE[1] + ARC_RADIUS * math.sin(theta)]
+    """Where the target is at time t, walking counter-clockwise around the box."""
+    perimeter = 4 * BOX_SIDE
+    dist = (BOX_SPEED * t) % perimeter
+    half = BOX_SIDE / 2.0
+    cx, cy = BOX_CENTRE
+    if dist < BOX_SIDE:                  # bottom edge: left → right
+        return [cx - half + dist, cy - half]
+    elif dist < 2 * BOX_SIDE:            # right edge: bottom → top
+        return [cx + half, cy - half + (dist - BOX_SIDE)]
+    elif dist < 3 * BOX_SIDE:            # top edge: right → left
+        return [cx + half - (dist - 2 * BOX_SIDE), cy + half]
+    else:                                 # left edge: top → bottom
+        return [cx - half, cy + half - (dist - 3 * BOX_SIDE)]
 
 
 def integrate_kinematics(pos, heading, v_left, v_right, dt):
@@ -182,10 +191,11 @@ def plot(data, out_path="pathfinding_arc_test.png"):
 
     # ── Trajectory ─────────────────────────────────────────
     ax = fig.add_subplot(gs[:, 0])
-    arc_circle = plt.Circle(ARC_CENTRE, ARC_RADIUS,
-                             color='crimson', fill=False, ls=':', alpha=0.4,
-                             label='target arc')
-    ax.add_patch(arc_circle)
+    half = BOX_SIDE / 2.0
+    box_rect = plt.Rectangle(
+        (BOX_CENTRE[0] - half, BOX_CENTRE[1] - half), BOX_SIDE, BOX_SIDE,
+        color='crimson', fill=False, ls=':', alpha=0.4, label='target box')
+    ax.add_patch(box_rect)
     ax.plot(data['tx'], data['ty'], 'r--', lw=1, label='target path')
     ax.plot(data['rx'], data['ry'], 'b-',  lw=1.5, label='robot path')
     ax.scatter([data['rx'][0]], [data['ry'][0]], c='blue',  marker='o', s=70,
@@ -210,7 +220,7 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     ax.set_xlim(min(xs) - pad, max(xs) + pad)
     ax.set_ylim(min(ys) - pad, max(ys) + pad)
     ax.set_xlabel('x (m)'); ax.set_ylabel('y (m)')
-    ax.set_title(f'Trajectory  (arc ω={ARC_OMEGA} rad/s, r={ARC_RADIUS}m)')
+    ax.set_title(f'Trajectory  (box {BOX_SIDE}m side, target {BOX_SPEED} m/s)')
     ax.legend(loc='upper right', fontsize=8)
     ax.grid(True, alpha=0.3)
 
@@ -252,10 +262,11 @@ def plot(data, out_path="pathfinding_arc_test.png"):
 
     # Standalone trajectory plot ────────────────────────────
     fig2, ax2 = plt.subplots(figsize=(7, 7))
-    arc_circle = plt.Circle(ARC_CENTRE, ARC_RADIUS,
-                             color='crimson', fill=False, ls=':', alpha=0.4,
-                             label='target arc')
-    ax2.add_patch(arc_circle)
+    half = BOX_SIDE / 2.0
+    box_rect2 = plt.Rectangle(
+        (BOX_CENTRE[0] - half, BOX_CENTRE[1] - half), BOX_SIDE, BOX_SIDE,
+        color='crimson', fill=False, ls=':', alpha=0.4, label='target box')
+    ax2.add_patch(box_rect2)
     ax2.plot(data['tx'], data['ty'], 'r--', lw=1.2, label='target path')
     ax2.plot(data['rx'], data['ry'], 'b-',  lw=2.0, label='cart path')
     ax2.scatter([data['rx'][0]], [data['ry'][0]], c='blue',  marker='o', s=90,
@@ -281,7 +292,7 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     ax2.set_xlabel('x (m)'); ax2.set_ylabel('y (m)')
     ax2.set_title(
         f'Cart trajectory  (cart cap {P.ROBOT_SPEED_MPS} m/s,  '
-        f'target {ARC_OMEGA*ARC_RADIUS:.2f} m/s on arc r={ARC_RADIUS}m)'
+        f'target {BOX_SPEED} m/s on {BOX_SIDE}m box)'
     )
     ax2.legend(loc='upper right', fontsize=9)
     ax2.grid(True, alpha=0.3)
@@ -327,8 +338,9 @@ def plot(data, out_path="pathfinding_arc_test.png"):
         print(f"Saved: {motors_path}")
 
     # Numerical summary
+    laps = BOX_SPEED * TOTAL_S / (4 * BOX_SIDE)
     in_view_pct = 100.0 * sum(data['in_fov']) / len(data['in_fov'])
-    print(f"\nSummary over {TOTAL_S:.1f} s, {len(data['t'])} ticks:")
+    print(f"\nSummary over {TOTAL_S:.1f} s, {len(data['t'])} ticks ({laps:.1f} laps):")
     print(f"  target in FOV         : {in_view_pct:.1f}% of ticks")
     print(f"  mean distance to tgt  : {np.mean(distances):.2f} m")
     print(f"  max  distance to tgt  : {np.max(distances):.2f} m")
