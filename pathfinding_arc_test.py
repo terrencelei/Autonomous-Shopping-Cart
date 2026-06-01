@@ -88,9 +88,12 @@ def run(drive=True, port=None, countdown=3):
     abs_ticks_l = 0   # accumulated absolute left encoder ticks (real hardware)
     turned      = 0.0 # simulated radians (--no-drive fallback)
 
-    # Drain any encoder packets that built up during the countdown
-    if motors is not None:
-        motors.read_encoder_deltas()
+    # Hard-flush the serial receive buffer and reset encoder tracking
+    # so packets that built up during the countdown don't count
+    if motors is not None and motors._ser and motors._ser.is_open:
+        motors._ser.reset_input_buffer()
+        motors._last_l = motors._last_r = None
+        motors._dl = motors._dr = 0
 
     i = 0
     try:
