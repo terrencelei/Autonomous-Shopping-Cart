@@ -69,7 +69,7 @@ DIST_KD      = 0.3               # distance PD derivative gain    (m/s per m/s)
 
 # Encoder counts per wheel revolution reported by the ESP32 after 4x
 # quadrature decoding and gearbox reduction.
-ENCODER_PPR  = 1472
+ENCODER_PPR  = 535
 
 # =============================================================================
 # DERIVED CONSTANTS  (do not edit)
