@@ -471,12 +471,18 @@ def tick(reading, pos, heading, obstacles=None):
     elif S.mode == "AVOID_EDGE" and not S.goal_queue:
         S.mode = "EDGE_FOLLOW"
 
-    elif S.mode == "EDGE_FOLLOW" and not obstacles and S.target_visible:
-        cy           = _nearest_aisle_cy(S.pos[1])
-        S.goal_queue = [[S.pos[0], cy]]
-        S.route      = build_route(S.pos, S.goal_queue[0])
-        S.mode       = "RETURN_CENTER"
-        S.lost       = False
+    elif S.mode == "EDGE_FOLLOW" and not obstacles:
+        if S.target_visible:
+            cy           = _nearest_aisle_cy(S.pos[1])
+            S.goal_queue = [[S.pos[0], cy]]
+            S.route      = build_route(S.pos, S.goal_queue[0])
+            S.mode       = "RETURN_CENTER"
+            S.lost       = False
+        else:
+            S.mode        = "SPIN"
+            S.lost        = True
+            S.spin_turned = 0.0
+            S.spin_dir    = math.copysign(1.0, S.last_angle) or 1.0
 
     elif S.mode == "RETURN_CENTER" and not S.goal_queue:
         if S.target_visible:
