@@ -572,7 +572,7 @@ def tick(reading, pos, heading, obstacles=None):
         want_hdg  = (aisle_hdg + cross_ang) % (2 * math.pi)
         omega     = _adiff(want_hdg, S.heading) / DT
         omega     = math.copysign(min(abs(omega), MAX_TURN), omega)
-        v_forward = MAX_SPEED * 0.5
+        v_forward = MAX_SPEED
 
     elif S.mode == "RETURN_CENTER":
         if S.goal_queue:
