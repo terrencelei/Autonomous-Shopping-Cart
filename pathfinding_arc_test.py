@@ -27,7 +27,8 @@ _MOTOR_PORT = getattr(P, 'MOTOR_PORT', getattr(P, 'MOTOR_UART_PORT', '/dev/ttyAC
 START_POS     = [0.0, 0.0]
 START_HEADING = 0.0
 CENTER_DEADBAND_DEG = 2.0
-CENTER_MAX_TURN_DEG = 60.0
+CENTER_MIN_TURN_DEG = 5.0
+CENTER_MAX_TURN_DEG = 15.0
 CENTER_KP           = 0.006  # rad/s per degree of angle error
 
 # =============================================================================
@@ -197,8 +198,10 @@ def center_turn_command(angle_deg):
     if abs(angle_deg) <= CENTER_DEADBAND_DEG:
         return 0.0
     omega = -CENTER_KP * angle_deg
+    min_turn = math.radians(CENTER_MIN_TURN_DEG)
     max_turn = math.radians(CENTER_MAX_TURN_DEG)
-    return math.copysign(min(abs(omega), max_turn), omega)
+    omega_mag = min(max(abs(omega), min_turn), max_turn)
+    return math.copysign(omega_mag, omega)
 
 
 def import_yolo_detect():

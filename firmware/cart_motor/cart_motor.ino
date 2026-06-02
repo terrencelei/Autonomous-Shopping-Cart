@@ -126,6 +126,7 @@ WheelPid leftPid;
 const float RPM_KP = 0.006f;
 const float RPM_KI = 0.020f;
 const float INTEGRAL_LIMIT = 25.0f;
+const float MOTOR_MIN_OUTPUT = 0.14f;
 const float STOP_RPM_EPS = 0.5f;
 
 float clampf(float v, float lo, float hi) {
@@ -158,6 +159,9 @@ float updatePid(WheelPid &pid, float measuredRPM, float dt) {
                       + RPM_KP * error
                       + RPM_KI * pid.integral,
                       -1.0f, 1.0f);
+  if (fabs(pid.output) < MOTOR_MIN_OUTPUT) {
+    pid.output = (pid.targetRPM > 0.0f) ? MOTOR_MIN_OUTPUT : -MOTOR_MIN_OUTPUT;
+  }
   return pid.output;
 }
 
