@@ -11,6 +11,7 @@ Inference runs entirely on the IMX500's on-chip neural processor; no CPU
 inference path. Requires the imx500-models apt package.
 """
 
+import math
 import os
 import sys
 import time
@@ -54,6 +55,13 @@ TARGET_DIST_WEIGHT  = 1.0
 TARGET_ANGLE_WEIGHT = 0.3
 
 DIST_EMA_ALPHA = 0.4
+
+# Obstacle avoidance
+AVOID_ANGLE_DEG    = 20.0   # angle bias injected into target reading to steer sideways
+AVOID_CLEAR_DIST_M = 1.0    # metres to travel after obstacle leaves view before re-centring
+
+# World-map window
+WORLD_MAP_PX = 500
 
 
 class IMX500Capture:
@@ -249,6 +257,50 @@ def overlay_map(frame, rows):
     return frame
 
 
+def draw_world_map(rows, avoid):
+    """Bird's-eye world-coordinate map: cart, target, obstacles on the CHUNK_MAP grid."""
+    img = np.zeros((WORLD_MAP_PX, WORLD_MAP_PX, 3), dtype=np.uint8)
+    sx  = WORLD_MAP_PX / P.MAP_W
+    sy  = WORLD_MAP_PX / P.MAP_H
+    cpw = max(1, int(P.CHUNK * sx))
+    cph = max(1, int(P.CHUNK * sy))
+
+    for r in range(P._ROWS):
+        for c in range(P._COLS):
+            px = int(c * P.CHUNK * sx)
+            py = int((P.MAP_H - (r + 1) * P.CHUNK) * sy)
+            col = (50, 50, 50) if P.CHUNK_MAP[r][c] else (18, 18, 18)
+            cv2.rectangle(img, (px, py), (px + cpw, py + cph), col, -1)
+
+    def w2p(wx, wy):
+        return int(wx * sx), int((P.MAP_H - wy) * sy)
+
+    # Cart body + heading arrow
+    cx, cy = w2p(*P.S.pos)
+    cv2.circle(img, (cx, cy), 8, (200, 200, 200), -1)
+    ax = cx + int(18 * math.cos(P.S.heading))
+    ay = cy - int(18 * math.sin(P.S.heading))
+    cv2.arrowedLine(img, (cx, cy), (ax, ay), (255, 255, 255), 2, tipLength=0.4)
+
+    # Detections projected from cart pose into world coords
+    for role, label_id, conf, dist, angle in rows:
+        bearing = P.S.heading - math.radians(angle)
+        wx = P.S.pos[0] + dist * math.cos(bearing)
+        wy = P.S.pos[1] + dist * math.sin(bearing)
+        px, py = w2p(wx, wy)
+        color = COLOR_TARGET if role == "TARGET" else COLOR_OBSTACLE
+        cv2.circle(img, (px, py), 7 if role == "TARGET" else 5, color, -1)
+        cv2.putText(img, label_id, (px + 8, py + 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 1)
+
+    state_label = avoid['state']
+    if avoid['state'] != 'NORMAL':
+        state_label += "  →" + ("RIGHT" if avoid['dir'] > 0 else "LEFT")
+    cv2.putText(img, f"Avoid: {state_label}", (5, WORLD_MAP_PX - 8),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 200), 1)
+    return img
+
+
 def print_header():
     print(f"\n{'Role':<10} {'ID':<8} {'Conf':>6}  {'Distance':>10}  {'Angle':>8}")
     print("-" * 52)
@@ -279,6 +331,11 @@ def run(no_display=False, no_drive=False):
     t_last_tick = time.monotonic()
     latest_target = None   # (dist_m, angle_deg) from the most recent frame
 
+    # Obstacle avoidance state
+    # state: NORMAL | AVOIDING | CLEARING
+    # dir:   +1 = steer right (obstacle left),  -1 = steer left (obstacle right)
+    avoid = {'state': 'NORMAL', 'dir': 0, 'clear_start': None}
+
     quit_msg = "" if no_display else " — press Q to quit"
     drive_msg = " (motors disabled)" if no_drive else ""
     print(f"\nTracking{quit_msg}{drive_msg}\n")
@@ -302,6 +359,37 @@ def run(no_display=False, no_drive=False):
                 latest_target = (t_dist, t_angle)
             else:
                 latest_target = None
+
+            # ---- Obstacle avoidance state machine ----
+            obstacle_rows  = [r for r in rows if r[0] == "OBSTACLE"]
+            target_visible = latest_target is not None
+
+            if avoid['state'] == 'NORMAL':
+                if obstacle_rows and target_visible:
+                    avg_ang = sum(r[4] for r in obstacle_rows) / len(obstacle_rows)
+                    avoid['dir']   = +1 if avg_ang <= 0 else -1
+                    avoid['state'] = 'AVOIDING'
+
+            elif avoid['state'] == 'AVOIDING':
+                if obstacle_rows:
+                    avg_ang = sum(r[4] for r in obstacle_rows) / len(obstacle_rows)
+                    avoid['dir'] = +1 if avg_ang <= 0 else -1
+                elif not target_visible:
+                    avoid['state']       = 'CLEARING'
+                    avoid['clear_start'] = list(P.S.pos)
+                else:
+                    avoid['state'] = 'NORMAL'
+
+            elif avoid['state'] == 'CLEARING':
+                d = math.hypot(P.S.pos[0] - avoid['clear_start'][0],
+                               P.S.pos[1] - avoid['clear_start'][1])
+                if d >= AVOID_CLEAR_DIST_M:
+                    avoid['state'] = 'NORMAL'
+                    avoid['dir']   = 0
+
+            # Bias the target angle to push the cart to the opposite side of the aisle
+            if target_visible and avoid['state'] == 'AVOIDING':
+                latest_target = (t_dist, t_angle + avoid['dir'] * AVOID_ANGLE_DEG)
 
             # Control tick at P.DT rate (independent of camera fps)
             now = time.monotonic()
@@ -327,6 +415,7 @@ def run(no_display=False, no_drive=False):
             if not no_display:
                 overlay_map(out, rows)
                 cv2.imshow("Cart View", out)
+                cv2.imshow("World Map", draw_world_map(rows, avoid))
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 
