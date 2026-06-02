@@ -146,11 +146,11 @@ def estimate_distance(bbox_h, bbox_cx, img_h, img_w):
     v_fov         = H_FOV_DEG * (img_h / img_w)
     fl_v          = focal_length_px(img_h, v_fov)
     raw_depth     = (PERSON_HEIGHT_M * fl_v) / bbox_h
-    # Project optical-axis depth onto the horizontal ground plane
-    ground_depth  = raw_depth / np.cos(np.radians(CAMERA_TILT_DEG))
     raw_angle_rad = np.arctan((bbox_cx - img_w / 2) / focal_length_px(img_w, H_FOV_DEG))
+    # Apply offset in optical-axis space, then project to ground plane and correct for horizontal angle
+    ground_depth  = (raw_depth - DISTANCE_OFFSET_M) / np.cos(np.radians(CAMERA_TILT_DEG))
     slant         = ground_depth / np.cos(raw_angle_rad)
-    return max(0.0, (slant - DISTANCE_OFFSET_M) * DISTANCE_SCALE)
+    return max(0.0, slant * DISTANCE_SCALE)
 
 
 def estimate_angle(bbox_cx, img_w):
