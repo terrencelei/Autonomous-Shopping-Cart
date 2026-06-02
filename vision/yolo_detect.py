@@ -443,9 +443,9 @@ def run(no_display=False, no_drive=False):
             if now - t_last_tick >= P.DT:
                 pos, heading = odometry.update()
                 obs = [(r[3], r[4]) for r in obstacle_rows]
-                v_right, v_left = P.tick(latest_target, pos, heading, obstacles=obs)
+                v_left, v_right = P.tick(latest_target, pos, heading, obstacles=obs)
                 if motors is not None:
-                    motors.send(v_right, v_left)
+                    motors.send(v_left, v_right)
                 t_last_tick = now
 
             t1 = time.time()

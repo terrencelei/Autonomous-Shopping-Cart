@@ -255,7 +255,7 @@ def _next_aisle(robot_y, direction, checked):
     return (min if direction > 0 else max)(pool, key=lambda t: t[0])
 
 def _wheel_commands(v_fwd, omega):
-    """Differential drive mixing. Returns (v_right, v_left) in m/s."""
+    """Differential drive mixing. Returns (v_left, v_right) in m/s."""
     half = TRACK_M / 2
     vl   = v_fwd - omega * half
     vr   = v_fwd + omega * half
@@ -343,8 +343,8 @@ class MotorDriver:
             if not line.startswith("E,"): continue
             try:
                 _, ls, rs  = line.split(",", 2)
-                lc = RIGHT_ENC_SIGN  * int(ls)
-                rc = LEFT_ENC_SIGN * int(rs)
+                lc = LEFT_ENC_SIGN * int(ls)
+                rc = RIGHT_ENC_SIGN * int(rs)
                 if self._last_l is not None:
                     self._dl += lc - self._last_l
                     self._dr += rc - self._last_r
@@ -356,7 +356,7 @@ class MotorDriver:
         return dl, dr
 
     def send(self, vl, vr):
-        cmd = f"L{RIGHT_MOTOR_SIGN * _rpm(vl):.1f} R{LEFT_MOTOR_SIGN * _rpm(vr):.1f}\n".encode()
+        cmd = f"L{LEFT_MOTOR_SIGN * _rpm(vl):.1f} R{RIGHT_MOTOR_SIGN * _rpm(vr):.1f}\n".encode()
         if self._ser and self._ser.is_open:
             self._ser.write(cmd)
         else:
@@ -431,7 +431,7 @@ def tick(reading, pos, heading, obstacles=None):
     pos       : [x, y] from Odometry
     heading   : float radians from Odometry
     obstacles : list of (dist_m, angle_deg) for non-target detections
-    Returns   : (v_right, v_left) in m/s
+    Returns   : (v_left, v_right) in m/s
     """
     obstacles = obstacles or []
 

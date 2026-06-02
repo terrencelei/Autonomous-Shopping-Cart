@@ -8,7 +8,7 @@
 // ── Serial protocol (115200 baud) ──────────────────────────────
 //   Host  → ESP32 :  "L<rpm> R<rpm>\n"   e.g.  "L42.5 R-30.0\n"
 //                                        Target wheel RPM for each side.
-//   ESP32 → Host  :  "E,<right_ticks>,<left_ticks>\n"
+//   ESP32 → Host  :  "E,<left_ticks>,<right_ticks>\n"
 //                                        Cumulative encoder counts, sent
 //                                        every REPORT_INTERVAL_MS.
 //
@@ -210,8 +210,8 @@ void handleLine(const String &line) {
   String rStr = line.substring(ri + 1);     rStr.trim();
   if (lStr.length() == 0 || rStr.length() == 0) return;
 
-  setRightRPM(lStr.toFloat());
-  setLeftRPM(rStr.toFloat());
+  setLeftRPM(lStr.toFloat());
+  setRightRPM(rStr.toFloat());
   lastCmdMs = millis();
 }
 
@@ -271,11 +271,11 @@ void loop() {
   // 4. Periodic encoder report.
   if (nowMs - lastReportMs >= REPORT_INTERVAL_MS) {
     lastReportMs = nowMs;
-    long l, r;
-    readEncoderCounts(l, r);
+    long right, left;
+    readEncoderCounts(right, left);
     Serial.print("E,");
-    Serial.print(l);
+    Serial.print(left);
     Serial.print(",");
-    Serial.println(r);
+    Serial.println(right);
   }
 }

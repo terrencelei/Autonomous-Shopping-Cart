@@ -33,9 +33,9 @@ CENTER_KP           = 0.035  # rad/s per degree of angle error
 # =============================================================================
 
 
-def integrate_kinematics(pos, heading, v_right, v_left, dt):
-    v_fwd = (v_right + v_left) / 2.0
-    omega = (v_left - v_right) / P.TRACK_M
+def integrate_kinematics(pos, heading, v_left, v_right, dt):
+    v_fwd = (v_left + v_right) / 2.0
+    omega = (v_right - v_left) / P.TRACK_M
     new_heading = (heading + omega * dt) % (2 * math.pi)
     new_x = pos[0] + v_fwd * math.cos(heading) * dt
     new_y = pos[1] + v_fwd * math.sin(heading) * dt
@@ -88,7 +88,7 @@ def run_spin(drive=True, port=None, countdown=3):
     times         = []
     robot_xs, robot_ys, robot_thetas = [], [], []
     encoder_degrees = []
-    v_fwds, omegas, v_rights, v_lefts = [], [], [], []
+    v_fwds, omegas, v_lefts, v_rights = [], [], [], []
     enc_right_cum, enc_left_cum = [], []
     enc_right_delta, enc_left_delta = [], []
     cum_l, cum_r = 0, 0
@@ -114,10 +114,10 @@ def run_spin(drive=True, port=None, countdown=3):
             t_loop0 = time.monotonic()
             t = i * P.DT
 
-            v_right, v_left = P._wheel_commands(0.0, P.MAX_TURN)
+            v_left, v_right = P._wheel_commands(0.0, P.MAX_TURN)
 
             if motors is not None:
-                motors.send(v_right, v_left)
+                motors.send(v_left, v_right)
                 d_l, d_r = motors.read_encoder_deltas()
             else:
                 d_l, d_r = 0, 0
@@ -141,11 +141,11 @@ def run_spin(drive=True, port=None, countdown=3):
             robot_thetas.append(heading)
 
             new_pos, new_heading, v_fwd, omega = integrate_kinematics(
-                pos, heading, v_right, v_left, P.DT)
+                pos, heading, v_left, v_right, P.DT)
             pos     = new_pos
             heading = new_heading
             v_fwds.append(v_fwd); omegas.append(omega)
-            v_rights.append(v_right); v_lefts.append(v_left)
+            v_lefts.append(v_left); v_rights.append(v_right)
 
             turned += abs(omega) * P.DT
 
@@ -186,7 +186,7 @@ def run_spin(drive=True, port=None, countdown=3):
         rx=robot_xs, ry=robot_ys, rt=robot_thetas,
         encoder_degrees=encoder_degrees,
         v_fwd=v_fwds, omega=omegas,
-        v_right=v_rights, v_left=v_lefts,
+        v_left=v_lefts, v_right=v_rights,
         enc_l_cum=enc_right_cum, enc_r_cum=enc_left_cum,
         enc_l_delta=enc_right_delta, enc_r_delta=enc_left_delta,
         drove=(motors is not None),
@@ -232,7 +232,7 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
     print("Press Q in the Cart View window to stop." if not no_display else "Display disabled.")
 
     times, robot_xs, robot_ys, robot_thetas = [], [], [], []
-    target_angles, omegas, v_rights, v_lefts = [], [], [], []
+    target_angles, omegas, v_lefts, v_rights = [], [], [], []
     enc_right_cum, enc_left_cum = [], []
     enc_right_delta, enc_left_delta = [], []
     cum_l, cum_r = 0, 0
@@ -260,7 +260,7 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
             target_row = next((r for r in rows if r[0] == "TARGET"), None)
             angle_deg = target_row[4] if target_row is not None else None
             omega = center_turn_command(angle_deg) if angle_deg is not None else 0.0
-            v_right, v_left = P._wheel_commands(0.0, omega)
+            v_left, v_right = P._wheel_commands(0.0, omega)
 
             now = time.monotonic()
             if now - last_tick >= P.DT:
@@ -269,7 +269,7 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                 P.S.heading = heading
 
                 if motors is not None:
-                    motors.send(v_right, v_left)
+                    motors.send(v_left, v_right)
                 last_tick = now
 
                 times.append(t)
@@ -277,7 +277,7 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                 robot_thetas.append(P.S.heading)
                 target_angles.append(float("nan") if angle_deg is None else angle_deg)
                 omegas.append(omega)
-                v_rights.append(v_right); v_lefts.append(v_left)
+                v_lefts.append(v_left); v_rights.append(v_right)
                 enc_right_delta.append(0); enc_left_delta.append(0)
                 enc_right_cum.append(cum_l); enc_left_cum.append(cum_r)
 
@@ -318,7 +318,7 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
         rx=robot_xs, ry=robot_ys, rt=robot_thetas,
         target_angle=target_angles,
         omega=omegas,
-        v_right=v_rights, v_left=v_lefts,
+        v_left=v_lefts, v_right=v_rights,
         enc_l_cum=enc_right_cum, enc_r_cum=enc_left_cum,
         enc_l_delta=enc_right_delta, enc_r_delta=enc_left_delta,
         drove=(motors is not None),
@@ -338,7 +338,7 @@ def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None
         print(f"Using simulated target angle {sim_angle:+.1f}°.")
 
     times, robot_xs, robot_ys, robot_thetas = [], [], [], []
-    target_angles, omegas, v_rights, v_lefts = [], [], [], []
+    target_angles, omegas, v_lefts, v_rights = [], [], [], []
     enc_right_cum, enc_left_cum = [], []
     enc_right_delta, enc_left_delta = [], []
     cum_l, cum_r = 0, 0
@@ -356,10 +356,10 @@ def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None
             reading = (0.0, sim_angle) if sim_angle is not None else receiver.get()
             angle_deg = reading[1] if reading is not None else None
             omega = center_turn_command(angle_deg) if angle_deg is not None else 0.0
-            v_right, v_left = P._wheel_commands(0.0, omega)
+            v_left, v_right = P._wheel_commands(0.0, omega)
 
             if motors is not None:
-                motors.send(v_right, v_left)
+                motors.send(v_left, v_right)
                 d_l, d_r = motors.read_encoder_deltas()
             else:
                 d_l, d_r = 0, 0
@@ -373,11 +373,11 @@ def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None
             target_angles.append(float("nan") if angle_deg is None else angle_deg)
 
             new_pos, new_heading, v_fwd, sim_omega = integrate_kinematics(
-                pos, heading, v_right, v_left, P.DT)
+                pos, heading, v_left, v_right, P.DT)
             pos = new_pos
             heading = new_heading
             omegas.append(omega)
-            v_rights.append(v_right); v_lefts.append(v_left)
+            v_lefts.append(v_left); v_rights.append(v_right)
 
             if i % max(1, int(0.5 / P.DT)) == 0:
                 label = "no target" if angle_deg is None else f"angle={angle_deg:+.1f}°"
@@ -400,7 +400,7 @@ def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None
         rx=robot_xs, ry=robot_ys, rt=robot_thetas,
         target_angle=target_angles,
         omega=omegas,
-        v_right=v_rights, v_left=v_lefts,
+        v_left=v_lefts, v_right=v_rights,
         enc_l_cum=enc_right_cum, enc_r_cum=enc_left_cum,
         enc_l_delta=enc_right_delta, enc_r_delta=enc_left_delta,
         drove=(motors is not None),
@@ -482,10 +482,10 @@ def plot(data, out_path="pathfinding_arc_test.png"):
         ax_cum.legend(fontsize=9)
         ax_cum.grid(True, alpha=0.3)
 
-        rpm_l = [v / P.WHEEL_CIRC * 60 for v in data['v_right']]
-        rpm_r = [v / P.WHEEL_CIRC * 60 for v in data['v_left']]
-        ax_rpm.plot(data['t'], rpm_l, 'b-', label='right commanded RPM')
-        ax_rpm.plot(data['t'], rpm_r, 'r-', label='left commanded RPM')
+        rpm_l = [v / P.WHEEL_CIRC * 60 for v in data['v_left']]
+        rpm_r = [v / P.WHEEL_CIRC * 60 for v in data['v_right']]
+        ax_rpm.plot(data['t'], rpm_l, 'b-', label='left commanded RPM')
+        ax_rpm.plot(data['t'], rpm_r, 'r-', label='right commanded RPM')
         ax_rpm.set_xlabel('time (s)')
         ax_rpm.set_ylabel('RPM')
         ax_rpm.set_title('Wheel speed commands')
