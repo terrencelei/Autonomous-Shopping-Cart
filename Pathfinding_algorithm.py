@@ -70,6 +70,7 @@ FOV_ENGAGE_DEG    = 25.0   # only rotate to keep shopper centred when angle exce
 LATERAL_KP        = 0.5    # cross-track correction weight for aisle-centre steering
 AISLE_EDGE_MARGIN = 0.15   # clearance from aisle wall when edge-hugging (metres)
 EDGE_ARRIVE       = 0.25   # tighter arrival radius for edge / centre goals (metres)
+EDGE_CLEAR_DIST_M = 1.0    # distance to travel after obstacles clear before leaving EDGE_FOLLOW
 
 # Encoder counts per wheel revolution reported by the ESP32 after 4x
 # quadrature decoding and gearbox reduction.
@@ -300,6 +301,7 @@ class RobotState:
     traverse_dir:    float = 1.0
     avoid_edge_y:    float = 0.0   # y-target when hugging an aisle edge
     avoid_dir:       int   = 0     # +1 = positive-y edge, -1 = negative-y edge
+    edge_clear_pos:  list  = field(default_factory=lambda: None)  # pos when obstacles first cleared
 
     def __post_init__(self):
         self.aisles_checked = [False] * len(AISLE_CY)
@@ -471,18 +473,25 @@ def tick(reading, pos, heading, obstacles=None):
     elif S.mode == "AVOID_EDGE" and not S.goal_queue:
         S.mode = "EDGE_FOLLOW"
 
-    elif S.mode == "EDGE_FOLLOW" and not obstacles:
-        if S.target_visible:
-            cy           = _nearest_aisle_cy(S.pos[1])
-            S.goal_queue = [[S.pos[0], cy]]
-            S.route      = build_route(S.pos, S.goal_queue[0])
-            S.mode       = "RETURN_CENTER"
-            S.lost       = False
+    elif S.mode == "EDGE_FOLLOW":
+        if obstacles:
+            S.edge_clear_pos = None  # reset whenever obstacle is still present
         else:
-            S.mode        = "SPIN"
-            S.lost        = True
-            S.spin_turned = 0.0
-            S.spin_dir    = math.copysign(1.0, S.last_angle) or 1.0
+            if S.edge_clear_pos is None:
+                S.edge_clear_pos = list(S.pos)
+            elif _dist(S.pos, S.edge_clear_pos) >= EDGE_CLEAR_DIST_M:
+                if S.target_visible:
+                    cy           = _nearest_aisle_cy(S.pos[1])
+                    S.goal_queue = [[S.pos[0], cy]]
+                    S.route      = build_route(S.pos, S.goal_queue[0])
+                    S.mode       = "RETURN_CENTER"
+                    S.lost       = False
+                else:
+                    S.mode        = "SPIN"
+                    S.lost        = True
+                    S.spin_turned = 0.0
+                    S.spin_dir    = math.copysign(1.0, S.last_angle) or 1.0
+                S.edge_clear_pos = None
 
     elif S.mode == "RETURN_CENTER" and not S.goal_queue:
         if S.target_visible:
