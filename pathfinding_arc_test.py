@@ -26,9 +26,10 @@ _MOTOR_PORT = getattr(P, 'MOTOR_PORT', getattr(P, 'MOTOR_UART_PORT', '/dev/ttyAC
 
 START_POS     = [0.0, 0.0]
 START_HEADING = 0.0
-CENTER_DEADBAND_DEG = 2.0
-CENTER_MIN_TURN_DEG = 5.0
-CENTER_MAX_TURN_DEG = 15.0
+CENTER_DEADBAND_DEG = 4.0
+CENTER_REACQUIRE_S  = 0.25
+CENTER_MIN_TURN_DEG = 2.0
+CENTER_MAX_TURN_DEG = 8.0
 CENTER_KP           = 0.006  # rad/s per degree of angle error
 
 # =============================================================================
@@ -242,6 +243,7 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
     start = time.monotonic()
     last_tick = time.monotonic()
     frame_times = []
+    target_visible_since = None
     i = 0
 
     flush_motors(motors)
@@ -262,7 +264,18 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
 
             target_row = next((r for r in rows if r[0] == "TARGET"), None)
             angle_deg = target_row[4] if target_row is not None else None
-            omega = center_turn_command(angle_deg) if angle_deg is not None else 0.0
+            if angle_deg is None:
+                target_visible_since = None
+                command_angle = None
+            else:
+                if target_visible_since is None:
+                    target_visible_since = loop_start
+                command_angle = (
+                    angle_deg
+                    if loop_start - target_visible_since >= CENTER_REACQUIRE_S
+                    else None
+                )
+            omega = center_turn_command(command_angle) if command_angle is not None else 0.0
             v_left, v_right = P._wheel_commands(0.0, omega)
 
             now = time.monotonic()
@@ -285,7 +298,12 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                 enc_right_cum.append(cum_l); enc_left_cum.append(cum_r)
 
                 if i % max(1, int(0.5 / P.DT)) == 0:
-                    label = "no target" if angle_deg is None else f"angle={angle_deg:+.1f}°"
+                    if angle_deg is None:
+                        label = "no target"
+                    elif command_angle is None:
+                        label = f"reacquire {angle_deg:+.1f}°"
+                    else:
+                        label = f"angle={angle_deg:+.1f}°"
                     print(f"t={t:5.1f}s  {label:<16} omega={math.degrees(omega):+6.1f}°/s")
                 i += 1
 
@@ -346,6 +364,7 @@ def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None
     enc_right_delta, enc_left_delta = [], []
     cum_l, cum_r = 0, 0
     start = time.monotonic()
+    target_visible_since = None
     i = 0
 
     flush_motors(motors)
@@ -358,7 +377,20 @@ def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None
 
             reading = (0.0, sim_angle) if sim_angle is not None else receiver.get()
             angle_deg = reading[1] if reading is not None else None
-            omega = center_turn_command(angle_deg) if angle_deg is not None else 0.0
+            if sim_angle is not None:
+                command_angle = angle_deg
+            elif angle_deg is None:
+                target_visible_since = None
+                command_angle = None
+            else:
+                if target_visible_since is None:
+                    target_visible_since = t_loop0
+                command_angle = (
+                    angle_deg
+                    if t_loop0 - target_visible_since >= CENTER_REACQUIRE_S
+                    else None
+                )
+            omega = center_turn_command(command_angle) if command_angle is not None else 0.0
             v_left, v_right = P._wheel_commands(0.0, omega)
 
             if motors is not None:
@@ -383,7 +415,12 @@ def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None
             v_lefts.append(v_left); v_rights.append(v_right)
 
             if i % max(1, int(0.5 / P.DT)) == 0:
-                label = "no target" if angle_deg is None else f"angle={angle_deg:+.1f}°"
+                if angle_deg is None:
+                    label = "no target"
+                elif command_angle is None:
+                    label = f"reacquire {angle_deg:+.1f}°"
+                else:
+                    label = f"angle={angle_deg:+.1f}°"
                 print(f"t={t:5.1f}s  {label:<16} omega={math.degrees(omega):+6.1f}°/s")
             i += 1
 
