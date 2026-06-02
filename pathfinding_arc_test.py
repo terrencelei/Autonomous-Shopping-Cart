@@ -33,6 +33,12 @@ CENTER_MIN_TURN_DEG = 2.0
 CENTER_MAX_TURN_DEG = 8.0
 CENTER_KP           = 0.006  # rad/s per degree of angle error
 
+# Slow-spin / stall-test parameters
+STALL_BOOST_OMEGA_DEG = 90.0   # speed during initial burst to break static friction (deg/s)
+STALL_BOOST_SECS      = 0.5    # duration of boost phase
+STALL_RAMP_START_DEG  = 45.0   # ramp begins at this speed after boost
+STALL_DETECT_TICKS    = 5      # consecutive zero-delta ticks before declaring stall
+
 # =============================================================================
 
 
@@ -211,14 +217,18 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
     heading = START_HEADING
     motors  = open_motors(drive=drive, port=port, countdown=countdown, action="slow-spinning")
 
-    omega_cmd = math.copysign(math.radians(CENTER_MIN_TURN_DEG), direction)
-    print(f"Slow spin mode: omega={math.degrees(omega_cmd):+.1f}°/s for {duration:.1f}s.")
+    ramp_duration = max(duration - STALL_BOOST_SECS, 1.0)
+    print(f"Slow spin: {STALL_BOOST_SECS:.1f}s boost at {STALL_BOOST_OMEGA_DEG:.0f}°/s, "
+          f"then ramp {STALL_RAMP_START_DEG:.0f}→0°/s over {ramp_duration:.1f}s.")
 
     times, robot_xs, robot_ys, robot_thetas = [], [], [], []
-    omegas, v_lefts, v_rights = [], [], []
+    omegas_cmd, omegas_enc, v_lefts, v_rights = [], [], [], []
     enc_right_cum, enc_left_cum = [], []
     enc_right_delta, enc_left_delta = [], []
     cum_l, cum_r = 0, 0
+    zero_tick_streak = 0
+    stall_omega_deg  = None
+    ramp_start_t     = None
     start = time.monotonic()
     i = 0
 
@@ -227,8 +237,17 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
         while True:
             t_loop0 = time.monotonic()
             t = t_loop0 - start
-            if duration > 0 and t >= duration:
-                break
+
+            # Phase 1: boost to overcome static friction
+            if t < STALL_BOOST_SECS:
+                omega_cmd = math.copysign(math.radians(STALL_BOOST_OMEGA_DEG), direction)
+            else:
+                # Phase 2: linear ramp from STALL_RAMP_START_DEG down to 0
+                if ramp_start_t is None:
+                    ramp_start_t = t
+                frac = min(1.0, (t - ramp_start_t) / ramp_duration)
+                omega_mag = math.radians(STALL_RAMP_START_DEG) * (1.0 - frac)
+                omega_cmd = math.copysign(omega_mag, direction)
 
             v_left, v_right = P._wheel_commands(0.0, omega_cmd)
             if motors is not None:
@@ -236,6 +255,11 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
                 d_l, d_r = motors.read_encoder_deltas()
             else:
                 d_l, d_r = 0, 0
+
+            # Encoder-derived angular velocity
+            vl_enc   = d_l * P.M_PER_PULSE / P.DT
+            vr_enc   = d_r * P.M_PER_PULSE / P.DT
+            omega_enc = (vr_enc - vl_enc) / P.TRACK_M
 
             cum_l += d_l; cum_r += d_r
             enc_right_delta.append(d_l); enc_left_delta.append(d_r)
@@ -245,13 +269,29 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
             robot_xs.append(pos[0]); robot_ys.append(pos[1])
             robot_thetas.append(heading)
 
-            pos, heading, _v_fwd, _omega = integrate_kinematics(
+            pos, heading, _v_fwd, _ = integrate_kinematics(
                 pos, heading, v_left, v_right, P.DT)
-            omegas.append(omega_cmd)
+            omegas_cmd.append(omega_cmd)
+            omegas_enc.append(omega_enc)
             v_lefts.append(v_left); v_rights.append(v_right)
 
+            # Stall detection during ramp phase only
+            if ramp_start_t is not None and motors is not None:
+                if abs(d_l) + abs(d_r) == 0:
+                    zero_tick_streak += 1
+                    if zero_tick_streak >= STALL_DETECT_TICKS and stall_omega_deg is None:
+                        stall_omega_deg = math.degrees(abs(omega_cmd))
+                        print(f"Stall at {stall_omega_deg:.1f}°/s  (t={t:.2f}s)")
+                        break
+                else:
+                    zero_tick_streak = 0
+
+            if duration > 0 and t >= duration:
+                break
+
             if i % max(1, int(1.0 / P.DT)) == 0:
-                print(f"t={t:5.1f}s  omega={math.degrees(omega_cmd):+5.1f}°/s")
+                print(f"t={t:5.1f}s  cmd={math.degrees(abs(omega_cmd)):5.1f}°/s  "
+                      f"enc={math.degrees(abs(omega_enc)):5.1f}°/s")
             i += 1
 
             elapsed = time.monotonic() - t_loop0
@@ -264,11 +304,18 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
             print("\nStopping motors.")
             motors.stop()
 
+    if stall_omega_deg is not None:
+        print(f"\nStall speed: {stall_omega_deg:.1f}°/s")
+    else:
+        print("\nNo stall detected within duration.")
+
     return dict(
         mode="slow-spin",
         t=times,
         rx=robot_xs, ry=robot_ys, rt=robot_thetas,
-        omega=omegas,
+        omega=omegas_cmd,
+        omega_enc=omegas_enc,
+        stall_omega_deg=stall_omega_deg,
         v_left=v_lefts, v_right=v_rights,
         enc_l_cum=enc_right_cum, enc_r_cum=enc_left_cum,
         enc_l_delta=enc_right_delta, enc_r_delta=enc_left_delta,
@@ -518,6 +565,58 @@ def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None
     )
 
 
+def _plot_slow_spin(data, out_path):
+    try:
+        import numpy as np
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError as e:
+        print(f"Skipping plots: {e}")
+        return
+
+    t            = data['t']
+    cmd_deg_s    = [math.degrees(o) for o in data['omega']]
+    enc_deg_s    = [math.degrees(o) for o in data.get('omega_enc', [0.0] * len(t))]
+    rpm_cmd_l    = [v / P.WHEEL_CIRC * 60 for v in data['v_left']]
+    rpm_cmd_r    = [v / P.WHEEL_CIRC * 60 for v in data['v_right']]
+    rpm_enc_l    = [d * P.M_PER_PULSE / P.DT / P.WHEEL_CIRC * 60
+                    for d in data['enc_l_delta']]
+    rpm_enc_r    = [d * P.M_PER_PULSE / P.DT / P.WHEEL_CIRC * 60
+                    for d in data['enc_r_delta']]
+
+    fig, (ax_omega, ax_rpm) = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
+
+    # ── Commanded vs encoder angular speed ────────────────
+    ax_omega.plot(t, cmd_deg_s, 'b-',  label='commanded', lw=1.5)
+    ax_omega.plot(t, enc_deg_s, 'r-',  label='encoder',   lw=1.2, alpha=0.85)
+    stall = data.get('stall_omega_deg')
+    if stall is not None:
+        ax_omega.axhline(stall, color='orange', ls='--', lw=1.2,
+                         label=f'stall ≈ {stall:.1f}°/s')
+    ax_omega.axvline(STALL_BOOST_SECS, color='gray', ls=':', alpha=0.5, label='ramp start')
+    ax_omega.set_ylabel('angular speed (deg/s)')
+    ax_omega.set_title('Commanded vs encoder angular speed')
+    ax_omega.legend(fontsize=8)
+    ax_omega.grid(True, alpha=0.3)
+
+    # ── Per-wheel commanded vs encoder RPM ────────────────
+    ax_rpm.plot(t, rpm_cmd_l, 'b-',  label='left cmd',  lw=1.5)
+    ax_rpm.plot(t, rpm_cmd_r, 'r-',  label='right cmd', lw=1.5)
+    ax_rpm.plot(t, rpm_enc_l, 'b--', label='left enc',  lw=1.2, alpha=0.8)
+    ax_rpm.plot(t, rpm_enc_r, 'r--', label='right enc', lw=1.2, alpha=0.8)
+    ax_rpm.axvline(STALL_BOOST_SECS, color='gray', ls=':', alpha=0.5)
+    ax_rpm.set_xlabel('time (s)')
+    ax_rpm.set_ylabel('RPM')
+    ax_rpm.set_title('Per-wheel commanded vs encoder RPM')
+    ax_rpm.legend(fontsize=8)
+    ax_rpm.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=110, bbox_inches='tight')
+    print(f"Saved: {out_path}")
+
+
 def plot(data, out_path="pathfinding_arc_test.png"):
     try:
         import numpy as np
@@ -528,8 +627,13 @@ def plot(data, out_path="pathfinding_arc_test.png"):
         print(f"Skipping plots: {e}")
         return
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 5))
     mode = data.get("mode", "spin")
+
+    if mode == "slow-spin":
+        _plot_slow_spin(data, out_path)
+        return
+
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5))
 
     # ── Angle over time ────────────────────────────────────
     ax = axes[0]
@@ -540,10 +644,6 @@ def plot(data, out_path="pathfinding_arc_test.png"):
         ax.axhline(0, color='gray', ls=':', alpha=0.6, label='center')
         ax.axhspan(-CENTER_DEADBAND_DEG, CENTER_DEADBAND_DEG,
                    color='green', alpha=0.12, label='deadband')
-    elif mode == "slow-spin":
-        angles_deg = [math.degrees(h) for h in data['rt']]
-        title = 'Slow spin heading over time'
-        ylabel = 'sim heading (deg)'
     elif data.get('drove'):
         angles_deg = data['encoder_degrees']
         title = 'Encoder angle over time'
@@ -573,12 +673,7 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     # ── Turn rate ──────────────────────────────────────────
     ax = axes[1]
     ax.plot(data['t'], np.degrees(data['omega']), 'b-')
-    if mode == "center":
-        cap = CENTER_MAX_TURN_DEG
-    elif mode == "slow-spin":
-        cap = CENTER_MIN_TURN_DEG
-    else:
-        cap = math.degrees(P.MAX_TURN)
+    cap = CENTER_MAX_TURN_DEG if mode == "center" else math.degrees(P.MAX_TURN)
     ax.axhline(cap, color='gray', ls=':', alpha=0.5, label=f'cap {cap:.0f}°/s')
     ax.axhline(-cap, color='gray', ls=':', alpha=0.5)
     ax.set_xlabel('time (s)')
