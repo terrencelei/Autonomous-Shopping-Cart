@@ -41,8 +41,8 @@ PERSON_CLASS_ID   = 0   # COCO "person" in the labels shipped with imx500-models
 
 PERSON_HEIGHT_M   = 1.8
 H_FOV_DEG         = 66.0   # Pi AI Camera horizontal field of view
-DISTANCE_OFFSET_M = -0.48
-DISTANCE_SCALE    = 0.52
+DISTANCE_OFFSET_M = 0.3
+DISTANCE_SCALE    = 0.87
 ANGLE_SCALE       = 0.99
 
 COLOR_TARGET   = (0, 255, 0)
