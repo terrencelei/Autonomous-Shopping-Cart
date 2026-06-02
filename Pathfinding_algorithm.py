@@ -79,7 +79,7 @@ WHEEL_CIRC   = math.pi * WHEEL_DIAMETER_M   # metres per revolution
 M_PER_PULSE  = WHEEL_CIRC / ENCODER_PPR
 
 # Wheel rotations for a robot-body degree of rotation (point turn geometry)
-ROT_PER_DEG  = WHEEL_TRACK_IN / (360.0 * WHEEL_DIAMETER_IN)
+ROT_PER_DEG  = TRACK_M / (360.0 * WHEEL_DIAMETER_M)
 
 # =============================================================================
 # MAP CONSTRUCTION
@@ -583,7 +583,7 @@ def main():
     odom     = Odometry(motors.read_encoder_deltas)
     receiver = TargetReceiver()
 
-    log.info(f"Wheel: {WHEEL_DIAMETER_IN}in dia, {WHEEL_TRACK_IN}in track  "
+    log.info(f"Wheel: {WHEEL_DIAMETER_M*1000:.1f}mm dia, {TRACK_M*1000:.1f}mm track  "
              f"| PPR={ENCODER_PPR}  m/pulse={M_PER_PULSE*1000:.3f}mm  "
              f"| rev/deg={ROT_PER_DEG:.5f}")
     log.info(f"Hold {HOLD_DIST}m  |  Kp={DIST_KP}  Kd={DIST_KD}  "
