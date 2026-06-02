@@ -41,6 +41,7 @@ PERSON_CLASS_ID   = 0   # COCO "person" in the labels shipped with imx500-models
 
 PERSON_HEIGHT_M   = 1.8
 H_FOV_DEG         = 66.0   # Pi AI Camera horizontal field of view
+CAMERA_TILT_DEG   = 29.0   # upward tilt from horizontal — projects optical depth to ground plane
 DISTANCE_OFFSET_M = 1.5
 DISTANCE_SCALE    = 1.5
 ANGLE_SCALE       = 1.0
@@ -145,8 +146,10 @@ def estimate_distance(bbox_h, bbox_cx, img_h, img_w):
     v_fov         = H_FOV_DEG * (img_h / img_w)
     fl_v          = focal_length_px(img_h, v_fov)
     raw_depth     = (PERSON_HEIGHT_M * fl_v) / bbox_h
+    # Project optical-axis depth onto the horizontal ground plane
+    ground_depth  = raw_depth / np.cos(np.radians(CAMERA_TILT_DEG))
     raw_angle_rad = np.arctan((bbox_cx - img_w / 2) / focal_length_px(img_w, H_FOV_DEG))
-    slant         = raw_depth / np.cos(raw_angle_rad)
+    slant         = ground_depth / np.cos(raw_angle_rad)
     return max(0.0, (slant - DISTANCE_OFFSET_M) * DISTANCE_SCALE)
 
 
