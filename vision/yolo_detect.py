@@ -56,10 +56,6 @@ TARGET_ANGLE_WEIGHT = 0.3
 
 DIST_EMA_ALPHA = 0.4
 
-# Obstacle avoidance
-AVOID_ANGLE_DEG    = 20.0   # angle bias injected into target reading to steer sideways
-AVOID_CLEAR_DIST_M = 1.0    # metres to travel after obstacle leaves view before re-centring
-
 # World-map window
 WORLD_MAP_PX = 500
 
@@ -257,7 +253,7 @@ def overlay_map(frame, rows):
     return frame
 
 
-def draw_world_map(rows, avoid):
+def draw_world_map(rows):
     """Bird's-eye world-coordinate map: cart, target, obstacles on the CHUNK_MAP grid."""
     img = np.zeros((WORLD_MAP_PX, WORLD_MAP_PX, 3), dtype=np.uint8)
     sx  = WORLD_MAP_PX / P.MAP_W
@@ -293,10 +289,7 @@ def draw_world_map(rows, avoid):
         cv2.putText(img, label_id, (px + 8, py + 4),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 1)
 
-    state_label = avoid['state']
-    if avoid['state'] != 'NORMAL':
-        state_label += "  →" + ("RIGHT" if avoid['dir'] > 0 else "LEFT")
-    cv2.putText(img, f"Avoid: {state_label}", (5, WORLD_MAP_PX - 8),
+    cv2.putText(img, f"Mode: {P.S.mode}", (5, WORLD_MAP_PX - 8),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 200), 1)
     return img
 
@@ -331,11 +324,6 @@ def run(no_display=False, no_drive=False):
     t_last_tick = time.monotonic()
     latest_target = None   # (dist_m, angle_deg) from the most recent frame
 
-    # Obstacle avoidance state
-    # state: NORMAL | AVOIDING | CLEARING
-    # dir:   +1 = steer right (obstacle left),  -1 = steer left (obstacle right)
-    avoid = {'state': 'NORMAL', 'dir': 0, 'clear_start': None}
-
     quit_msg = "" if no_display else " — press Q to quit"
     drive_msg = " (motors disabled)" if no_drive else ""
     print(f"\nTracking{quit_msg}{drive_msg}\n")
@@ -360,42 +348,15 @@ def run(no_display=False, no_drive=False):
             else:
                 latest_target = None
 
-            # ---- Obstacle avoidance state machine ----
-            obstacle_rows  = [r for r in rows if r[0] == "OBSTACLE"]
-            target_visible = latest_target is not None
-
-            if avoid['state'] == 'NORMAL':
-                if obstacle_rows and target_visible:
-                    avg_ang = sum(r[4] for r in obstacle_rows) / len(obstacle_rows)
-                    avoid['dir']   = +1 if avg_ang <= 0 else -1
-                    avoid['state'] = 'AVOIDING'
-
-            elif avoid['state'] == 'AVOIDING':
-                if obstacle_rows:
-                    avg_ang = sum(r[4] for r in obstacle_rows) / len(obstacle_rows)
-                    avoid['dir'] = +1 if avg_ang <= 0 else -1
-                elif not target_visible:
-                    avoid['state']       = 'CLEARING'
-                    avoid['clear_start'] = list(P.S.pos)
-                else:
-                    avoid['state'] = 'NORMAL'
-
-            elif avoid['state'] == 'CLEARING':
-                d = math.hypot(P.S.pos[0] - avoid['clear_start'][0],
-                               P.S.pos[1] - avoid['clear_start'][1])
-                if d >= AVOID_CLEAR_DIST_M:
-                    avoid['state'] = 'NORMAL'
-                    avoid['dir']   = 0
-
-            # Bias the target angle to push the cart to the opposite side of the aisle
-            if target_visible and avoid['state'] == 'AVOIDING':
-                latest_target = (t_dist, t_angle + avoid['dir'] * AVOID_ANGLE_DEG)
+            # Collect obstacles for pathfinding
+            obstacle_rows = [r for r in rows if r[0] == "OBSTACLE"]
 
             # Control tick at P.DT rate (independent of camera fps)
             now = time.monotonic()
             if now - t_last_tick >= P.DT:
                 pos, heading = odometry.update()
-                v_left, v_right = P.tick(latest_target, pos, heading)
+                obs = [(r[3], r[4]) for r in obstacle_rows]
+                v_left, v_right = P.tick(latest_target, pos, heading, obstacles=obs)
                 if motors is not None:
                     motors.send(v_left, v_right)
                 t_last_tick = now
@@ -415,7 +376,7 @@ def run(no_display=False, no_drive=False):
             if not no_display:
                 overlay_map(out, rows)
                 cv2.imshow("Cart View", out)
-                cv2.imshow("World Map", draw_world_map(rows, avoid))
+                cv2.imshow("World Map", draw_world_map(rows))
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 

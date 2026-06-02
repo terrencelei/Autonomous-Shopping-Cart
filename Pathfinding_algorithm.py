@@ -66,6 +66,10 @@ MIN_APPROACH = 0.15              # floor speed when approaching (ensures progres
 CENTER_KP    = 0.02              # centering gain  (rad/s per degree of angle error)
 DIST_KP      = 0.4               # distance PD proportional gain  (m/s per metre)
 DIST_KD      = 0.3               # distance PD derivative gain    (m/s per m/s)
+FOV_ENGAGE_DEG    = 25.0   # only rotate to keep shopper centred when angle exceeds this
+LATERAL_KP        = 0.5    # cross-track correction weight for aisle-centre steering
+AISLE_EDGE_MARGIN = 0.15   # clearance from aisle wall when edge-hugging (metres)
+EDGE_ARRIVE       = 0.25   # tighter arrival radius for edge / centre goals (metres)
 
 # Encoder counts per wheel revolution reported by the ESP32 after 4x
 # quadrature decoding and gearbox reduction.
@@ -238,6 +242,9 @@ def _peek_bounds(edge_pos):
     half = min(math.atan2(AISLE_W / 2, AISLE_W) + math.radians(45), math.pi/2)
     return perp - half, perp + half
 
+def _nearest_aisle_cy(y):
+    return min(AISLE_CY, key=lambda cy: abs(cy - y))
+
 def _next_aisle(robot_y, direction, checked):
     """Nearest unchecked aisle y-centre in the given direction."""
     pool = [(cy, i) for i, cy in enumerate(AISLE_CY)
@@ -291,6 +298,8 @@ class RobotState:
     peek_end:        float = 0.0
     peek_aisle_i:    int   = -1
     traverse_dir:    float = 1.0
+    avoid_edge_y:    float = 0.0   # y-target when hugging an aisle edge
+    avoid_dir:       int   = 0     # +1 = positive-y edge, -1 = negative-y edge
 
     def __post_init__(self):
         self.aisles_checked = [False] * len(AISLE_CY)
@@ -414,13 +423,15 @@ class TargetReceiver:
 # TICK — one control cycle
 # =============================================================================
 
-def tick(reading, pos, heading):
+def tick(reading, pos, heading, obstacles=None):
     """
-    reading : (dist_m, angle_deg) from TargetReceiver, or None
-    pos     : [x, y] from Odometry
-    heading : float radians from Odometry
-    Returns : (v_left, v_right) in m/s
+    reading   : (dist_m, angle_deg) from TargetReceiver, or None
+    pos       : [x, y] from Odometry
+    heading   : float radians from Odometry
+    obstacles : list of (dist_m, angle_deg) for non-target detections
+    Returns   : (v_left, v_right) in m/s
     """
+    obstacles = obstacles or []
 
     # 1. Update pose from sensors
     S.pos     = list(pos)
@@ -444,46 +455,126 @@ def tick(reading, pos, heading):
     # 4. State transitions (priority order)
     on_edge = _on_edge(S.pos)
 
-    if S.target_visible and S.mode != "IN_VIEW":
-        S.mode          = "IN_VIEW"
-        S.lost          = False
+    # Obstacle avoidance — highest priority, interrupts tracking/return modes
+    if obstacles and S.mode in ("IN_VIEW", "FOLLOW_GOAL", "RETURN_CENTER"):
+        avg_dist  = sum(d for d, _ in obstacles) / len(obstacles)
+        avg_ang   = sum(a for _, a in obstacles) / len(obstacles)
+        obs_bear  = S.heading - math.radians(avg_ang)
+        obs_y     = S.pos[1] + avg_dist * math.sin(obs_bear)
+        cy        = _nearest_aisle_cy(S.pos[1])
+        S.avoid_dir    = -1 if obs_y >= cy else +1
+        S.avoid_edge_y = cy + S.avoid_dir * (AISLE_W / 2 - AISLE_EDGE_MARGIN)
+        S.goal_queue   = [[S.pos[0], S.avoid_edge_y]]
+        S.route        = build_route(S.pos, S.goal_queue[0])
+        S.mode         = "AVOID_EDGE"
+
+    elif S.mode == "AVOID_EDGE" and not S.goal_queue:
+        S.mode = "EDGE_FOLLOW"
+
+    elif S.mode == "EDGE_FOLLOW" and not obstacles and S.target_visible:
+        cy           = _nearest_aisle_cy(S.pos[1])
+        S.goal_queue = [[S.pos[0], cy]]
+        S.route      = build_route(S.pos, S.goal_queue[0])
+        S.mode       = "RETURN_CENTER"
+        S.lost       = False
+
+    elif S.mode == "RETURN_CENTER" and not S.goal_queue:
+        if S.target_visible:
+            S.mode           = "IN_VIEW"
+            S.lost           = False
+            S.aisles_checked = [False] * len(AISLE_CY)
+        else:
+            S.mode        = "SPIN"
+            S.lost        = True
+            S.spin_turned = 0.0
+            S.spin_dir    = math.copysign(1.0, S.last_angle) or 1.0
+
+    elif S.target_visible and S.mode not in ("IN_VIEW", "AVOID_EDGE", "EDGE_FOLLOW", "RETURN_CENTER"):
+        S.mode           = "IN_VIEW"
+        S.lost           = False
         S.aisles_checked = [False] * len(AISLE_CY)
-        S.goal_queue    = [list(target_xy)]
+        S.goal_queue     = [list(target_xy)]
 
     elif not S.target_visible and S.mode == "IN_VIEW":
-        S.mode          = "FOLLOW_GOAL"
-        S.goal_queue    = [list(S.last_target_pos)]
-        S.prev_dist     = None
+        S.mode       = "FOLLOW_GOAL"
+        S.goal_queue = [list(S.last_target_pos)]
+        S.prev_dist  = None
 
     elif S.mode == "FOLLOW_GOAL" and not S.goal_queue:
-        S.mode          = "SPIN"
-        S.lost          = True
-        S.spin_turned   = 0.0
-        S.spin_dir      = math.copysign(1.0, S.last_angle) or 1.0
+        S.mode        = "SPIN"
+        S.lost        = True
+        S.spin_turned = 0.0
+        S.spin_dir    = math.copysign(1.0, S.last_angle) or 1.0
 
     # 5. State actions → compute v_forward and omega
     v_forward = omega = 0.0
 
     if S.mode == "IN_VIEW":
-        # --- Centering: P controller on camera angle error ---
-        # Positive angle_deg = target right → turn right (negative omega)
-        omega = -CENTER_KP * angle_deg
-        omega = math.copysign(min(abs(omega), MAX_TURN), omega)
+        aisle_cy  = _nearest_aisle_cy(S.pos[1])
+        aisle_hdg = 0.0 if target_xy[0] >= S.pos[0] else math.pi
 
-        # --- Distance: single PD controller (no phase switching) ---
+        # Cross-track correction: blend a small heading offset to return to aisle centre
+        lat_err   = aisle_cy - S.pos[1]
+        cross_ang = math.atan2(lat_err * LATERAL_KP, 1.0)
+        want_hdg  = (aisle_hdg + cross_ang) % (2 * math.pi)
+        omega     = _adiff(want_hdg, S.heading) / DT
+        omega     = math.copysign(min(abs(omega), MAX_TURN), omega)
+
+        # FOV-edge gate: only add centering correction when shopper nears FOV edge
+        if abs(angle_deg) > FOV_ENGAGE_DEG:
+            fov_err = angle_deg - math.copysign(FOV_ENGAGE_DEG, angle_deg)
+            omega  += -CENTER_KP * fov_err
+            omega   = math.copysign(min(abs(omega), MAX_TURN), omega)
+
+        # Distance PD
         e     = dist_m - HOLD_DIST
         de_dt = (dist_m - S.prev_dist) / DT if S.prev_dist is not None else 0.0
         v_pd  = DIST_KP * e + DIST_KD * de_dt
-
-        if e > 0:   # too far — floor at min approach speed
+        if e > 0:
             v_forward = min(max(v_pd, MIN_APPROACH), MAX_SPEED)
-        else:       # too close — allow reversing
+        else:
             v_forward = max(v_pd, -MAX_SPEED)
 
         S.prev_dist  = dist_m
         S.goal_queue = [list(target_xy)]
 
     elif S.mode == "FOLLOW_GOAL":
+        if S.goal_queue:
+            wp      = S.goal_queue[0]
+            S.route = build_route(S.pos, wp)
+            if len(S.route) >= 2:
+                want  = _bearing(S.route[0], S.route[1])
+                new_h = _rotate_toward(S.heading, want, DT)
+                omega = _adiff(new_h, S.heading) / DT
+                if abs(_adiff(S.heading, want)) < ALIGN:
+                    v_forward = MAX_SPEED
+            if _dist(S.pos, wp) < ARRIVE:
+                S.goal_queue.pop(0)
+
+    elif S.mode == "AVOID_EDGE":
+        if S.goal_queue:
+            wp      = S.goal_queue[0]
+            S.route = build_route(S.pos, wp)
+            if len(S.route) >= 2:
+                want  = _bearing(S.route[0], S.route[1])
+                new_h = _rotate_toward(S.heading, want, DT)
+                omega = _adiff(new_h, S.heading) / DT
+                if abs(_adiff(S.heading, want)) < ALIGN:
+                    v_forward = MAX_SPEED
+            if _dist(S.pos, wp) < EDGE_ARRIVE:
+                S.goal_queue.pop(0)
+
+    elif S.mode == "EDGE_FOLLOW":
+        # Move along the aisle at the edge while waiting for shopper to reappear
+        aisle_hdg = 0.0 if S.last_target_pos[0] >= S.pos[0] else math.pi
+        lat_err   = S.avoid_edge_y - S.pos[1]
+        cross_ang = math.atan2(lat_err * LATERAL_KP, 1.0)
+        want_hdg  = (aisle_hdg + cross_ang) % (2 * math.pi)
+        omega     = _adiff(want_hdg, S.heading) / DT
+        omega     = math.copysign(min(abs(omega), MAX_TURN), omega)
+        v_forward = MAX_SPEED * 0.5
+
+    elif S.mode == "RETURN_CENTER":
         if S.goal_queue:
             wp      = S.goal_queue[0]
             S.route = build_route(S.pos, wp)
