@@ -114,7 +114,6 @@ struct WheelPid {
   float targetRPM = 0.0f;
   float measuredRPM = 0.0f;
   float integral = 0.0f;
-  float prevError = 0.0f;
   float output = 0.0f;
   long lastCount = 0;
 };
@@ -124,7 +123,6 @@ WheelPid leftPid;
 
 const float RPM_KP = 0.006f;
 const float RPM_KI = 0.020f;
-const float RPM_KD = 0.0002f;
 const float INTEGRAL_LIMIT = 25.0f;
 const float STOP_RPM_EPS = 0.5f;
 
@@ -146,21 +144,17 @@ float updatePid(WheelPid &pid, float measuredRPM, float dt) {
 
   if (fabs(pid.targetRPM) < STOP_RPM_EPS) {
     pid.integral = 0.0f;
-    pid.prevError = 0.0f;
     pid.output = 0.0f;
     return 0.0f;
   }
 
   float error = pid.targetRPM - measuredRPM;
   pid.integral = clampf(pid.integral + error * dt, -INTEGRAL_LIMIT, INTEGRAL_LIMIT);
-  float derivative = (error - pid.prevError) / dt;
-  pid.prevError = error;
 
   float feedforward = pid.targetRPM / MAX_RPM;
   pid.output = clampf(feedforward
                       + RPM_KP * error
-                      + RPM_KI * pid.integral
-                      + RPM_KD * derivative,
+                      + RPM_KI * pid.integral,
                       -1.0f, 1.0f);
   return pid.output;
 }
@@ -176,8 +170,6 @@ void stopMotors() {
   leftPid.targetRPM = 0.0f;
   rightPid.integral = 0.0f;
   leftPid.integral = 0.0f;
-  rightPid.prevError = 0.0f;
-  leftPid.prevError = 0.0f;
   rightPid.output = 0.0f;
   leftPid.output = 0.0f;
   rightMotor.setOutput(0.0f);
