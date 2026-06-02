@@ -28,7 +28,7 @@ START_POS     = [0.0, 0.0]
 START_HEADING = 0.0
 CENTER_DEADBAND_DEG = 2.0
 CENTER_MAX_TURN_DEG = 60.0
-CENTER_KP           = 0.02   # rad/s per degree of angle error
+CENTER_KP           = 0.002  # rad/s per degree of angle error
 
 # =============================================================================
 

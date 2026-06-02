@@ -63,7 +63,7 @@ ALIGN        = math.radians(5)   # heading tolerance before moving (search state
 # Tracking  (IN_VIEW state)
 HOLD_DIST    = 2.0               # target hold distance (metres)
 MIN_APPROACH = 0.15              # floor speed when approaching (ensures progress)
-CENTER_KP    = 0.01              # centering gain  (rad/s per degree of angle error)
+CENTER_KP    = 0.001             # centering gain  (rad/s per degree of angle error)
 DIST_KP      = 0.4               # distance PD proportional gain  (m/s per metre)
 DIST_KD      = 0.3               # distance PD derivative gain    (m/s per m/s)
 FOV_ENGAGE_DEG    = 25.0   # only rotate to keep shopper centred when angle exceeds this
