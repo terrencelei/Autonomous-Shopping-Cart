@@ -1,9 +1,11 @@
 """
-Spin test — drives the cart one full 360° rotation in place, then stops.
+Rotation test — either spin one full 360° turn or rotate in place to keep
+the shopper centred in the camera FOV.
 
 Usage:
-    python3 pathfinding_arc_test.py            # drives motors
-    python3 pathfinding_arc_test.py --no-drive # pure sim, no serial
+    python3 pathfinding_arc_test.py                    # centre target from UDP
+    python3 pathfinding_arc_test.py --mode spin         # one 360° spin
+    python3 pathfinding_arc_test.py --no-drive --sim-angle 15
     python3 pathfinding_arc_test.py --port /dev/ttyUSB0
 """
 
@@ -11,11 +13,6 @@ import argparse
 import math
 import os
 import time
-
-import numpy as np
-import matplotlib
-matplotlib.use('Agg')   # non-interactive backend — required on headless Pi
-import matplotlib.pyplot as plt
 
 import Pathfinding_algorithm as P
 
@@ -28,6 +25,9 @@ _MOTOR_PORT = getattr(P, 'MOTOR_PORT', getattr(P, 'MOTOR_UART_PORT', '/dev/ttyAC
 
 START_POS     = [0.0, 0.0]
 START_HEADING = 0.0
+CENTER_DEADBAND_DEG = 2.0
+CENTER_MAX_TURN_DEG = 60.0
+CENTER_KP           = 0.035  # rad/s per degree of angle error
 
 # =============================================================================
 
@@ -54,22 +54,35 @@ def find_serial_port(preferred):
     return preferred
 
 
-def run(drive=True, port=None, countdown=3):
+def open_motors(drive=True, port=None, countdown=3, action="moving"):
+    if not drive:
+        return None
+
+    chosen = port or find_serial_port(_MOTOR_PORT)
+    if chosen != _MOTOR_PORT:
+        P.MOTOR_PORT = chosen
+    motors = P.MotorDriver()
+    if countdown > 0:
+        print(f"\n*** Cart will start {action} in {countdown}s ***")
+        for k in range(countdown, 0, -1):
+            print(f"  {k}...")
+            time.sleep(1)
+        print("  GO!\n")
+    return motors
+
+
+def flush_motors(motors):
+    if motors is not None and motors._ser and motors._ser.is_open:
+        motors._ser.reset_input_buffer()
+        motors._last_l = motors._last_r = None
+        motors._dl = motors._dr = 0
+
+
+def run_spin(drive=True, port=None, countdown=3):
     pos     = list(START_POS)
     heading = START_HEADING
 
-    motors = None
-    if drive:
-        chosen = port or find_serial_port(_MOTOR_PORT)
-        if chosen != _MOTOR_PORT:
-            P.MOTOR_PORT = chosen
-        motors = P.MotorDriver()
-        if countdown > 0:
-            print(f"\n*** Cart will start spinning in {countdown}s ***")
-            for k in range(countdown, 0, -1):
-                print(f"  {k}...")
-                time.sleep(1)
-            print("  GO!\n")
+    motors = open_motors(drive=drive, port=port, countdown=countdown, action="spinning")
 
     times         = []
     robot_xs, robot_ys, robot_thetas = [], [], []
@@ -92,10 +105,7 @@ def run(drive=True, port=None, countdown=3):
 
     # Hard-flush the serial receive buffer and reset encoder tracking
     # so packets that built up during the countdown don't count
-    if motors is not None and motors._ser and motors._ser.is_open:
-        motors._ser.reset_input_buffer()
-        motors._last_l = motors._last_r = None
-        motors._dl = motors._dr = 0
+    flush_motors(motors)
 
     i = 0
     try:
@@ -170,6 +180,7 @@ def run(drive=True, port=None, countdown=3):
               "Check encoder wiring/signs before trusting odometry.")
 
     return dict(
+        mode="spin",
         t=times,
         rx=robot_xs, ry=robot_ys, rt=robot_thetas,
         encoder_degrees=encoder_degrees,
@@ -181,19 +192,128 @@ def run(drive=True, port=None, countdown=3):
     )
 
 
+def center_turn_command(angle_deg):
+    if abs(angle_deg) <= CENTER_DEADBAND_DEG:
+        return 0.0
+    omega = -CENTER_KP * angle_deg
+    max_turn = math.radians(CENTER_MAX_TURN_DEG)
+    return math.copysign(min(abs(omega), max_turn), omega)
+
+
+def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None):
+    pos     = list(START_POS)
+    heading = START_HEADING
+    motors  = open_motors(drive=drive, port=port, countdown=countdown, action="centring")
+    receiver = None if sim_angle is not None else P.TargetReceiver()
+
+    print("Centering mode: rotate only, no forward motion.")
+    if sim_angle is None:
+        print(f"Listening for UDP target readings on port {P.UDP_PORT}.")
+    else:
+        print(f"Using simulated target angle {sim_angle:+.1f}°.")
+
+    times, robot_xs, robot_ys, robot_thetas = [], [], [], []
+    target_angles, omegas, v_rights, v_lefts = [], [], [], []
+    enc_right_cum, enc_left_cum = [], []
+    enc_right_delta, enc_left_delta = [], []
+    cum_l, cum_r = 0, 0
+    start = time.monotonic()
+    i = 0
+
+    flush_motors(motors)
+    try:
+        while True:
+            t_loop0 = time.monotonic()
+            t = t_loop0 - start
+            if duration > 0 and t >= duration:
+                break
+
+            reading = (0.0, sim_angle) if sim_angle is not None else receiver.get()
+            angle_deg = reading[1] if reading is not None else None
+            omega = center_turn_command(angle_deg) if angle_deg is not None else 0.0
+            v_right, v_left = P._wheel_commands(0.0, omega)
+
+            if motors is not None:
+                motors.send(v_right, v_left)
+                d_l, d_r = motors.read_encoder_deltas()
+            else:
+                d_l, d_r = 0, 0
+            cum_l += d_l; cum_r += d_r
+            enc_right_delta.append(d_l); enc_left_delta.append(d_r)
+            enc_right_cum.append(cum_l); enc_left_cum.append(cum_r)
+
+            times.append(t)
+            robot_xs.append(pos[0]); robot_ys.append(pos[1])
+            robot_thetas.append(heading)
+            target_angles.append(float("nan") if angle_deg is None else angle_deg)
+
+            new_pos, new_heading, v_fwd, sim_omega = integrate_kinematics(
+                pos, heading, v_right, v_left, P.DT)
+            pos = new_pos
+            heading = new_heading
+            omegas.append(omega)
+            v_rights.append(v_right); v_lefts.append(v_left)
+
+            if i % max(1, int(0.5 / P.DT)) == 0:
+                label = "no target" if angle_deg is None else f"angle={angle_deg:+.1f}°"
+                print(f"t={t:5.1f}s  {label:<16} omega={math.degrees(omega):+6.1f}°/s")
+            i += 1
+
+            elapsed = time.monotonic() - t_loop0
+            if elapsed < P.DT:
+                time.sleep(P.DT - elapsed)
+    except KeyboardInterrupt:
+        print("\nCentering stopped by user.")
+    finally:
+        if motors is not None:
+            print("\nStopping motors.")
+            motors.stop()
+
+    return dict(
+        mode="center",
+        t=times,
+        rx=robot_xs, ry=robot_ys, rt=robot_thetas,
+        target_angle=target_angles,
+        omega=omegas,
+        v_right=v_rights, v_left=v_lefts,
+        enc_l_cum=enc_right_cum, enc_r_cum=enc_left_cum,
+        enc_l_delta=enc_right_delta, enc_r_delta=enc_left_delta,
+        drove=(motors is not None),
+    )
+
+
 def plot(data, out_path="pathfinding_arc_test.png"):
+    try:
+        import numpy as np
+        import matplotlib
+        matplotlib.use('Agg')   # non-interactive backend — required on headless Pi
+        import matplotlib.pyplot as plt
+    except ImportError as e:
+        print(f"Skipping plots: {e}")
+        return
+
     fig, axes = plt.subplots(1, 2, figsize=(11, 5))
+    mode = data.get("mode", "spin")
 
     # ── Angle over time ────────────────────────────────────
     ax = axes[0]
-    if data.get('drove'):
+    if mode == "center":
+        angles_deg = data.get("target_angle", [])
+        title = 'Target angle in FOV'
+        ylabel = 'target angle (deg)'
+        ax.axhline(0, color='gray', ls=':', alpha=0.6, label='center')
+        ax.axhspan(-CENTER_DEADBAND_DEG, CENTER_DEADBAND_DEG,
+                   color='green', alpha=0.12, label='deadband')
+    elif data.get('drove'):
         angles_deg = data['encoder_degrees']
         title = 'Encoder angle over time'
         ylabel = 'encoder angle (deg)'
+        ax.axhline(360, color='gray', ls=':', alpha=0.6, label='360°')
     else:
         angles_deg = [math.degrees(h) for h in data['rt']]
         title = 'Sim heading over time'
         ylabel = 'sim heading (deg)'
+        ax.axhline(360, color='gray', ls=':', alpha=0.6, label='360°')
     ax.plot(data['t'], angles_deg, 'b-')
     if angles_deg and data['t']:
         final_angle = angles_deg[-1]
@@ -204,7 +324,6 @@ def plot(data, out_path="pathfinding_arc_test.png"):
                     textcoords='offset points',
                     fontsize=9,
                     arrowprops=dict(arrowstyle='->', lw=0.8))
-    ax.axhline(360, color='gray', ls=':', alpha=0.6, label='360°')
     ax.set_xlabel('time (s)')
     ax.set_ylabel(ylabel)
     ax.set_title(title)
@@ -214,8 +333,9 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     # ── Turn rate ──────────────────────────────────────────
     ax = axes[1]
     ax.plot(data['t'], np.degrees(data['omega']), 'b-')
-    ax.axhline( math.degrees(P.MAX_TURN), color='gray', ls=':', alpha=0.5,
-                label=f'cap {math.degrees(P.MAX_TURN):.0f}°/s')
+    cap = CENTER_MAX_TURN_DEG if mode == "center" else math.degrees(P.MAX_TURN)
+    ax.axhline(cap, color='gray', ls=':', alpha=0.5, label=f'cap {cap:.0f}°/s')
+    ax.axhline(-cap, color='gray', ls=':', alpha=0.5)
     ax.set_xlabel('time (s)')
     ax.set_ylabel('omega (deg/s)')
     ax.set_title('Turn rate command')
@@ -255,13 +375,24 @@ def plot(data, out_path="pathfinding_arc_test.png"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--mode", choices=("center", "spin"), default="center",
+                        help="center keeps the shopper centred; spin runs the original 360° test")
     parser.add_argument("--no-drive", action="store_true",
                         help="simulation only — don't open the ESP32 serial port")
     parser.add_argument("--port", default=None,
                         help=f"serial port override (default: {_MOTOR_PORT})")
     parser.add_argument("--countdown", type=int, default=3,
                         help="seconds before motors start (default: 3)")
+    parser.add_argument("--duration", type=float, default=30.0,
+                        help="centering run time in seconds; 0 runs until Ctrl-C (default: 30)")
+    parser.add_argument("--sim-angle", type=float, default=None,
+                        help="simulate a fixed target angle instead of listening for UDP")
     args = parser.parse_args()
 
-    data = run(drive=not args.no_drive, port=args.port, countdown=args.countdown)
+    if args.mode == "spin":
+        data = run_spin(drive=not args.no_drive, port=args.port, countdown=args.countdown)
+    else:
+        data = run_center(drive=not args.no_drive, port=args.port,
+                          countdown=args.countdown, duration=args.duration,
+                          sim_angle=args.sim_angle)
     plot(data)
