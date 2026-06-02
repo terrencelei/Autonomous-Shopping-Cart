@@ -3,7 +3,8 @@ Rotation test — either spin one full 360° turn or rotate in place to keep
 the shopper centred in the camera FOV.
 
 Usage:
-    python3 pathfinding_arc_test.py                    # centre target from UDP
+    python3 pathfinding_arc_test.py                    # centre target from live camera
+    python3 pathfinding_arc_test.py --source udp       # centre target from UDP
     python3 pathfinding_arc_test.py --mode spin         # one 360° spin
     python3 pathfinding_arc_test.py --no-drive --sim-angle 15
     python3 pathfinding_arc_test.py --port /dev/ttyUSB0
@@ -200,6 +201,130 @@ def center_turn_command(angle_deg):
     return math.copysign(min(abs(omega), max_turn), omega)
 
 
+def import_yolo_detect():
+    try:
+        from vision import yolo_detect as Y
+    except Exception as e:
+        raise SystemExit(f"ERROR: could not import vision/yolo_detect.py: {e}")
+    return Y
+
+
+def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_display=False):
+    Y = import_yolo_detect()
+    if not Y.RPK_MODEL_PATH.exists():
+        raise SystemExit(
+            f"ERROR: {Y.RPK_MODEL_PATH} not found. Install with: sudo apt install imx500-models"
+        )
+
+    motors = open_motors(drive=drive, port=port, countdown=countdown, action="centring")
+    odometry = P.Odometry(motors.read_encoder_deltas if motors else lambda: (0, 0))
+    cap = Y.IMX500Capture(model_path=Y.RPK_MODEL_PATH, width=640, height=480, fps=30)
+    tracker = Y.sv.ByteTrack(
+        track_activation_threshold=0.25,
+        lost_track_buffer=60,
+        minimum_matching_threshold=0.8,
+        frame_rate=30,
+    )
+    smooth_state = {}
+    target_lock = Y.TargetLock()
+
+    print("Camera centering mode: yolo_detect boxes/radar, rotate only, no forward motion.")
+    print("Press Q in the Cart View window to stop." if not no_display else "Display disabled.")
+
+    times, robot_xs, robot_ys, robot_thetas = [], [], [], []
+    target_angles, omegas, v_rights, v_lefts = [], [], [], []
+    enc_right_cum, enc_left_cum = [], []
+    enc_right_delta, enc_left_delta = [], []
+    cum_l, cum_r = 0, 0
+    start = time.monotonic()
+    last_tick = time.monotonic()
+    frame_times = []
+    i = 0
+
+    flush_motors(motors)
+    try:
+        while True:
+            loop_start = time.monotonic()
+            t = loop_start - start
+            if duration > 0 and t >= duration:
+                break
+
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            dets = cap.get_detections()
+            tracked = tracker.update_with_detections(dets)
+            out, rows = Y.annotate_frame(frame, tracked, smooth_state, target_lock, loop_start)
+
+            target_row = next((r for r in rows if r[0] == "TARGET"), None)
+            angle_deg = target_row[4] if target_row is not None else None
+            omega = center_turn_command(angle_deg) if angle_deg is not None else 0.0
+            v_right, v_left = P._wheel_commands(0.0, omega)
+
+            now = time.monotonic()
+            if now - last_tick >= P.DT:
+                pos, heading = odometry.update()
+                P.S.pos = list(pos)
+                P.S.heading = heading
+
+                if motors is not None:
+                    motors.send(v_right, v_left)
+                last_tick = now
+
+                times.append(t)
+                robot_xs.append(P.S.pos[0]); robot_ys.append(P.S.pos[1])
+                robot_thetas.append(P.S.heading)
+                target_angles.append(float("nan") if angle_deg is None else angle_deg)
+                omegas.append(omega)
+                v_rights.append(v_right); v_lefts.append(v_left)
+                enc_right_delta.append(0); enc_left_delta.append(0)
+                enc_right_cum.append(cum_l); enc_left_cum.append(cum_r)
+
+                if i % max(1, int(0.5 / P.DT)) == 0:
+                    label = "no target" if angle_deg is None else f"angle={angle_deg:+.1f}°"
+                    print(f"t={t:5.1f}s  {label:<16} omega={math.degrees(omega):+6.1f}°/s")
+                i += 1
+
+            frame_times.append(time.time())
+            if len(frame_times) > 30:
+                frame_times.pop(0)
+            fps_live = (
+                (len(frame_times) - 1) / (frame_times[-1] - frame_times[0])
+                if len(frame_times) > 1 else 0.0
+            )
+            Y.cv2.putText(out, f"CENTER  FPS: {fps_live:.1f}  omega={math.degrees(omega):+.1f}deg/s",
+                          (10, 25), Y.cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
+
+            if not no_display:
+                Y.overlay_map(out, rows)
+                Y.cv2.imshow("Cart View", out)
+                Y.cv2.imshow("World Map", Y.draw_world_map(rows))
+                if Y.cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+    except KeyboardInterrupt:
+        print("\nCamera centering stopped by user.")
+    finally:
+        if motors is not None:
+            print("\nStopping motors.")
+            motors.stop()
+        cap.release()
+        if not no_display:
+            Y.cv2.destroyAllWindows()
+
+    return dict(
+        mode="center",
+        t=times,
+        rx=robot_xs, ry=robot_ys, rt=robot_thetas,
+        target_angle=target_angles,
+        omega=omegas,
+        v_right=v_rights, v_left=v_lefts,
+        enc_l_cum=enc_right_cum, enc_r_cum=enc_left_cum,
+        enc_l_delta=enc_right_delta, enc_r_delta=enc_left_delta,
+        drove=(motors is not None),
+    )
+
+
 def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None):
     pos     = list(START_POS)
     heading = START_HEADING
@@ -377,8 +502,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--mode", choices=("center", "spin"), default="center",
                         help="center keeps the shopper centred; spin runs the original 360° test")
+    parser.add_argument("--source", choices=("camera", "udp"), default="camera",
+                        help="target angle source for center mode (default: camera)")
     parser.add_argument("--no-drive", action="store_true",
                         help="simulation only — don't open the ESP32 serial port")
+    parser.add_argument("--no-display", action="store_true",
+                        help="suppress OpenCV windows in camera center mode")
     parser.add_argument("--port", default=None,
                         help=f"serial port override (default: {_MOTOR_PORT})")
     parser.add_argument("--countdown", type=int, default=3,
@@ -391,8 +520,18 @@ if __name__ == "__main__":
 
     if args.mode == "spin":
         data = run_spin(drive=not args.no_drive, port=args.port, countdown=args.countdown)
-    else:
+    elif args.sim_angle is not None or args.source == "udp":
+        if args.source == "udp" and args.sim_angle is None:
+            print(f"UDP centering mode: listening on port {P.UDP_PORT}.")
         data = run_center(drive=not args.no_drive, port=args.port,
                           countdown=args.countdown, duration=args.duration,
                           sim_angle=args.sim_angle)
+    else:
+        no_display = args.no_display
+        if not no_display and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            no_display = True
+            print("No display detected — running headless (use --no-display to silence this message).")
+        data = run_center_camera(drive=not args.no_drive, port=args.port,
+                                 countdown=args.countdown, duration=args.duration,
+                                 no_display=no_display)
     plot(data)
