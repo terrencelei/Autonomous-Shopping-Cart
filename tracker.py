@@ -52,7 +52,7 @@ ANGLE_THRESH = 25.0   # degrees — suppress forward motion if off-centre beyond
 MAX_SPEED    = 0.5    # m/s
 MAX_TURN     = math.radians(90)   # rad/s
 
-CENTER_KP    = 0.002  # rad/s per degree of angle error
+CENTER_KP    = 0.006  # rad/s per degree of angle error
 DIST_KP      = 0.4    # (m/s)/m   — proportional gain on distance error
 DIST_KD      = 0.3    # (m/s)/(m/s) — derivative gain on relative speed
 
