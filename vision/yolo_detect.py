@@ -55,6 +55,10 @@ TARGET_DIST_WEIGHT  = 1.0
 TARGET_ANGLE_WEIGHT = 0.3
 
 DIST_EMA_ALPHA = 0.4
+ANGLE_EMA_ALPHA = 0.4
+TARGET_LOST_TIMEOUT_S = 0.75
+TARGET_SWITCH_MARGIN = 0.8
+TARGET_SWITCH_FRAMES = 5
 
 # World-map window
 WORLD_MAP_PX = 500
@@ -155,46 +159,127 @@ def estimate_angle(bbox_cx, img_w):
     return np.degrees(np.arctan((bbox_cx - img_w / 2) / fl)) * ANGLE_SCALE
 
 
-def find_target_idx(detections, img_w, img_h):
-    best_idx, best_score = None, float("inf")
-    for i, (x1, y1, x2, y2) in enumerate(detections.xyxy):
-        bbox_h  = y2 - y1
-        bbox_cx = (x1 + x2) / 2
-        dist    = estimate_distance(bbox_h, bbox_cx, img_h, img_w) if bbox_h > 0 else float("inf")
-        angle   = abs(estimate_angle(bbox_cx, img_w))
-        score   = TARGET_DIST_WEIGHT * dist + TARGET_ANGLE_WEIGHT * angle
-        if score < best_score:
-            best_score, best_idx = score, i
-    return best_idx
+def detection_score(dist, angle):
+    return TARGET_DIST_WEIGHT * dist + TARGET_ANGLE_WEIGHT * abs(angle)
 
 
-def annotate_frame(frame, detections: sv.Detections, smooth_state: dict):
+def normalize_track_id(tid):
+    if tid is None:
+        return None
+    try:
+        if np.isnan(tid):
+            return None
+    except TypeError:
+        pass
+    return int(tid)
+
+
+class TargetLock:
+    def __init__(self):
+        self.locked_id = None
+        self.last_seen = 0.0
+        self.switch_candidate_id = None
+        self.switch_candidate_frames = 0
+
+    def choose(self, measurements, now):
+        if not measurements:
+            self.switch_candidate_id = None
+            self.switch_candidate_frames = 0
+            if self.locked_id is not None and now - self.last_seen > TARGET_LOST_TIMEOUT_S:
+                self.locked_id = None
+            return None
+
+        best = min(measurements, key=lambda m: m["score"])
+        if all(m["track_id"] is None for m in measurements):
+            return best["index"]
+
+        best_tracked = min((m for m in measurements if m["track_id"] is not None),
+                           key=lambda m: m["score"])
+        current = next((m for m in measurements if m["track_id"] == self.locked_id), None)
+        if current is None:
+            if self.locked_id is not None and now - self.last_seen <= TARGET_LOST_TIMEOUT_S:
+                return None
+            self._lock(best_tracked["track_id"], now)
+            return best_tracked["index"]
+
+        self.last_seen = now
+        if best_tracked["track_id"] != self.locked_id and best_tracked["score"] + TARGET_SWITCH_MARGIN < current["score"]:
+            if best_tracked["track_id"] == self.switch_candidate_id:
+                self.switch_candidate_frames += 1
+            else:
+                self.switch_candidate_id = best_tracked["track_id"]
+                self.switch_candidate_frames = 1
+
+            if self.switch_candidate_frames >= TARGET_SWITCH_FRAMES:
+                self._lock(best_tracked["track_id"], now)
+                return best_tracked["index"]
+        else:
+            self.switch_candidate_id = None
+            self.switch_candidate_frames = 0
+
+        return current["index"]
+
+    def _lock(self, track_id, now):
+        self.locked_id = track_id
+        self.last_seen = now
+        self.switch_candidate_id = None
+        self.switch_candidate_frames = 0
+
+
+def annotate_frame(frame, detections: sv.Detections, smooth_state: dict, target_lock: TargetLock, now: float):
     img_h, img_w = frame.shape[:2]
     out = frame.copy()
 
-    target_idx = find_target_idx(detections, img_w, img_h)
     ids = detections.tracker_id if detections.tracker_id is not None else [None] * len(detections)
 
-    rows = []
-    for i, ((x1, y1, x2, y2), conf, tid) in enumerate(zip(
+    measurements = []
+    for i, ((x1, y1, x2, y2), conf, tid_raw) in enumerate(zip(
         detections.xyxy, detections.confidence, ids
     )):
+        tid = normalize_track_id(tid_raw)
+        bbox_h  = y2 - y1
+        bbox_cx = (x1 + x2) / 2
+        raw_dist  = estimate_distance(bbox_h, bbox_cx, img_h, img_w) if bbox_h > 0 else 0
+        raw_angle = estimate_angle(bbox_cx, img_w)
+
+        if tid is not None:
+            prev = smooth_state.get(tid, {"dist": raw_dist, "angle": raw_angle})
+            dist = DIST_EMA_ALPHA * raw_dist + (1 - DIST_EMA_ALPHA) * prev["dist"]
+            angle = ANGLE_EMA_ALPHA * raw_angle + (1 - ANGLE_EMA_ALPHA) * prev["angle"]
+            smooth_state[tid] = {"dist": dist, "angle": angle, "last_seen": now}
+        else:
+            dist = raw_dist
+            angle = raw_angle
+
+        measurements.append({
+            "index": i,
+            "track_id": tid,
+            "xyxy": (x1, y1, x2, y2),
+            "confidence": conf,
+            "dist": dist,
+            "angle": angle,
+            "score": detection_score(dist, angle),
+        })
+
+    for tid, state in list(smooth_state.items()):
+        if now - state.get("last_seen", now) > TARGET_LOST_TIMEOUT_S * 4:
+            smooth_state.pop(tid, None)
+
+    target_idx = target_lock.choose(measurements, now)
+
+    rows = []
+    for m in measurements:
+        i = m["index"]
+        x1, y1, x2, y2 = m["xyxy"]
+        conf = m["confidence"]
+        tid = m["track_id"]
         is_target = (i == target_idx)
         color     = COLOR_TARGET if is_target else COLOR_OBSTACLE
         role      = "TARGET" if is_target else "OBSTACLE"
         label_id  = f"ID{tid}" if tid is not None else "?"
 
-        bbox_h  = y2 - y1
-        bbox_cx = (x1 + x2) / 2
-
-        raw_dist = estimate_distance(bbox_h, bbox_cx, img_h, img_w) if bbox_h > 0 else 0
-        if tid is not None:
-            prev = smooth_state.get(tid, raw_dist)
-            dist = DIST_EMA_ALPHA * raw_dist + (1 - DIST_EMA_ALPHA) * prev
-            smooth_state[tid] = dist
-        else:
-            dist = raw_dist
-        angle = estimate_angle(bbox_cx, img_w)
+        dist = m["dist"]
+        angle = m["angle"]
 
         thickness = 3 if is_target else 2
         cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
@@ -314,6 +399,7 @@ def run(no_display=False, no_drive=False):
         frame_rate=30,
     )
     smooth_state = {}
+    target_lock = TargetLock()
 
     # Motor driver and odometry from Pathfinding_algorithm
     motors   = None if no_drive else P.MotorDriver()
@@ -338,7 +424,7 @@ def run(no_display=False, no_drive=False):
 
             dets    = cap.get_detections()
             tracked = tracker.update_with_detections(dets)
-            out, rows = annotate_frame(frame, tracked, smooth_state)
+            out, rows = annotate_frame(frame, tracked, smooth_state, target_lock, time.monotonic())
 
             # Keep the freshest target sighting for the next control tick
             target_row = next((r for r in rows if r[0] == "TARGET"), None)

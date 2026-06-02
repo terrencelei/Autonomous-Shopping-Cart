@@ -459,10 +459,9 @@ def tick(reading, pos, heading, obstacles=None):
 
     # Obstacle avoidance — highest priority, interrupts tracking/return modes
     if obstacles and S.mode in ("IN_VIEW", "FOLLOW_GOAL", "RETURN_CENTER"):
-        avg_dist  = sum(d for d, _ in obstacles) / len(obstacles)
-        avg_ang   = sum(a for _, a in obstacles) / len(obstacles)
-        obs_bear  = S.heading - math.radians(avg_ang)
-        obs_y     = S.pos[1] + avg_dist * math.sin(obs_bear)
+        obs_dist, obs_ang = min(obstacles, key=lambda o: o[0])
+        obs_bear  = S.heading - math.radians(obs_ang)
+        obs_y     = S.pos[1] + obs_dist * math.sin(obs_bear)
         cy        = _nearest_aisle_cy(S.pos[1])
         S.avoid_dir    = -1 if obs_y >= cy else +1
         S.avoid_edge_y = cy + S.avoid_dir * (AISLE_W / 2 - AISLE_EDGE_MARGIN)
