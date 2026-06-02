@@ -143,7 +143,7 @@ pip install pyserial numpy
 1. **Odometry** — encoder deltas (`E,<l>,<r>` lines from the ESP32) are integrated each tick to maintain an absolute `(x, y, heading)` pose.
 2. **Sighting conversion** — the vision system's `(dist_m, angle_deg)` is projected into map coordinates using the current pose.
 3. **State machine** — `tick()` runs the priority-ordered state machine (see below).
-4. **Drive** — `tick()` outputs `(v_left, v_right)` in m/s, converted to RPM and written as `L<rpm> R<rpm>\n` to the ESP32.
+4. **Drive** — `tick()` outputs `(v_right, v_left)` in m/s, converted to RPM and written as `L<rpm> R<rpm>\n` to the ESP32.
 
 ### State Machine
 
@@ -183,8 +183,8 @@ Entered when the shopper cannot be found after exhausting `FOLLOW_GOAL` or `RETU
 | `TRACK_M` | `Pathfinding_algorithm.py` | Centre-to-centre wheel spacing |
 | `ENCODER_PPR` | `Pathfinding_algorithm.py` | Pulses per revolution after gearbox + 4× quadrature |
 | `GEAR_RATIO` | `Pathfinding_algorithm.py` | Motor gearbox ratio |
-| `LEFT_ENC_SIGN` / `RIGHT_ENC_SIGN` | `Pathfinding_algorithm.py` | Flip to `+1` if that encoder counts backwards |
-| `LEFT_MOTOR_SIGN` / `RIGHT_MOTOR_SIGN` | `Pathfinding_algorithm.py` | Flip to `+1` if that motor drives the wrong direction |
+| `RIGHT_ENC_SIGN` / `LEFT_ENC_SIGN` | `Pathfinding_algorithm.py` | Flip to `+1` if that encoder counts backwards |
+| `RIGHT_MOTOR_SIGN` / `LEFT_MOTOR_SIGN` | `Pathfinding_algorithm.py` | Flip to `+1` if that motor drives the wrong direction |
 
 ---
 
@@ -196,8 +196,8 @@ Entered when the shopper cannot be found after exhausting `FOLLOW_GOAL` or `RETU
 
 | Side | PWM A | PWM B | Encoder A | Encoder B |
 |------|-------|-------|-----------|-----------|
-| Left (M1)  | GPIO 18 | GPIO 19 | GPIO 32 | GPIO 33 |
-| Right (M2) | GPIO 22 | GPIO 23 | GPIO 25 | GPIO 26 |
+| Right (M1)  | GPIO 18 | GPIO 19 | GPIO 32 | GPIO 33 |
+| Left (M2) | GPIO 22 | GPIO 23 | GPIO 25 | GPIO 26 |
 
 Connect the ESP32 to the Pi via the CP2102 USB-UART bridge; it will enumerate as `/dev/ttyUSB0`.
 
@@ -330,7 +330,7 @@ Check the ESP32 is plugged in: `ls /dev/ttyUSB*`. Add the user to the `dialout` 
 Calibrate `MAX_RPM` in `firmware/cart_motor/cart_motor.ino`. Run the cart at full output for a fixed time, read the final `E,<l>,<r>` line, and compute `rpm = (ticks / ENCODER_PPR) * (60 / seconds)`.
 
 **Cart drifts off-track after a few metres:**
-Check `LEFT_ENC_SIGN` / `RIGHT_ENC_SIGN` — if either encoder counts the wrong direction the odometry will diverge quickly. Verify with: push the cart forward by hand and check that both encoder counts in the `E,<l>,<r>` stream increase.
+Check `RIGHT_ENC_SIGN` / `LEFT_ENC_SIGN` — if either encoder counts the wrong direction the odometry will diverge quickly. Verify with: push the cart forward by hand and check that both encoder counts in the `E,<l>,<r>` stream increase.
 
 **Obstacle avoidance not triggering:**
 The cart only avoids from `IN_VIEW`, `FOLLOW_GOAL`, and `RETURN_CENTER`. If the cart is in a search state (`SPIN` etc.) when an obstacle appears, avoidance does not interrupt it. This is by design — avoidance is only relevant while actively following.

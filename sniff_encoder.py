@@ -1,6 +1,6 @@
 """
 Quick serial sniffer for the ESP32 cart_motor firmware. Prints every
-"E,<left>,<right>" packet that arrives on /dev/ttyUSB0 alongside the
+"E,<right>,<left>" packet that arrives on /dev/ttyUSB0 alongside the
 per-update delta, mirroring the format of the latest dual_motor_test.ino:
 
     L=     0 (d   +0)   R=     7 (d   +1)  *R*
@@ -21,12 +21,12 @@ BAUD = 115200
 DURATION_S = 20
 
 # Flip if a wheel's encoder count goes negative under forward motion.
-LEFT_SIGN  = -1
-RIGHT_SIGN = +1
+RIGHT_SIGN  = -1
+LEFT_SIGN = +1
 
 s = serial.Serial(PORT, BAUD, timeout=1)
 print(f"Watching {PORT} for {DURATION_S}s.")
-print("Push LEFT wheel hard for 5s, then RIGHT wheel for 5s.\n")
+print("Push RIGHT wheel hard for 5s, then LEFT wheel for 5s.\n")
 
 end = time.time() + DURATION_S
 prev_l = prev_r = None
@@ -39,8 +39,8 @@ while time.time() < end:
     if line.startswith("E,"):
         try:
             _, l_s, r_s = line.split(",", 2)
-            l = LEFT_SIGN  * int(l_s)
-            r = RIGHT_SIGN * int(r_s)
+            l = RIGHT_SIGN  * int(l_s)
+            r = LEFT_SIGN * int(r_s)
         except ValueError:
             print(f"  bad packet: {line!r}")
             continue

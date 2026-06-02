@@ -32,9 +32,9 @@ START_HEADING = 0.0
 # =============================================================================
 
 
-def integrate_kinematics(pos, heading, v_left, v_right, dt):
-    v_fwd = (v_left + v_right) / 2.0
-    omega = (v_right - v_left) / P.TRACK_M
+def integrate_kinematics(pos, heading, v_right, v_left, dt):
+    v_fwd = (v_right + v_left) / 2.0
+    omega = (v_left - v_right) / P.TRACK_M
     new_heading = (heading + omega * dt) % (2 * math.pi)
     new_x = pos[0] + v_fwd * math.cos(heading) * dt
     new_y = pos[1] + v_fwd * math.sin(heading) * dt
@@ -74,9 +74,9 @@ def run(drive=True, port=None, countdown=3):
     times         = []
     robot_xs, robot_ys, robot_thetas = [], [], []
     encoder_degrees = []
-    v_fwds, omegas, v_lefts, v_rights = [], [], [], []
-    enc_left_cum, enc_right_cum = [], []
-    enc_left_delta, enc_right_delta = [], []
+    v_fwds, omegas, v_rights, v_lefts = [], [], [], []
+    enc_right_cum, enc_left_cum = [], []
+    enc_right_delta, enc_left_delta = [], []
     cum_l, cum_r = 0, 0
 
     # Ticks one wheel travels during a 360° point turn:
@@ -86,8 +86,8 @@ def run(drive=True, port=None, countdown=3):
     print(f"Target: {TICKS_360:.0f} active-wheel encoder ticks for 360°  "
           f"(ENCODER_PPR={P.ENCODER_PPR})")
 
-    abs_ticks_l = 0   # accumulated absolute left encoder ticks (real hardware)
-    abs_ticks_r = 0   # accumulated absolute right encoder ticks (real hardware)
+    abs_ticks_l = 0   # accumulated absolute right encoder ticks (real hardware)
+    abs_ticks_r = 0   # accumulated absolute left encoder ticks (real hardware)
     turned      = 0.0 # simulated radians (--no-drive fallback)
 
     # Hard-flush the serial receive buffer and reset encoder tracking
@@ -103,10 +103,10 @@ def run(drive=True, port=None, countdown=3):
             t_loop0 = time.monotonic()
             t = i * P.DT
 
-            v_left, v_right = P._wheel_commands(0.0, P.MAX_TURN)
+            v_right, v_left = P._wheel_commands(0.0, P.MAX_TURN)
 
             if motors is not None:
-                motors.send(v_left, v_right)
+                motors.send(v_right, v_left)
                 d_l, d_r = motors.read_encoder_deltas()
             else:
                 d_l, d_r = 0, 0
@@ -122,19 +122,19 @@ def run(drive=True, port=None, countdown=3):
                 if active_ticks else 0.0
             )
             encoder_degrees.append(measured_ticks / TICKS_360 * 360.0)
-            enc_left_delta.append(d_l);  enc_right_delta.append(d_r)
-            enc_left_cum.append(cum_l);  enc_right_cum.append(cum_r)
+            enc_right_delta.append(d_l);  enc_left_delta.append(d_r)
+            enc_right_cum.append(cum_l);  enc_left_cum.append(cum_r)
 
             times.append(t)
             robot_xs.append(pos[0]); robot_ys.append(pos[1])
             robot_thetas.append(heading)
 
             new_pos, new_heading, v_fwd, omega = integrate_kinematics(
-                pos, heading, v_left, v_right, P.DT)
+                pos, heading, v_right, v_left, P.DT)
             pos     = new_pos
             heading = new_heading
             v_fwds.append(v_fwd); omegas.append(omega)
-            v_lefts.append(v_left); v_rights.append(v_right)
+            v_rights.append(v_right); v_lefts.append(v_left)
 
             turned += abs(omega) * P.DT
 
@@ -174,9 +174,9 @@ def run(drive=True, port=None, countdown=3):
         rx=robot_xs, ry=robot_ys, rt=robot_thetas,
         encoder_degrees=encoder_degrees,
         v_fwd=v_fwds, omega=omegas,
-        v_left=v_lefts, v_right=v_rights,
-        enc_l_cum=enc_left_cum, enc_r_cum=enc_right_cum,
-        enc_l_delta=enc_left_delta, enc_r_delta=enc_right_delta,
+        v_right=v_rights, v_left=v_lefts,
+        enc_l_cum=enc_right_cum, enc_r_cum=enc_left_cum,
+        enc_l_delta=enc_right_delta, enc_r_delta=enc_left_delta,
         drove=(motors is not None),
     )
 
@@ -230,17 +230,17 @@ def plot(data, out_path="pathfinding_arc_test.png"):
         fig2, axes2 = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
         ax_cum, ax_rpm = axes2
 
-        ax_cum.plot(data['t'], data['enc_l_cum'], 'b-', label='left')
-        ax_cum.plot(data['t'], data['enc_r_cum'], 'r-', label='right')
+        ax_cum.plot(data['t'], data['enc_l_cum'], 'b-', label='right')
+        ax_cum.plot(data['t'], data['enc_r_cum'], 'r-', label='left')
         ax_cum.set_ylabel('cumulative ticks')
         ax_cum.set_title('Encoder counts')
         ax_cum.legend(fontsize=9)
         ax_cum.grid(True, alpha=0.3)
 
-        rpm_l = [v / P.WHEEL_CIRC * 60 for v in data['v_left']]
-        rpm_r = [v / P.WHEEL_CIRC * 60 for v in data['v_right']]
-        ax_rpm.plot(data['t'], rpm_l, 'b-', label='left commanded RPM')
-        ax_rpm.plot(data['t'], rpm_r, 'r-', label='right commanded RPM')
+        rpm_l = [v / P.WHEEL_CIRC * 60 for v in data['v_right']]
+        rpm_r = [v / P.WHEEL_CIRC * 60 for v in data['v_left']]
+        ax_rpm.plot(data['t'], rpm_l, 'b-', label='right commanded RPM')
+        ax_rpm.plot(data['t'], rpm_r, 'r-', label='left commanded RPM')
         ax_rpm.set_xlabel('time (s)')
         ax_rpm.set_ylabel('RPM')
         ax_rpm.set_title('Wheel speed commands')

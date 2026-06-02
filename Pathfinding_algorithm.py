@@ -36,10 +36,10 @@ WHEEL_DIAMETER_M = 0.06778          # outer wheel diameter (meters)
 TRACK_M    = 0.333         # inside-to-inside wheel spacing (meters)
 
 GEAR_RATIO        = 5            # motor gearbox ratio (check sticker)
-LEFT_ENC_SIGN     = -1           # flip to +1 if left wheel counts backwards
-RIGHT_ENC_SIGN    = +1
-LEFT_MOTOR_SIGN   = -1           # flip to +1 if left motor drives wrong direction
-RIGHT_MOTOR_SIGN  = +1
+RIGHT_ENC_SIGN     = -1           # flip to +1 if right wheel counts backwards
+LEFT_ENC_SIGN    = +1
+RIGHT_MOTOR_SIGN   = -1           # flip to +1 if right motor drives wrong direction
+LEFT_MOTOR_SIGN  = +1
 
 MOTOR_PORT  = "/dev/ttyUSB0"     # CP2102 USB-UART bridge
 MOTOR_BAUD  = 115200
@@ -255,7 +255,7 @@ def _next_aisle(robot_y, direction, checked):
     return (min if direction > 0 else max)(pool, key=lambda t: t[0])
 
 def _wheel_commands(v_fwd, omega):
-    """Differential drive mixing. Returns (v_left, v_right) in m/s."""
+    """Differential drive mixing. Returns (v_right, v_left) in m/s."""
     half = TRACK_M / 2
     vl   = v_fwd - omega * half
     vr   = v_fwd + omega * half
@@ -343,8 +343,8 @@ class MotorDriver:
             if not line.startswith("E,"): continue
             try:
                 _, ls, rs  = line.split(",", 2)
-                lc = LEFT_ENC_SIGN  * int(ls)
-                rc = RIGHT_ENC_SIGN * int(rs)
+                lc = RIGHT_ENC_SIGN  * int(ls)
+                rc = LEFT_ENC_SIGN * int(rs)
                 if self._last_l is not None:
                     self._dl += lc - self._last_l
                     self._dr += rc - self._last_r
@@ -356,7 +356,7 @@ class MotorDriver:
         return dl, dr
 
     def send(self, vl, vr):
-        cmd = f"L{LEFT_MOTOR_SIGN * _rpm(vl):.1f} R{RIGHT_MOTOR_SIGN * _rpm(vr):.1f}\n".encode()
+        cmd = f"L{RIGHT_MOTOR_SIGN * _rpm(vl):.1f} R{LEFT_MOTOR_SIGN * _rpm(vr):.1f}\n".encode()
         if self._ser and self._ser.is_open:
             self._ser.write(cmd)
         else:
@@ -375,10 +375,10 @@ class Odometry:
 
     def update(self):
         dl, dr   = self._read()
-        d_left   = dl * M_PER_PULSE
-        d_right  = dr * M_PER_PULSE
-        d_centre = (d_left + d_right) / 2
-        d_theta  = (d_right - d_left) / TRACK_M
+        d_right   = dl * M_PER_PULSE
+        d_left  = dr * M_PER_PULSE
+        d_centre = (d_right + d_left) / 2
+        d_theta  = (d_left - d_right) / TRACK_M
         mid      = self.heading + d_theta / 2
         self.x      += d_centre * math.cos(mid)
         self.y      += d_centre * math.sin(mid)
@@ -431,7 +431,7 @@ def tick(reading, pos, heading, obstacles=None):
     pos       : [x, y] from Odometry
     heading   : float radians from Odometry
     obstacles : list of (dist_m, angle_deg) for non-target detections
-    Returns   : (v_left, v_right) in m/s
+    Returns   : (v_right, v_left) in m/s
     """
     obstacles = obstacles or []
 

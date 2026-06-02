@@ -8,7 +8,7 @@
 // ── Serial protocol (115200 baud) ──────────────────────────────
 //   Host  → ESP32 :  "L<rpm> R<rpm>\n"   e.g.  "L42.5 R-30.0\n"
 //                                        Target wheel RPM for each side.
-//   ESP32 → Host  :  "E,<left_ticks>,<right_ticks>\n"
+//   ESP32 → Host  :  "E,<right_ticks>,<left_ticks>\n"
 //                                        Cumulative encoder counts, sent
 //                                        every REPORT_INTERVAL_MS.
 //
@@ -18,8 +18,8 @@
 //   the cart driving away.
 //
 // ── Pin layout (matches dual_motor_test.ino) ───────────────────
-//   M1 (LEFT) : PWM 18 / 19, encoder A=32 B=33
-//   M2 (RIGHT): PWM 22 / 23, encoder A=25 B=26
+//   M1 (RIGHT) : PWM 18 / 19, encoder A=32 B=33
+//   M2 (LEFT): PWM 22 / 23, encoder A=25 B=26
 //
 // ── Calibration ────────────────────────────────────────────────
 //   MAX_RPM below is the wheel-shaft RPM that corresponds to a full-
@@ -31,29 +31,29 @@
 #include <TB9051FTGMotorCarrier.h>
 
 // ── Pin definitions ───────────────────────────────────────────
-#define LEFT_PWM1   18
-#define LEFT_PWM2   19
-#define LEFT_ENC_A  32
-#define LEFT_ENC_B  33
+#define RIGHT_PWM1   18
+#define RIGHT_PWM2   19
+#define RIGHT_ENC_A  32
+#define RIGHT_ENC_B  33
 
-#define RIGHT_PWM1  22
-#define RIGHT_PWM2  23
-#define RIGHT_ENC_A 25
-#define RIGHT_ENC_B 26
+#define LEFT_PWM1  22
+#define LEFT_PWM2  23
+#define LEFT_ENC_A 25
+#define LEFT_ENC_B 26
 
 // ── Drivers & encoder state ───────────────────────────────────
-TB9051FTGMotorCarrier leftMotor(LEFT_PWM1, LEFT_PWM2);
 TB9051FTGMotorCarrier rightMotor(RIGHT_PWM1, RIGHT_PWM2);
+TB9051FTGMotorCarrier leftMotor(LEFT_PWM1, LEFT_PWM2);
 
-volatile long leftCount  = 0;
-volatile long rightCount = 0;
+volatile long rightCount  = 0;
+volatile long leftCount = 0;
 
-volatile uint8_t leftEncState  = 0;
-volatile uint8_t rightEncState = 0;
+volatile uint8_t rightEncState  = 0;
+volatile uint8_t leftEncState = 0;
 
 // Flip a sign if "forward" motion produces a negative count for that wheel.
-#define LEFT_ENC_DIR   1
-#define RIGHT_ENC_DIR  1
+#define RIGHT_ENC_DIR   1
+#define LEFT_ENC_DIR  1
 
 int8_t IRAM_ATTR quadratureDelta(uint8_t previous, uint8_t current) {
   // Two-bit (A << 1 | B) state machine; valid forward / reverse transitions
@@ -74,24 +74,24 @@ int8_t IRAM_ATTR quadratureDelta(uint8_t previous, uint8_t current) {
   }
 }
 
-uint8_t IRAM_ATTR readLeftEncoderState() {
-  return (digitalRead(LEFT_ENC_A) << 1) | digitalRead(LEFT_ENC_B);
-}
-
 uint8_t IRAM_ATTR readRightEncoderState() {
   return (digitalRead(RIGHT_ENC_A) << 1) | digitalRead(RIGHT_ENC_B);
 }
 
-void IRAM_ATTR leftISR() {
-  uint8_t cur = readLeftEncoderState();
-  leftCount += LEFT_ENC_DIR * quadratureDelta(leftEncState, cur);
-  leftEncState = cur;
+uint8_t IRAM_ATTR readLeftEncoderState() {
+  return (digitalRead(LEFT_ENC_A) << 1) | digitalRead(LEFT_ENC_B);
 }
 
 void IRAM_ATTR rightISR() {
   uint8_t cur = readRightEncoderState();
   rightCount += RIGHT_ENC_DIR * quadratureDelta(rightEncState, cur);
   rightEncState = cur;
+}
+
+void IRAM_ATTR leftISR() {
+  uint8_t cur = readLeftEncoderState();
+  leftCount += LEFT_ENC_DIR * quadratureDelta(leftEncState, cur);
+  leftEncState = cur;
 }
 
 // ── Tunables ──────────────────────────────────────────────────
@@ -104,21 +104,21 @@ unsigned long lastReportMs = 0;
 String        buf;
 
 // ── Motor helpers ─────────────────────────────────────────────
-void setLeftRPM(float rpm)  {
-  float u = rpm / MAX_RPM;
-  if (u >  1.0f) u =  1.0f;
-  if (u < -1.0f) u = -1.0f;
-  leftMotor.setOutput(u);
-}
-void setRightRPM(float rpm) {
+void setRightRPM(float rpm)  {
   float u = rpm / MAX_RPM;
   if (u >  1.0f) u =  1.0f;
   if (u < -1.0f) u = -1.0f;
   rightMotor.setOutput(u);
 }
+void setLeftRPM(float rpm) {
+  float u = rpm / MAX_RPM;
+  if (u >  1.0f) u =  1.0f;
+  if (u < -1.0f) u = -1.0f;
+  leftMotor.setOutput(u);
+}
 void stopMotors() {
-  leftMotor.setOutput(0.0f);
   rightMotor.setOutput(0.0f);
+  leftMotor.setOutput(0.0f);
 }
 
 // Parse "L<rpm> R<rpm>" — tolerates extra whitespace.
@@ -131,8 +131,8 @@ void handleLine(const String &line) {
   String rStr = line.substring(ri + 1);     rStr.trim();
   if (lStr.length() == 0 || rStr.length() == 0) return;
 
-  setLeftRPM(lStr.toFloat());
-  setRightRPM(rStr.toFloat());
+  setRightRPM(lStr.toFloat());
+  setLeftRPM(rStr.toFloat());
   lastCmdMs = millis();
 }
 
@@ -140,26 +140,26 @@ void handleLine(const String &line) {
 void setup() {
   Serial.begin(115200);
 
-  leftMotor.enable();
   rightMotor.enable();
+  leftMotor.enable();
 
   // INPUT_PULLUP — not plain INPUT — so a disconnected or open-drain
   // encoder doesn't pick up PWM noise from neighbouring motor pins as
   // phantom edges. Replace with INPUT if you're using a push-pull
   // (totem-pole) encoder with its own external pull-down.
-  pinMode(LEFT_ENC_A,  INPUT_PULLUP);
-  pinMode(LEFT_ENC_B,  INPUT_PULLUP);
-  pinMode(RIGHT_ENC_A, INPUT_PULLUP);
-  pinMode(RIGHT_ENC_B, INPUT_PULLUP);
+  pinMode(RIGHT_ENC_A,  INPUT_PULLUP);
+  pinMode(RIGHT_ENC_B,  INPUT_PULLUP);
+  pinMode(LEFT_ENC_A, INPUT_PULLUP);
+  pinMode(LEFT_ENC_B, INPUT_PULLUP);
 
   // Seed the quadrature state machines with the current pin levels, then
   // attach CHANGE-edge ISRs on all four lines for full 4x decoding.
-  leftEncState  = readLeftEncoderState();
-  rightEncState = readRightEncoderState();
-  attachInterrupt(digitalPinToInterrupt(LEFT_ENC_A),  leftISR,  CHANGE);
-  attachInterrupt(digitalPinToInterrupt(LEFT_ENC_B),  leftISR,  CHANGE);
-  attachInterrupt(digitalPinToInterrupt(RIGHT_ENC_A), rightISR, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(RIGHT_ENC_B), rightISR, CHANGE);
+  rightEncState  = readRightEncoderState();
+  leftEncState = readLeftEncoderState();
+  attachInterrupt(digitalPinToInterrupt(RIGHT_ENC_A),  rightISR,  CHANGE);
+  attachInterrupt(digitalPinToInterrupt(RIGHT_ENC_B),  rightISR,  CHANGE);
+  attachInterrupt(digitalPinToInterrupt(LEFT_ENC_A), leftISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(LEFT_ENC_B), leftISR, CHANGE);
 
   stopMotors();
   Serial.println("cart_motor ready");
@@ -187,8 +187,8 @@ void loop() {
   if (millis() - lastReportMs >= REPORT_INTERVAL_MS) {
     lastReportMs = millis();
     noInterrupts();
-    long l = leftCount;
-    long r = rightCount;
+    long l = rightCount;
+    long r = leftCount;
     interrupts();
     Serial.print("E,");
     Serial.print(l);
