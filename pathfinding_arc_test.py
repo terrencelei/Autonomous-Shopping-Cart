@@ -36,7 +36,7 @@ CENTER_KP           = 0.006  # rad/s per degree of angle error
 # Slow-spin / stall-test parameters
 STALL_BOOST_OMEGA_DEG = 90.0   # speed during initial burst to break static friction (deg/s)
 STALL_BOOST_SECS      = 0.5    # duration of boost phase
-STALL_RAMP_START_DEG  = 45.0   # ramp begins at this speed after boost
+STALL_RAMP_START_DEG  = 10.0   # ramp begins at this speed after boost
 STALL_DETECT_TICKS    = 5      # consecutive zero-delta ticks before declaring stall
 
 # =============================================================================
