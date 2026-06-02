@@ -6,6 +6,7 @@ Usage:
     python3 pathfinding_arc_test.py                    # centre target from live camera
     python3 pathfinding_arc_test.py --source udp       # centre target from UDP
     python3 pathfinding_arc_test.py --mode spin         # one 360° spin
+    python3 pathfinding_arc_test.py --mode slow-spin    # slow in-place spin
     python3 pathfinding_arc_test.py --no-drive --sim-angle 15
     python3 pathfinding_arc_test.py --port /dev/ttyUSB0
 """
@@ -203,6 +204,76 @@ def center_turn_command(angle_deg):
     max_turn = math.radians(CENTER_MAX_TURN_DEG)
     omega_mag = min(max(abs(omega), min_turn), max_turn)
     return math.copysign(omega_mag, omega)
+
+
+def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1.0):
+    pos     = list(START_POS)
+    heading = START_HEADING
+    motors  = open_motors(drive=drive, port=port, countdown=countdown, action="slow-spinning")
+
+    omega_cmd = math.copysign(math.radians(CENTER_MIN_TURN_DEG), direction)
+    print(f"Slow spin mode: omega={math.degrees(omega_cmd):+.1f}°/s for {duration:.1f}s.")
+
+    times, robot_xs, robot_ys, robot_thetas = [], [], [], []
+    omegas, v_lefts, v_rights = [], [], []
+    enc_right_cum, enc_left_cum = [], []
+    enc_right_delta, enc_left_delta = [], []
+    cum_l, cum_r = 0, 0
+    start = time.monotonic()
+    i = 0
+
+    flush_motors(motors)
+    try:
+        while True:
+            t_loop0 = time.monotonic()
+            t = t_loop0 - start
+            if duration > 0 and t >= duration:
+                break
+
+            v_left, v_right = P._wheel_commands(0.0, omega_cmd)
+            if motors is not None:
+                motors.send(v_left, v_right)
+                d_l, d_r = motors.read_encoder_deltas()
+            else:
+                d_l, d_r = 0, 0
+
+            cum_l += d_l; cum_r += d_r
+            enc_right_delta.append(d_l); enc_left_delta.append(d_r)
+            enc_right_cum.append(cum_l); enc_left_cum.append(cum_r)
+
+            times.append(t)
+            robot_xs.append(pos[0]); robot_ys.append(pos[1])
+            robot_thetas.append(heading)
+
+            pos, heading, _v_fwd, _omega = integrate_kinematics(
+                pos, heading, v_left, v_right, P.DT)
+            omegas.append(omega_cmd)
+            v_lefts.append(v_left); v_rights.append(v_right)
+
+            if i % max(1, int(1.0 / P.DT)) == 0:
+                print(f"t={t:5.1f}s  omega={math.degrees(omega_cmd):+5.1f}°/s")
+            i += 1
+
+            elapsed = time.monotonic() - t_loop0
+            if elapsed < P.DT:
+                time.sleep(P.DT - elapsed)
+    except KeyboardInterrupt:
+        print("\nSlow spin stopped by user.")
+    finally:
+        if motors is not None:
+            print("\nStopping motors.")
+            motors.stop()
+
+    return dict(
+        mode="slow-spin",
+        t=times,
+        rx=robot_xs, ry=robot_ys, rt=robot_thetas,
+        omega=omegas,
+        v_left=v_lefts, v_right=v_rights,
+        enc_l_cum=enc_right_cum, enc_r_cum=enc_left_cum,
+        enc_l_delta=enc_right_delta, enc_r_delta=enc_left_delta,
+        drove=(motors is not None),
+    )
 
 
 def import_yolo_detect():
@@ -469,6 +540,10 @@ def plot(data, out_path="pathfinding_arc_test.png"):
         ax.axhline(0, color='gray', ls=':', alpha=0.6, label='center')
         ax.axhspan(-CENTER_DEADBAND_DEG, CENTER_DEADBAND_DEG,
                    color='green', alpha=0.12, label='deadband')
+    elif mode == "slow-spin":
+        angles_deg = [math.degrees(h) for h in data['rt']]
+        title = 'Slow spin heading over time'
+        ylabel = 'sim heading (deg)'
     elif data.get('drove'):
         angles_deg = data['encoder_degrees']
         title = 'Encoder angle over time'
@@ -498,7 +573,12 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     # ── Turn rate ──────────────────────────────────────────
     ax = axes[1]
     ax.plot(data['t'], np.degrees(data['omega']), 'b-')
-    cap = CENTER_MAX_TURN_DEG if mode == "center" else math.degrees(P.MAX_TURN)
+    if mode == "center":
+        cap = CENTER_MAX_TURN_DEG
+    elif mode == "slow-spin":
+        cap = CENTER_MIN_TURN_DEG
+    else:
+        cap = math.degrees(P.MAX_TURN)
     ax.axhline(cap, color='gray', ls=':', alpha=0.5, label=f'cap {cap:.0f}°/s')
     ax.axhline(-cap, color='gray', ls=':', alpha=0.5)
     ax.set_xlabel('time (s)')
@@ -540,8 +620,8 @@ def plot(data, out_path="pathfinding_arc_test.png"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--mode", choices=("center", "spin"), default="center",
-                        help="center keeps the shopper centred; spin runs the original 360° test")
+    parser.add_argument("--mode", choices=("center", "spin", "slow-spin"), default="center",
+                        help="center keeps shopper centred; spin runs 360°; slow-spin turns in place slowly")
     parser.add_argument("--source", choices=("camera", "udp"), default="camera",
                         help="target angle source for center mode (default: camera)")
     parser.add_argument("--no-drive", action="store_true",
@@ -553,13 +633,20 @@ if __name__ == "__main__":
     parser.add_argument("--countdown", type=int, default=3,
                         help="seconds before motors start (default: 3)")
     parser.add_argument("--duration", type=float, default=30.0,
-                        help="centering run time in seconds; 0 runs until Ctrl-C (default: 30)")
+                        help="run time in seconds for center/slow-spin; 0 runs until Ctrl-C (default: 30)")
+    parser.add_argument("--direction", choices=("left", "right"), default="left",
+                        help="slow-spin direction (default: left)")
     parser.add_argument("--sim-angle", type=float, default=None,
                         help="simulate a fixed target angle instead of listening for UDP")
     args = parser.parse_args()
 
     if args.mode == "spin":
         data = run_spin(drive=not args.no_drive, port=args.port, countdown=args.countdown)
+    elif args.mode == "slow-spin":
+        spin_dir = 1.0 if args.direction == "left" else -1.0
+        data = run_slow_spin(drive=not args.no_drive, port=args.port,
+                             countdown=args.countdown, duration=args.duration,
+                             direction=spin_dir)
     elif args.sim_angle is not None or args.source == "udp":
         if args.source == "udp" and args.sim_angle is None:
             print(f"UDP centering mode: listening on port {P.UDP_PORT}.")
