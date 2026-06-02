@@ -28,6 +28,8 @@
 //       rpm = (ticks_per_sec / ENCODER_PPR) * 60
 //   Update the constant once measured.
 
+struct WheelPid;
+
 #include <TB9051FTGMotorCarrier.h>
 #include <math.h>
 
