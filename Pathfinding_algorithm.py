@@ -74,7 +74,7 @@ EDGE_CLEAR_DIST_M = 1.0    # distance to travel after obstacles clear before lea
 
 # Encoder counts per wheel revolution reported by the ESP32 after 4x
 # quadrature decoding and gearbox reduction.
-ENCODER_PPR  = 503
+ENCODER_PPR  = 447
 
 # =============================================================================
 # DERIVED CONSTANTS  (do not edit)
