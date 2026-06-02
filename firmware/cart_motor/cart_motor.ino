@@ -29,6 +29,7 @@
 //   Update the constant once measured.
 
 #include <TB9051FTGMotorCarrier.h>
+#include <math.h>
 
 // ── Pin definitions ───────────────────────────────────────────
 #define RIGHT_PWM1   18
@@ -96,29 +97,113 @@ void IRAM_ATTR leftISR() {
 
 // ── Tunables ──────────────────────────────────────────────────
 const float MAX_RPM = 150.0f;                 // calibrate to your hardware
+const float ENCODER_PPR = 447.0f;             // must match Pathfinding_algorithm.py
+const float RIGHT_RPM_SIGN = 1.0f;            // flip if measured RPM sign is reversed
+const float LEFT_RPM_SIGN = 1.0f;
+
+const unsigned long CONTROL_INTERVAL_MS = 20; // 50 Hz wheel-speed PID
 const unsigned long WATCHDOG_MS        = 500;
 const unsigned long REPORT_INTERVAL_MS = 20;  // 50 Hz encoder report
 
 unsigned long lastCmdMs    = 0;
+unsigned long lastControlMs = 0;
 unsigned long lastReportMs = 0;
 String        buf;
 
-// ── Motor helpers ─────────────────────────────────────────────
+struct WheelPid {
+  float targetRPM = 0.0f;
+  float measuredRPM = 0.0f;
+  float integral = 0.0f;
+  float prevError = 0.0f;
+  float output = 0.0f;
+  long lastCount = 0;
+};
+
+WheelPid rightPid;
+WheelPid leftPid;
+
+const float RPM_KP = 0.006f;
+const float RPM_KI = 0.020f;
+const float RPM_KD = 0.0002f;
+const float INTEGRAL_LIMIT = 25.0f;
+const float STOP_RPM_EPS = 0.5f;
+
+float clampf(float v, float lo, float hi) {
+  if (v < lo) return lo;
+  if (v > hi) return hi;
+  return v;
+}
+
+void readEncoderCounts(long &right, long &left) {
+  noInterrupts();
+  right = rightCount;
+  left = leftCount;
+  interrupts();
+}
+
+float updatePid(WheelPid &pid, float measuredRPM, float dt) {
+  pid.measuredRPM = measuredRPM;
+
+  if (fabs(pid.targetRPM) < STOP_RPM_EPS) {
+    pid.integral = 0.0f;
+    pid.prevError = 0.0f;
+    pid.output = 0.0f;
+    return 0.0f;
+  }
+
+  float error = pid.targetRPM - measuredRPM;
+  pid.integral = clampf(pid.integral + error * dt, -INTEGRAL_LIMIT, INTEGRAL_LIMIT);
+  float derivative = (error - pid.prevError) / dt;
+  pid.prevError = error;
+
+  float feedforward = pid.targetRPM / MAX_RPM;
+  pid.output = clampf(feedforward
+                      + RPM_KP * error
+                      + RPM_KI * pid.integral
+                      + RPM_KD * derivative,
+                      -1.0f, 1.0f);
+  return pid.output;
+}
+
 void setRightRPM(float rpm)  {
-  float u = rpm / MAX_RPM;
-  if (u >  1.0f) u =  1.0f;
-  if (u < -1.0f) u = -1.0f;
-  rightMotor.setOutput(u);
+  rightPid.targetRPM = clampf(rpm, -MAX_RPM, MAX_RPM);
 }
 void setLeftRPM(float rpm) {
-  float u = rpm / MAX_RPM;
-  if (u >  1.0f) u =  1.0f;
-  if (u < -1.0f) u = -1.0f;
-  leftMotor.setOutput(u);
+  leftPid.targetRPM = clampf(rpm, -MAX_RPM, MAX_RPM);
 }
 void stopMotors() {
+  rightPid.targetRPM = 0.0f;
+  leftPid.targetRPM = 0.0f;
+  rightPid.integral = 0.0f;
+  leftPid.integral = 0.0f;
+  rightPid.prevError = 0.0f;
+  leftPid.prevError = 0.0f;
+  rightPid.output = 0.0f;
+  leftPid.output = 0.0f;
   rightMotor.setOutput(0.0f);
   leftMotor.setOutput(0.0f);
+}
+
+void updateMotorPid(unsigned long nowMs) {
+  if (nowMs - lastControlMs < CONTROL_INTERVAL_MS) return;
+
+  float dt = (nowMs - lastControlMs) / 1000.0f;
+  lastControlMs = nowMs;
+  if (dt <= 0.0f) return;
+
+  long rightNow, leftNow;
+  readEncoderCounts(rightNow, leftNow);
+
+  long rightDelta = rightNow - rightPid.lastCount;
+  long leftDelta = leftNow - leftPid.lastCount;
+  rightPid.lastCount = rightNow;
+  leftPid.lastCount = leftNow;
+
+  float rightMeasured = RIGHT_RPM_SIGN * (rightDelta / ENCODER_PPR) * (60.0f / dt);
+  float leftMeasured = LEFT_RPM_SIGN * (leftDelta / ENCODER_PPR) * (60.0f / dt);
+
+  rightMotor.setOutput(updatePid(rightPid, rightMeasured, dt));
+  leftMotor.setOutput(updatePid(leftPid, leftMeasured, dt));
 }
 
 // Parse "L<rpm> R<rpm>" — tolerates extra whitespace.
@@ -161,6 +246,8 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(LEFT_ENC_A), leftISR, CHANGE);
   attachInterrupt(digitalPinToInterrupt(LEFT_ENC_B), leftISR, CHANGE);
 
+  readEncoderCounts(rightPid.lastCount, leftPid.lastCount);
+  lastControlMs = millis();
   stopMotors();
   Serial.println("cart_motor ready");
 }
@@ -183,13 +270,15 @@ void loop() {
     stopMotors();
   }
 
-  // 3. Periodic encoder report.
-  if (millis() - lastReportMs >= REPORT_INTERVAL_MS) {
-    lastReportMs = millis();
-    noInterrupts();
-    long l = rightCount;
-    long r = leftCount;
-    interrupts();
+  // 3. Closed-loop wheel-speed control.
+  unsigned long nowMs = millis();
+  updateMotorPid(nowMs);
+
+  // 4. Periodic encoder report.
+  if (nowMs - lastReportMs >= REPORT_INTERVAL_MS) {
+    lastReportMs = nowMs;
+    long l, r;
+    readEncoderCounts(l, r);
     Serial.print("E,");
     Serial.print(l);
     Serial.print(",");
