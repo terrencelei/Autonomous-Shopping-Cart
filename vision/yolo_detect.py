@@ -44,6 +44,7 @@ H_FOV_DEG         = 66.0   # Pi AI Camera horizontal field of view
 DISTANCE_OFFSET_M = 0
 DISTANCE_SCALE    = 0.7
 ANGLE_SCALE       = 0.99
+ANGLE_OFFSET_DEG  = 2.0
 
 COLOR_TARGET   = (0, 255, 0)
 COLOR_OBSTACLE = (0, 0, 255)
@@ -156,7 +157,7 @@ def estimate_distance(bbox_h, bbox_cx, img_h, img_w):
 
 def estimate_angle(bbox_cx, img_w):
     fl = focal_length_px(img_w, H_FOV_DEG)
-    return np.degrees(np.arctan((bbox_cx - img_w / 2) / fl)) * ANGLE_SCALE
+    return np.degrees(np.arctan((bbox_cx - img_w / 2) / fl)) * ANGLE_SCALE - ANGLE_OFFSET_DEG
 
 
 def detection_score(dist, angle):
