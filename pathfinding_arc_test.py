@@ -29,9 +29,9 @@ START_POS     = [0.0, 0.0]
 START_HEADING = 0.0
 CENTER_DEADBAND_DEG = 4.0
 CENTER_REACQUIRE_S  = 0.25
-CENTER_START_RPM    = 1.0
-CENTER_SEARCH_MAX_RPM = 10.0
-CENTER_SEARCH_RAMP_STEP_RPM = 0.5
+CENTER_START_RPM    = 1.5
+CENTER_SEARCH_MAX_RPM = 3.0
+CENTER_SEARCH_RAMP_STEP_RPM = 0.25
 CENTER_SEARCH_RAMP_HOLD_S = 0.25
 
 # Slow-spin / stall-test parameters.  The test commands wheel RPMs, not raw
@@ -404,9 +404,16 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
             f"ERROR: {Y.RPK_MODEL_PATH} not found. Install with: sudo apt install imx500-models"
         )
 
+    try:
+        cap = Y.IMX500Capture(model_path=Y.RPK_MODEL_PATH, width=640, height=480, fps=30)
+    except RuntimeError as e:
+        raise SystemExit(
+            f"ERROR: could not open IMX500 camera: {e}\n"
+            "Check that the Raspberry Pi AI Camera is connected, enabled, and not already in use."
+        )
+
     motors = open_motors(drive=drive, port=port, countdown=countdown, action="centring")
     odometry = P.Odometry(motors.read_encoder_deltas if motors else lambda: (0, 0))
-    cap = Y.IMX500Capture(model_path=Y.RPK_MODEL_PATH, width=640, height=480, fps=30)
     tracker = Y.sv.ByteTrack(
         track_activation_threshold=0.25,
         lost_track_buffer=60,
