@@ -893,11 +893,17 @@ def plot(data, out_path="pathfinding_arc_test.png"):
 
         rpm_l = [v / P.WHEEL_CIRC * 60 for v in data['v_left']]
         rpm_r = [v / P.WHEEL_CIRC * 60 for v in data['v_right']]
+        rpm_enc_l = [d * P.M_PER_PULSE / P.DT / P.WHEEL_CIRC * 60
+                     for d in data['enc_l_delta']]
+        rpm_enc_r = [d * P.M_PER_PULSE / P.DT / P.WHEEL_CIRC * 60
+                     for d in data['enc_r_delta']]
         ax_rpm.plot(data['t'], rpm_l, 'b-', label='left commanded RPM')
         ax_rpm.plot(data['t'], rpm_r, 'r-', label='right commanded RPM')
+        ax_rpm.plot(data['t'], rpm_enc_l, 'b--', label='left encoder RPM', alpha=0.8)
+        ax_rpm.plot(data['t'], rpm_enc_r, 'r--', label='right encoder RPM', alpha=0.8)
         ax_rpm.set_xlabel('time (s)')
         ax_rpm.set_ylabel('RPM')
-        ax_rpm.set_title('Wheel speed commands')
+        ax_rpm.set_title('Commanded vs encoder wheel RPM')
         ax_rpm.legend(fontsize=8)
         ax_rpm.grid(True, alpha=0.3)
 
