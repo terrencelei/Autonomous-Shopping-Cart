@@ -34,6 +34,7 @@ CENTER_MIN_RUN_RPM  = 0.3
 CENTER_KICK_RPM  =8
 CENTER_KICK_RELEASE_TICKS = 30
 CENTER_SEARCH_KICK_RPM =10
+CENTER_SEARCH_KICK_RELEASE_TICKS = 50
 CENTER_SEARCH_MAX_RPM = 0.5
 CENTER_SEARCH_RAMP_STEP_RPM = 0.1
 CENTER_SEARCH_RAMP_HOLD_S = 1
@@ -253,7 +254,10 @@ class CenterRpmCommand:
         self._kick_l_ticks = 0
         self._kick_r_ticks = 0
 
-    def command(self, rpm, direction, encoder_delta=(0, 0), kick_rpm=CENTER_KICK_RPM):
+    def command(
+            self, rpm, direction, encoder_delta=(0, 0),
+            kick_rpm=CENTER_KICK_RPM,
+            kick_release_ticks=CENTER_KICK_RELEASE_TICKS):
         rpm = clamp_center_rpm(rpm)
         if rpm <= 0.0:
             self.reset()
@@ -270,8 +274,8 @@ class CenterRpmCommand:
         d_l, d_r = encoder_delta
         self._kick_l_ticks += abs(d_l)
         self._kick_r_ticks += abs(d_r)
-        if (self._kick_l_ticks >= CENTER_KICK_RELEASE_TICKS or
-                self._kick_r_ticks >= CENTER_KICK_RELEASE_TICKS):
+        if (self._kick_l_ticks >= kick_release_ticks or
+                self._kick_r_ticks >= kick_release_ticks):
             self._kick_active = False
 
         if self._kick_active:
@@ -562,9 +566,14 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                 else:
                     d_l, d_r = 0, 0
                 kick_rpm = CENTER_SEARCH_KICK_RPM if search_mode else CENTER_KICK_RPM
+                kick_release_ticks = (
+                    CENTER_SEARCH_KICK_RELEASE_TICKS
+                    if search_mode else CENTER_KICK_RELEASE_TICKS
+                )
                 omega = rpm_command.command(
                     desired_rpm, desired_direction, encoder_delta=(d_l, d_r),
-                    kick_rpm=kick_rpm)
+                    kick_rpm=kick_rpm,
+                    kick_release_ticks=kick_release_ticks)
                 v_left, v_right = P._wheel_commands(0.0, omega)
                 pos, heading = update_odometry_from_deltas(odometry, d_l, d_r)
                 P.S.pos = list(pos)
