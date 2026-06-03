@@ -44,12 +44,11 @@ CENTER_SEARCH_STALL_TICKS = 5
 
 # Slow-spin / stall-test parameters.  The test commands wheel RPMs, not raw
 # PWM, because the ESP32 firmware exposes an RPM serial protocol.
-STALL_RAMP_UP_START_RPM = 1.25   # first commanded wheel RPM during stall search
+STALL_RAMP_UP_START_RPM = 0.05   # first commanded wheel RPM during stall search
 STALL_RAMP_UP_STEP_RPM  = 0.05   # RPM added after each no-movement hold
-STALL_RAMP_DOWN_STEP_RPM = 0.25  # RPM removed after each moving hold
-STALL_STEP_HOLD_SECS    = 0.1  # time to hold each RPM before changing it
-STALL_MAX_RPM           = 0.9  # safety cap for the ramp-up search
-STALL_DETECT_TICKS      = 5     # consecutive zero-delta reads before declaring no motion
+STALL_RAMP_DOWN_STEP_RPM = 0.02  # RPM removed after each moving hold
+STALL_STEP_HOLD_SECS    = 1.0  # time to hold each RPM before changing it
+STALL_MAX_RPM           = 2.0  # safety cap for the ramp-up search
 
 # =============================================================================
 
@@ -321,11 +320,13 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
           f"{STALL_STEP_HOLD_SECS:.2f}s.")
 
     times, robot_xs, robot_ys, robot_thetas = [], [], [], []
-    omegas_cmd, omegas_enc, v_lefts, v_rights = [], [], [], []
+    omegas_cmd, omegas_enc, command_rpms, enc_rpm_mags = [], [], [], []
+    v_lefts, v_rights = [], []
     enc_right_cum, enc_left_cum = [], []
     enc_right_delta, enc_left_delta = [], []
     cum_l, cum_r = 0, 0
-    zero_tick_streak = 0
+    hold_ticks = 0
+    hold_enc_rpm_peak = 0.0
     phase = "ramp_up"
     command_rpm = STALL_RAMP_UP_START_RPM
     next_step_t = STALL_STEP_HOLD_SECS
@@ -361,11 +362,13 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
             enc_rpm_l = d_l * P.M_PER_PULSE / P.DT / P.WHEEL_CIRC * 60
             enc_rpm_r = d_r * P.M_PER_PULSE / P.DT / P.WHEEL_CIRC * 60
             enc_rpm_mag = max(abs(enc_rpm_l), abs(enc_rpm_r))
-            moved = (abs(d_l) + abs(d_r)) > 0
+            tick_count = abs(d_l) + abs(d_r)
+            hold_ticks += tick_count
+            hold_enc_rpm_peak = max(hold_enc_rpm_peak, enc_rpm_mag)
 
             cum_l += d_l; cum_r += d_r
-            enc_right_delta.append(d_l); enc_left_delta.append(d_r)
-            enc_right_cum.append(cum_l); enc_left_cum.append(cum_r)
+            enc_left_delta.append(d_l); enc_right_delta.append(d_r)
+            enc_left_cum.append(cum_l); enc_right_cum.append(cum_r)
 
             times.append(t)
             robot_xs.append(pos[0]); robot_ys.append(pos[1])
@@ -375,60 +378,52 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
                 pos, heading, v_left, v_right, P.DT)
             omegas_cmd.append(omega_cmd)
             omegas_enc.append(omega_enc)
+            command_rpms.append(command_rpm)
+            enc_rpm_mags.append(enc_rpm_mag)
             v_lefts.append(v_left); v_rights.append(v_right)
-
-            if moved:
-                zero_tick_streak = 0
-            else:
-                zero_tick_streak += 1
 
             if motors is None:
                 if t >= next_step_t:
                     command_rpm += STALL_RAMP_UP_STEP_RPM
                     next_step_t = t + STALL_STEP_HOLD_SECS
-            elif phase == "ramp_up":
-                if moved:
+            elif t >= next_step_t:
+                hold_moved = hold_ticks > 0
+                if phase == "ramp_up" and hold_moved:
                     initial_move_rpm = command_rpm
-                    initial_move_enc_rpm = enc_rpm_mag
+                    initial_move_enc_rpm = hold_enc_rpm_peak
                     lowest_move_rpm = command_rpm
-                    lowest_move_enc_rpm = enc_rpm_mag
+                    lowest_move_enc_rpm = hold_enc_rpm_peak
                     phase = "ramp_down"
-                    next_step_t = t + STALL_STEP_HOLD_SECS
                     print(f"Initial movement: cmd={initial_move_rpm:.2f} wheel RPM, "
                           f"enc≈{initial_move_enc_rpm:.2f} RPM  (t={t:.2f}s)")
-                elif t >= next_step_t:
+                elif phase == "ramp_up":
                     if command_rpm >= STALL_MAX_RPM:
                         print(f"Reached {STALL_MAX_RPM:.1f} RPM without encoder movement.")
                         break
                     command_rpm = min(command_rpm + STALL_RAMP_UP_STEP_RPM, STALL_MAX_RPM)
-                    next_step_t = t + STALL_STEP_HOLD_SECS
-            elif phase == "ramp_down":
-                if moved:
+                elif phase == "ramp_down" and hold_moved:
                     lowest_move_rpm = command_rpm
-                    lowest_move_enc_rpm = enc_rpm_mag
-                    if t >= next_step_t:
-                        command_rpm = max(0.0, command_rpm - STALL_RAMP_DOWN_STEP_RPM)
-                        next_step_t = t + STALL_STEP_HOLD_SECS
-                else:
-                    if zero_tick_streak >= STALL_DETECT_TICKS:
-                        stall_rpm = command_rpm
-                        stall_omega_deg = math.degrees(abs(omega_cmd))
-                        print(f"Stalled again: last moving cmd={lowest_move_rpm:.2f} "
-                              f"wheel RPM, current cmd={stall_rpm:.2f} wheel RPM  "
-                              f"(t={t:.2f}s)")
-                        break
-
-                if command_rpm <= 0.0 and zero_tick_streak >= STALL_DETECT_TICKS:
+                    lowest_move_enc_rpm = hold_enc_rpm_peak
+                    command_rpm = max(0.0, command_rpm - STALL_RAMP_DOWN_STEP_RPM)
+                elif phase == "ramp_down":
                     stall_rpm = command_rpm
-                    stall_omega_deg = 0.0
+                    stall_omega_deg = math.degrees(abs(omega_cmd))
+                    print(f"Stopped moving: lowest moving cmd={lowest_move_rpm:.2f} "
+                          f"wheel RPM, first stopped cmd={stall_rpm:.2f} wheel RPM  "
+                          f"(t={t:.2f}s)")
                     break
+
+                hold_ticks = 0
+                hold_enc_rpm_peak = 0.0
+                next_step_t = t + STALL_STEP_HOLD_SECS
 
             if duration > 0 and t >= duration:
                 break
 
             if i % max(1, int(1.0 / P.DT)) == 0:
                 print(f"t={t:5.1f}s  {phase:9s}  cmd={command_rpm:5.2f} wheel RPM  "
-                      f"enc={enc_rpm_mag:5.2f} RPM  ticks=({d_l:+d},{d_r:+d})")
+                      f"enc={enc_rpm_mag:5.2f} RPM  "
+                      f"hold_ticks={hold_ticks:4d}  ticks=({d_l:+d},{d_r:+d})")
             i += 1
 
             elapsed = time.monotonic() - t_loop0
@@ -462,6 +457,8 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
         rx=robot_xs, ry=robot_ys, rt=robot_thetas,
         omega=omegas_cmd,
         omega_enc=omegas_enc,
+        command_rpm=command_rpms,
+        encoder_rpm=enc_rpm_mags,
         stall_omega_deg=stall_omega_deg,
         initial_move_rpm=initial_move_rpm,
         initial_move_enc_rpm=initial_move_enc_rpm,
@@ -469,8 +466,8 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
         lowest_move_enc_rpm=lowest_move_enc_rpm,
         stall_rpm=stall_rpm,
         v_left=v_lefts, v_right=v_rights,
-        enc_l_cum=enc_right_cum, enc_r_cum=enc_left_cum,
-        enc_l_delta=enc_right_delta, enc_r_delta=enc_left_delta,
+        enc_l_cum=enc_left_cum, enc_r_cum=enc_right_cum,
+        enc_l_delta=enc_left_delta, enc_r_delta=enc_right_delta,
         drove=(motors is not None),
     )
 
@@ -804,8 +801,14 @@ def _plot_slow_spin(data, out_path):
         return
 
     t            = data['t']
-    cmd_deg_s    = [math.degrees(o) for o in data['omega']]
-    enc_deg_s    = [math.degrees(o) for o in data.get('omega_enc', [0.0] * len(t))]
+    cmd_wheel_rpm = data.get(
+        'command_rpm',
+        [spin_omega_to_wheel_rpm(o) for o in data['omega']],
+    )
+    enc_wheel_rpm = data.get(
+        'encoder_rpm',
+        [spin_omega_to_wheel_rpm(o) for o in data.get('omega_enc', [0.0] * len(t))],
+    )
     rpm_cmd_l    = [v / P.WHEEL_CIRC * 60 for v in data['v_left']]
     rpm_cmd_r    = [v / P.WHEEL_CIRC * 60 for v in data['v_right']]
     rpm_enc_l    = [d * P.M_PER_PULSE / P.DT / P.WHEEL_CIRC * 60
@@ -815,15 +818,15 @@ def _plot_slow_spin(data, out_path):
 
     fig, (ax_omega, ax_rpm) = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
 
-    # ── Commanded vs encoder angular speed ────────────────
-    ax_omega.plot(t, cmd_deg_s, 'b-',  label='commanded', lw=1.5)
-    ax_omega.plot(t, enc_deg_s, 'r-',  label='encoder',   lw=1.2, alpha=0.85)
-    stall = data.get('stall_omega_deg')
+    # ── Commanded vs encoder equivalent wheel RPM ─────────
+    ax_omega.plot(t, cmd_wheel_rpm, 'b-',  label='commanded wheel RPM', lw=1.5)
+    ax_omega.plot(t, enc_wheel_rpm, 'r-',  label='encoder wheel RPM',   lw=1.2, alpha=0.85)
+    stall = data.get('stall_rpm')
     if stall is not None:
         ax_omega.axhline(stall, color='orange', ls='--', lw=1.2,
-                         label=f'stall ≈ {stall:.1f}°/s')
-    ax_omega.set_ylabel('angular speed (deg/s)')
-    ax_omega.set_title('Commanded vs encoder angular speed')
+                         label=f'stall {stall:.2f} RPM')
+    ax_omega.set_ylabel('wheel RPM')
+    ax_omega.set_title('Commanded vs encoder wheel RPM')
     ax_omega.legend(fontsize=8)
     ax_omega.grid(True, alpha=0.3)
 

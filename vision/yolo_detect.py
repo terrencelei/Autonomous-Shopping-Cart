@@ -19,6 +19,21 @@ import argparse
 import warnings
 from pathlib import Path
 
+
+def configure_qt_fonts():
+    if os.environ.get("QT_QPA_FONTDIR"):
+        return
+    for font_dir in (
+            "/usr/share/fonts/truetype/dejavu",
+            "/usr/share/fonts/truetype/liberation2",
+            "/usr/share/fonts/truetype/freefont"):
+        if os.path.isdir(font_dir):
+            os.environ["QT_QPA_FONTDIR"] = font_dir
+            return
+
+
+configure_qt_fonts()
+
 import cv2
 import numpy as np
 import supervision as sv
