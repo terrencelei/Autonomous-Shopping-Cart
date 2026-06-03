@@ -921,8 +921,8 @@ if __name__ == "__main__":
                         help=f"serial port override (default: {_MOTOR_PORT})")
     parser.add_argument("--countdown", type=int, default=3,
                         help="seconds before motors start (default: 3)")
-    parser.add_argument("--duration", type=float, default=30.0,
-                        help="run time in seconds for center/slow-spin; 0 runs until Ctrl-C (default: 30)")
+    parser.add_argument("--duration", type=float, default=0.0,
+                        help="run time in seconds for center/slow-spin; 0 runs until Ctrl-C (default: 0)")
     parser.add_argument("--direction", choices=("left", "right"), default="left",
                         help="slow-spin direction (default: left)")
     parser.add_argument("--sim-angle", type=float, default=None,
