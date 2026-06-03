@@ -29,7 +29,9 @@ START_POS     = [0.0, 0.0]
 START_HEADING = 0.0
 CENTER_DEADBAND_DEG = 4.0
 CENTER_REACQUIRE_S  = 0.25
-CENTER_START_RPM    = 0.4
+CENTER_START_RPM    = 0.25
+CENTER_MIN_RUN_RPM  = 0.25
+CENTER_KICK_RPM     = 1.0
 CENTER_SEARCH_MAX_RPM = 0.5
 CENTER_SEARCH_RAMP_STEP_RPM = 0.05
 CENTER_SEARCH_RAMP_HOLD_S = 0.25
@@ -216,10 +218,45 @@ def spin_omega_to_wheel_rpm(omega):
     return wheel_speed / P.WHEEL_CIRC * 60.0
 
 
-def center_turn_command(angle_deg):
-    if abs(angle_deg) <= CENTER_DEADBAND_DEG:
+def clamp_center_rpm(rpm):
+    if rpm <= 0.0:
         return 0.0
-    return wheel_rpm_to_spin_omega(CENTER_START_RPM, -angle_deg)
+    return min(max(rpm, CENTER_MIN_RUN_RPM), CENTER_SEARCH_MAX_RPM)
+
+
+class CenterRpmCommand:
+    def __init__(self):
+        self._moving = False
+        self._last_sign = 0.0
+        self._kick_pending = False
+
+    def reset(self):
+        self._moving = False
+        self._last_sign = 0.0
+        self._kick_pending = False
+
+    def command(self, rpm, direction):
+        rpm = clamp_center_rpm(rpm)
+        if rpm <= 0.0:
+            self.reset()
+            return 0.0
+
+        sign = math.copysign(1.0, direction)
+        if not self._moving or sign != self._last_sign:
+            self._kick_pending = True
+        self._moving = True
+        self._last_sign = sign
+
+        if self._kick_pending:
+            self._kick_pending = False
+            return wheel_rpm_to_spin_omega(CENTER_KICK_RPM, sign)
+        return wheel_rpm_to_spin_omega(rpm, sign)
+
+
+def center_turn_request(angle_deg):
+    if angle_deg is None or abs(angle_deg) <= CENTER_DEADBAND_DEG:
+        return 0.0, 0.0
+    return CENTER_START_RPM, -angle_deg
 
 
 def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1.0):
@@ -438,6 +475,9 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
     last_search_omega_sign = 1.0
     search_rpm = CENTER_START_RPM
     next_search_step_t = 0.0
+    rpm_command = CenterRpmCommand()
+    omega = 0.0
+    v_left = v_right = 0.0
     i = 0
 
     flush_motors(motors)
@@ -458,11 +498,13 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
 
             target_row = next((r for r in rows if r[0] == "TARGET"), None)
             angle_deg = target_row[4] if target_row is not None else None
+            desired_rpm = 0.0
+            desired_direction = 0.0
             if angle_deg is None:
                 target_visible_since = None
                 command_angle = None
             else:
-                search_rpm = CENTER_START_RPM
+                search_rpm = CENTER_MIN_RUN_RPM
                 next_search_step_t = t + CENTER_SEARCH_RAMP_HOLD_S
                 if abs(angle_deg) > CENTER_DEADBAND_DEG:
                     last_search_omega_sign = math.copysign(1.0, -angle_deg)
@@ -474,21 +516,21 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                     else None
                 )
             if command_angle is not None:
-                omega = center_turn_command(command_angle)
+                desired_rpm, desired_direction = center_turn_request(command_angle)
             elif angle_deg is None:
-                omega = wheel_rpm_to_spin_omega(search_rpm, last_search_omega_sign)
+                desired_rpm = search_rpm
+                desired_direction = last_search_omega_sign
                 if t >= next_search_step_t:
                     search_rpm = min(
                         CENTER_SEARCH_MAX_RPM,
                         search_rpm + CENTER_SEARCH_RAMP_STEP_RPM,
                     )
                     next_search_step_t = t + CENTER_SEARCH_RAMP_HOLD_S
-            else:
-                omega = 0.0
-            v_left, v_right = P._wheel_commands(0.0, omega)
 
             now = time.monotonic()
             if now - last_tick >= P.DT:
+                omega = rpm_command.command(desired_rpm, desired_direction)
+                v_left, v_right = P._wheel_commands(0.0, omega)
                 pos, heading = odometry.update()
                 P.S.pos = list(pos)
                 P.S.heading = heading
@@ -509,13 +551,13 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                 if i % max(1, int(0.5 / P.DT)) == 0:
                     cmd_rpm = spin_omega_to_wheel_rpm(omega)
                     if angle_deg is None:
-                        label = f"search {cmd_rpm:.1f}rpm"
+                        label = f"search {cmd_rpm:.2f}rpm"
                     elif command_angle is None:
                         label = f"reacquire {angle_deg:+.1f}°"
                     else:
                         label = f"angle={angle_deg:+.1f}°"
                     print(f"t={t:5.1f}s  {label:<16} "
-                          f"cmd={cmd_rpm:4.1f}rpm  "
+                          f"cmd={cmd_rpm:4.2f}rpm  "
                           f"omega={math.degrees(omega):+6.1f}°/s")
                 i += 1
 
@@ -577,6 +619,7 @@ def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None
     cum_l, cum_r = 0, 0
     start = time.monotonic()
     target_visible_since = None
+    rpm_command = CenterRpmCommand()
     i = 0
 
     flush_motors(motors)
@@ -589,6 +632,8 @@ def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None
 
             reading = (0.0, sim_angle) if sim_angle is not None else receiver.get()
             angle_deg = reading[1] if reading is not None else None
+            desired_rpm = 0.0
+            desired_direction = 0.0
             if sim_angle is not None:
                 command_angle = angle_deg
             elif angle_deg is None:
@@ -602,7 +647,9 @@ def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None
                     if t_loop0 - target_visible_since >= CENTER_REACQUIRE_S
                     else None
                 )
-            omega = center_turn_command(command_angle) if command_angle is not None else 0.0
+            if command_angle is not None:
+                desired_rpm, desired_direction = center_turn_request(command_angle)
+            omega = rpm_command.command(desired_rpm, desired_direction)
             v_left, v_right = P._wheel_commands(0.0, omega)
 
             if motors is not None:
@@ -633,7 +680,10 @@ def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None
                     label = f"reacquire {angle_deg:+.1f}°"
                 else:
                     label = f"angle={angle_deg:+.1f}°"
-                print(f"t={t:5.1f}s  {label:<16} omega={math.degrees(omega):+6.1f}°/s")
+                cmd_rpm = spin_omega_to_wheel_rpm(omega)
+                print(f"t={t:5.1f}s  {label:<16} "
+                      f"cmd={cmd_rpm:4.2f}rpm  "
+                      f"omega={math.degrees(omega):+6.1f}°/s")
             i += 1
 
             elapsed = time.monotonic() - t_loop0
