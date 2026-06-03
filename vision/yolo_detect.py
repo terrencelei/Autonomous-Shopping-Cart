@@ -77,6 +77,10 @@ TARGET_SWITCH_MARGIN = 2.0
 TARGET_SWITCH_FRAMES = 12
 TARGET_REID_MAX_DIST_DELTA_M = 1.0
 TARGET_REID_MAX_ANGLE_DELTA_DEG = 12.0
+TARGET_COLOR_EMA_ALPHA = 0.25
+TARGET_COLOR_REID_MIN_SCORE = 0.45
+TARGET_COLOR_SWITCH_MIN_SCORE = 0.35
+TARGET_COLOR_SWITCH_PENALTY = 1.5
 
 # World-map window
 WORLD_MAP_PX = 500
@@ -192,12 +196,52 @@ def normalize_track_id(tid):
     return int(tid)
 
 
+def clothing_color_hist(frame, xyxy):
+    h, w = frame.shape[:2]
+    x1, y1, x2, y2 = xyxy
+    x1 = max(0, min(w - 1, int(x1)))
+    x2 = max(0, min(w, int(x2)))
+    y1 = max(0, min(h - 1, int(y1)))
+    y2 = max(0, min(h, int(y2)))
+    if x2 <= x1 or y2 <= y1:
+        return None
+
+    box_w = x2 - x1
+    box_h = y2 - y1
+    # Use the shirt/torso area, avoiding face/hair and legs where possible.
+    tx1 = x1 + int(0.20 * box_w)
+    tx2 = x2 - int(0.20 * box_w)
+    ty1 = y1 + int(0.25 * box_h)
+    ty2 = y1 + int(0.70 * box_h)
+    if tx2 <= tx1 or ty2 <= ty1:
+        return None
+
+    crop = frame[ty1:ty2, tx1:tx2]
+    if crop.size == 0:
+        return None
+
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, (0, 25, 35), (179, 255, 255))
+    if cv2.countNonZero(mask) < 20:
+        mask = None
+    hist = cv2.calcHist([hsv], [0, 1], mask, [24, 16], [0, 180, 0, 256])
+    cv2.normalize(hist, hist, 0.0, 1.0, cv2.NORM_MINMAX)
+    return hist
+
+
+def color_similarity(a, b):
+    if a is None or b is None:
+        return None
+    return max(0.0, float(cv2.compareHist(a, b, cv2.HISTCMP_CORREL)))
+
+
 class TargetLock:
     def __init__(self):
         self.locked_id = None
         self.last_seen = 0.0
         self.last_dist = None
         self.last_angle = None
+        self.color_hist = None
         self.switch_candidate_id = None
         self.switch_candidate_frames = 0
 
@@ -214,7 +258,7 @@ class TargetLock:
             return best["index"]
 
         best_tracked = min((m for m in measurements if m["track_id"] is not None),
-                           key=lambda m: m["score"])
+                           key=self._target_score)
         current = next((m for m in measurements if m["track_id"] == self.locked_id), None)
         if current is None:
             if self.locked_id is not None and now - self.last_seen <= TARGET_LOST_TIMEOUT_S:
@@ -227,7 +271,13 @@ class TargetLock:
             return best_tracked["index"]
 
         self._remember(current, now)
-        if best_tracked["track_id"] != self.locked_id and best_tracked["score"] + TARGET_SWITCH_MARGIN < current["score"]:
+        candidate_similarity = color_similarity(self.color_hist, best_tracked["color_hist"])
+        color_ok = (
+            candidate_similarity is None or
+            candidate_similarity >= TARGET_COLOR_SWITCH_MIN_SCORE
+        )
+        if (color_ok and best_tracked["track_id"] != self.locked_id and
+                self._target_score(best_tracked) + TARGET_SWITCH_MARGIN < self._target_score(current)):
             if best_tracked["track_id"] == self.switch_candidate_id:
                 self.switch_candidate_frames += 1
             else:
@@ -247,6 +297,7 @@ class TargetLock:
         self.last_seen = now
         self.last_dist = measurement["dist"]
         self.last_angle = measurement["angle"]
+        self._update_color(measurement)
 
     def _reidentify(self, measurements):
         if self.last_dist is None or self.last_angle is None:
@@ -256,9 +307,16 @@ class TargetLock:
         for m in measurements:
             dist_delta = abs(m["dist"] - self.last_dist)
             angle_delta = abs(m["angle"] - self.last_angle)
+            color_score = color_similarity(self.color_hist, m["color_hist"])
+            color_ok = (
+                self.color_hist is None or
+                color_score is None or
+                color_score >= TARGET_COLOR_REID_MIN_SCORE
+            )
             if (dist_delta <= TARGET_REID_MAX_DIST_DELTA_M and
-                    angle_delta <= TARGET_REID_MAX_ANGLE_DELTA_DEG):
-                candidates.append((dist_delta + 0.1 * angle_delta, m))
+                    angle_delta <= TARGET_REID_MAX_ANGLE_DELTA_DEG and color_ok):
+                color_bonus = color_score if color_score is not None else 0.0
+                candidates.append((dist_delta + 0.1 * angle_delta - color_bonus, m))
         return min(candidates, key=lambda item: item[0])[1] if candidates else None
 
     def _lock(self, track_id, now, measurement=None):
@@ -267,8 +325,29 @@ class TargetLock:
         if measurement is not None:
             self.last_dist = measurement["dist"]
             self.last_angle = measurement["angle"]
+            self._update_color(measurement)
         self.switch_candidate_id = None
         self.switch_candidate_frames = 0
+
+    def _target_score(self, measurement):
+        score = measurement["score"]
+        color_score = color_similarity(self.color_hist, measurement["color_hist"])
+        if self.color_hist is not None and color_score is not None:
+            score += TARGET_COLOR_SWITCH_PENALTY * (1.0 - color_score)
+        return score
+
+    def _update_color(self, measurement):
+        hist = measurement.get("color_hist")
+        if hist is None:
+            return
+        if self.color_hist is None:
+            self.color_hist = hist.copy()
+            return
+        cv2.addWeighted(
+            hist, TARGET_COLOR_EMA_ALPHA,
+            self.color_hist, 1.0 - TARGET_COLOR_EMA_ALPHA,
+            0.0, self.color_hist)
+        cv2.normalize(self.color_hist, self.color_hist, 0.0, 1.0, cv2.NORM_MINMAX)
 
 
 def annotate_frame(frame, detections: sv.Detections, smooth_state: dict, target_lock: TargetLock, now: float):
@@ -304,6 +383,7 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict, target_
             "dist": dist,
             "angle": angle,
             "score": detection_score(dist, angle),
+            "color_hist": clothing_color_hist(frame, (x1, y1, x2, y2)),
         })
 
     for tid, state in list(smooth_state.items()):
