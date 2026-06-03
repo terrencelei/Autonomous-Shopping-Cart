@@ -29,18 +29,18 @@ START_POS     = [0.0, 0.0]
 START_HEADING = 0.0
 CENTER_DEADBAND_DEG = 4.0
 CENTER_REACQUIRE_S  = 0.25
-CENTER_START_RPM    = 0.25
+CENTER_START_RPM    = 0.4
 CENTER_SEARCH_MAX_RPM = 0.5
 CENTER_SEARCH_RAMP_STEP_RPM = 0.05
 CENTER_SEARCH_RAMP_HOLD_S = 0.25
 
 # Slow-spin / stall-test parameters.  The test commands wheel RPMs, not raw
 # PWM, because the ESP32 firmware exposes an RPM serial protocol.
-STALL_RAMP_UP_START_RPM = 0.5   # first commanded wheel RPM during stall search
+STALL_RAMP_UP_START_RPM = 0.75   # first commanded wheel RPM during stall search
 STALL_RAMP_UP_STEP_RPM  = 0.05   # RPM added after each no-movement hold
 STALL_RAMP_DOWN_STEP_RPM = 0.25  # RPM removed after each moving hold
 STALL_STEP_HOLD_SECS    = 0.1  # time to hold each RPM before changing it
-STALL_MAX_RPM           = 0.75  # safety cap for the ramp-up search
+STALL_MAX_RPM           = 0.9  # safety cap for the ramp-up search
 STALL_DETECT_TICKS      = 5     # consecutive zero-delta reads before declaring no motion
 
 # =============================================================================
