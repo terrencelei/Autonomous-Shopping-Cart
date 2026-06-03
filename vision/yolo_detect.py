@@ -58,8 +58,10 @@ TARGET_ANGLE_WEIGHT = 0.3
 DIST_EMA_ALPHA = 0.4
 ANGLE_EMA_ALPHA = 0.4
 TARGET_LOST_TIMEOUT_S = 0.75
-TARGET_SWITCH_MARGIN = 0.8
-TARGET_SWITCH_FRAMES = 5
+TARGET_SWITCH_MARGIN = 2.0
+TARGET_SWITCH_FRAMES = 12
+TARGET_REID_MAX_DIST_DELTA_M = 1.0
+TARGET_REID_MAX_ANGLE_DELTA_DEG = 12.0
 
 # World-map window
 WORLD_MAP_PX = 500
@@ -179,6 +181,8 @@ class TargetLock:
     def __init__(self):
         self.locked_id = None
         self.last_seen = 0.0
+        self.last_dist = None
+        self.last_angle = None
         self.switch_candidate_id = None
         self.switch_candidate_frames = 0
 
@@ -199,11 +203,15 @@ class TargetLock:
         current = next((m for m in measurements if m["track_id"] == self.locked_id), None)
         if current is None:
             if self.locked_id is not None and now - self.last_seen <= TARGET_LOST_TIMEOUT_S:
+                reid = self._reidentify(measurements)
+                if reid is not None:
+                    self._lock(reid["track_id"], now, reid)
+                    return reid["index"]
                 return None
-            self._lock(best_tracked["track_id"], now)
+            self._lock(best_tracked["track_id"], now, best_tracked)
             return best_tracked["index"]
 
-        self.last_seen = now
+        self._remember(current, now)
         if best_tracked["track_id"] != self.locked_id and best_tracked["score"] + TARGET_SWITCH_MARGIN < current["score"]:
             if best_tracked["track_id"] == self.switch_candidate_id:
                 self.switch_candidate_frames += 1
@@ -212,7 +220,7 @@ class TargetLock:
                 self.switch_candidate_frames = 1
 
             if self.switch_candidate_frames >= TARGET_SWITCH_FRAMES:
-                self._lock(best_tracked["track_id"], now)
+                self._lock(best_tracked["track_id"], now, best_tracked)
                 return best_tracked["index"]
         else:
             self.switch_candidate_id = None
@@ -220,9 +228,30 @@ class TargetLock:
 
         return current["index"]
 
-    def _lock(self, track_id, now):
+    def _remember(self, measurement, now):
+        self.last_seen = now
+        self.last_dist = measurement["dist"]
+        self.last_angle = measurement["angle"]
+
+    def _reidentify(self, measurements):
+        if self.last_dist is None or self.last_angle is None:
+            return None
+
+        candidates = []
+        for m in measurements:
+            dist_delta = abs(m["dist"] - self.last_dist)
+            angle_delta = abs(m["angle"] - self.last_angle)
+            if (dist_delta <= TARGET_REID_MAX_DIST_DELTA_M and
+                    angle_delta <= TARGET_REID_MAX_ANGLE_DELTA_DEG):
+                candidates.append((dist_delta + 0.1 * angle_delta, m))
+        return min(candidates, key=lambda item: item[0])[1] if candidates else None
+
+    def _lock(self, track_id, now, measurement=None):
         self.locked_id = track_id
         self.last_seen = now
+        if measurement is not None:
+            self.last_dist = measurement["dist"]
+            self.last_angle = measurement["angle"]
         self.switch_candidate_id = None
         self.switch_candidate_frames = 0
 
