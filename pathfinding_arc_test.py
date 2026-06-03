@@ -46,8 +46,8 @@ CENTER_SEARCH_STALL_TICKS = 5
 # PWM, because the ESP32 firmware exposes an RPM serial protocol.
 STALL_RAMP_UP_START_RPM = 0.05   # first commanded wheel RPM during stall search
 STALL_RAMP_UP_STEP_RPM  = 0.05   # RPM added after each no-movement hold
-STALL_RAMP_DOWN_STEP_RPM = 0.02  # RPM removed after each moving hold
-STALL_STEP_HOLD_SECS    = 1.0  # time to hold each RPM before changing it
+STALL_RAMP_DOWN_STEP_RPM = 0.05  # RPM removed after each moving hold
+STALL_STEP_HOLD_SECS    = 0.5  # time to hold each RPM before changing it
 STALL_MAX_RPM           = 2.0  # safety cap for the ramp-up search
 STALL_OVERCOME_CUM_RPM  = 100.0 # cumulative encoder RPM in a hold before stall is overcome
 
