@@ -33,6 +33,7 @@ CENTER_START_RPM    = 0.25
 CENTER_MIN_RUN_RPM  = 0.2
 CENTER_KICK_RPM  = 5
 CENTER_KICK_RELEASE_TICKS = 30
+CENTER_SEARCH_KICK_RPM = 1.0
 CENTER_SEARCH_MAX_RPM = 0.25
 CENTER_SEARCH_RAMP_STEP_RPM = 0.05
 CENTER_SEARCH_RAMP_HOLD_S = 0.25
@@ -252,7 +253,7 @@ class CenterRpmCommand:
         self._kick_l_ticks = 0
         self._kick_r_ticks = 0
 
-    def command(self, rpm, direction, encoder_delta=(0, 0)):
+    def command(self, rpm, direction, encoder_delta=(0, 0), kick_rpm=CENTER_KICK_RPM):
         rpm = clamp_center_rpm(rpm)
         if rpm <= 0.0:
             self.reset()
@@ -274,7 +275,7 @@ class CenterRpmCommand:
             self._kick_active = False
 
         if self._kick_active:
-            return wheel_rpm_to_spin_omega(CENTER_KICK_RPM, sign)
+            return wheel_rpm_to_spin_omega(kick_rpm, sign)
         return wheel_rpm_to_spin_omega(rpm, sign)
 
 
@@ -525,6 +526,7 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
             angle_deg = target_row[4] if target_row is not None else None
             desired_rpm = 0.0
             desired_direction = 0.0
+            search_mode = False
             if angle_deg is None:
                 target_visible_since = None
                 command_angle = None
@@ -543,6 +545,7 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
             if command_angle is not None:
                 desired_rpm, desired_direction = center_turn_request(command_angle)
             elif angle_deg is None:
+                search_mode = True
                 desired_rpm = search_rpm
                 desired_direction = last_search_omega_sign
                 if t >= next_search_step_t:
@@ -558,8 +561,10 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                     d_l, d_r = motors.read_encoder_deltas()
                 else:
                     d_l, d_r = 0, 0
+                kick_rpm = CENTER_SEARCH_KICK_RPM if search_mode else CENTER_KICK_RPM
                 omega = rpm_command.command(
-                    desired_rpm, desired_direction, encoder_delta=(d_l, d_r))
+                    desired_rpm, desired_direction, encoder_delta=(d_l, d_r),
+                    kick_rpm=kick_rpm)
                 v_left, v_right = P._wheel_commands(0.0, omega)
                 pos, heading = update_odometry_from_deltas(odometry, d_l, d_r)
                 P.S.pos = list(pos)
