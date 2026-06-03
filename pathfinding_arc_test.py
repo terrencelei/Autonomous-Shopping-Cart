@@ -236,6 +236,12 @@ def spin_omega_to_wheel_rpm(omega):
     return wheel_speed / P.WHEEL_CIRC * 60.0
 
 
+def encoder_delta_to_wheel_rpm(delta_ticks):
+    ticks_per_wheel_rev = P.ENCODER_PPR * getattr(P, 'GEAR_RATIO', 1)
+    wheel_revs = delta_ticks / ticks_per_wheel_rev
+    return wheel_revs / P.DT * 60.0
+
+
 def search_max_rpm_for_distance(dist_m):
     if dist_m is not None and dist_m < CENTER_SEARCH_DISTANCE_SPLIT_M:
         return CENTER_SEARCH_NEAR_MAX_RPM
@@ -358,11 +364,11 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
                 d_l, d_r = 0, 0
 
             # Encoder-derived angular velocity
-            vl_enc   = d_l * P.M_PER_PULSE / P.DT
-            vr_enc   = d_r * P.M_PER_PULSE / P.DT
+            enc_rpm_l = encoder_delta_to_wheel_rpm(d_l)
+            enc_rpm_r = encoder_delta_to_wheel_rpm(d_r)
+            vl_enc = enc_rpm_l * P.WHEEL_CIRC / 60.0
+            vr_enc = enc_rpm_r * P.WHEEL_CIRC / 60.0
             omega_enc = (vr_enc - vl_enc) / P.TRACK_M
-            enc_rpm_l = d_l * P.M_PER_PULSE / P.DT / P.WHEEL_CIRC * 60
-            enc_rpm_r = d_r * P.M_PER_PULSE / P.DT / P.WHEEL_CIRC * 60
             enc_rpm_mag = max(abs(enc_rpm_l), abs(enc_rpm_r))
             tick_count = abs(d_l) + abs(d_r)
             hold_ticks += tick_count
@@ -818,10 +824,8 @@ def _plot_slow_spin(data, out_path):
     )
     rpm_cmd_l    = [v / P.WHEEL_CIRC * 60 for v in data['v_left']]
     rpm_cmd_r    = [v / P.WHEEL_CIRC * 60 for v in data['v_right']]
-    rpm_enc_l    = [d * P.M_PER_PULSE / P.DT / P.WHEEL_CIRC * 60
-                    for d in data['enc_l_delta']]
-    rpm_enc_r    = [d * P.M_PER_PULSE / P.DT / P.WHEEL_CIRC * 60
-                    for d in data['enc_r_delta']]
+    rpm_enc_l    = [encoder_delta_to_wheel_rpm(d) for d in data['enc_l_delta']]
+    rpm_enc_r    = [encoder_delta_to_wheel_rpm(d) for d in data['enc_r_delta']]
 
     fig, (ax_omega, ax_rpm) = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
 
@@ -952,10 +956,8 @@ def plot(data, out_path="pathfinding_arc_test.png"):
 
         rpm_l = [v / P.WHEEL_CIRC * 60 for v in data['v_left']]
         rpm_r = [v / P.WHEEL_CIRC * 60 for v in data['v_right']]
-        rpm_enc_l = [d * P.M_PER_PULSE / P.DT / P.WHEEL_CIRC * 60
-                     for d in data['enc_l_delta']]
-        rpm_enc_r = [d * P.M_PER_PULSE / P.DT / P.WHEEL_CIRC * 60
-                     for d in data['enc_r_delta']]
+        rpm_enc_l = [encoder_delta_to_wheel_rpm(d) for d in data['enc_l_delta']]
+        rpm_enc_r = [encoder_delta_to_wheel_rpm(d) for d in data['enc_r_delta']]
         ax_rpm.plot(data['t'], rpm_l, 'b-', label='left commanded RPM')
         ax_rpm.plot(data['t'], rpm_r, 'r-', label='right commanded RPM')
         ax_rpm.plot(data['t'], rpm_enc_l, 'b--', label='left encoder RPM', alpha=0.8)
