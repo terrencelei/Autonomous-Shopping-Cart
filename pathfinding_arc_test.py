@@ -29,9 +29,10 @@ START_POS     = [0.0, 0.0]
 START_HEADING = 0.0
 CENTER_DEADBAND_DEG = 4.0
 CENTER_REACQUIRE_S  = 0.25
-CENTER_MIN_TURN_DEG = 2.0
-CENTER_MAX_TURN_DEG = 8.0
-CENTER_KP           = 0.006  # rad/s per degree of angle error
+CENTER_START_RPM    = 1.0
+CENTER_SEARCH_MAX_RPM = 10.0
+CENTER_SEARCH_RAMP_STEP_RPM = 0.5
+CENTER_SEARCH_RAMP_HOLD_S = 0.25
 
 # Slow-spin / stall-test parameters.  The test commands wheel RPMs, not raw
 # PWM, because the ESP32 firmware exposes an RPM serial protocol.
@@ -205,14 +206,20 @@ def run_spin(drive=True, port=None, countdown=3):
     )
 
 
+def wheel_rpm_to_spin_omega(rpm, direction=1.0):
+    wheel_speed = abs(rpm) * P.WHEEL_CIRC / 60.0
+    return math.copysign(2.0 * wheel_speed / P.TRACK_M, direction)
+
+
+def spin_omega_to_wheel_rpm(omega):
+    wheel_speed = abs(omega) * P.TRACK_M / 2.0
+    return wheel_speed / P.WHEEL_CIRC * 60.0
+
+
 def center_turn_command(angle_deg):
     if abs(angle_deg) <= CENTER_DEADBAND_DEG:
         return 0.0
-    omega = -CENTER_KP * angle_deg
-    min_turn = math.radians(CENTER_MIN_TURN_DEG)
-    max_turn = math.radians(CENTER_MAX_TURN_DEG)
-    omega_mag = min(max(abs(omega), min_turn), max_turn)
-    return math.copysign(omega_mag, omega)
+    return wheel_rpm_to_spin_omega(CENTER_START_RPM, -angle_deg)
 
 
 def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1.0):
@@ -421,6 +428,9 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
     last_tick = time.monotonic()
     frame_times = []
     target_visible_since = None
+    last_search_omega_sign = 1.0
+    search_rpm = CENTER_START_RPM
+    next_search_step_t = 0.0
     i = 0
 
     flush_motors(motors)
@@ -445,6 +455,10 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                 target_visible_since = None
                 command_angle = None
             else:
+                search_rpm = CENTER_START_RPM
+                next_search_step_t = t + CENTER_SEARCH_RAMP_HOLD_S
+                if abs(angle_deg) > CENTER_DEADBAND_DEG:
+                    last_search_omega_sign = math.copysign(1.0, -angle_deg)
                 if target_visible_since is None:
                     target_visible_since = loop_start
                 command_angle = (
@@ -452,7 +466,18 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                     if loop_start - target_visible_since >= CENTER_REACQUIRE_S
                     else None
                 )
-            omega = center_turn_command(command_angle) if command_angle is not None else 0.0
+            if command_angle is not None:
+                omega = center_turn_command(command_angle)
+            elif angle_deg is None:
+                omega = wheel_rpm_to_spin_omega(search_rpm, last_search_omega_sign)
+                if t >= next_search_step_t:
+                    search_rpm = min(
+                        CENTER_SEARCH_MAX_RPM,
+                        search_rpm + CENTER_SEARCH_RAMP_STEP_RPM,
+                    )
+                    next_search_step_t = t + CENTER_SEARCH_RAMP_HOLD_S
+            else:
+                omega = 0.0
             v_left, v_right = P._wheel_commands(0.0, omega)
 
             now = time.monotonic()
@@ -475,13 +500,16 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                 enc_right_cum.append(cum_l); enc_left_cum.append(cum_r)
 
                 if i % max(1, int(0.5 / P.DT)) == 0:
+                    cmd_rpm = spin_omega_to_wheel_rpm(omega)
                     if angle_deg is None:
-                        label = "no target"
+                        label = f"search {cmd_rpm:.1f}rpm"
                     elif command_angle is None:
                         label = f"reacquire {angle_deg:+.1f}°"
                     else:
                         label = f"angle={angle_deg:+.1f}°"
-                    print(f"t={t:5.1f}s  {label:<16} omega={math.degrees(omega):+6.1f}°/s")
+                    print(f"t={t:5.1f}s  {label:<16} "
+                          f"cmd={cmd_rpm:4.1f}rpm  "
+                          f"omega={math.degrees(omega):+6.1f}°/s")
                 i += 1
 
             frame_times.append(time.time())
@@ -740,7 +768,10 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     # ── Turn rate ──────────────────────────────────────────
     ax = axes[1]
     ax.plot(data['t'], np.degrees(data['omega']), 'b-')
-    cap = CENTER_MAX_TURN_DEG if mode == "center" else math.degrees(P.MAX_TURN)
+    cap = (
+        math.degrees(wheel_rpm_to_spin_omega(CENTER_SEARCH_MAX_RPM))
+        if mode == "center" else math.degrees(P.MAX_TURN)
+    )
     ax.axhline(cap, color='gray', ls=':', alpha=0.5, label=f'cap {cap:.0f}°/s')
     ax.axhline(-cap, color='gray', ls=':', alpha=0.5)
     ax.set_xlabel('time (s)')
