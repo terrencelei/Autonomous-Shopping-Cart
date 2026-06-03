@@ -33,11 +33,12 @@ CENTER_START_RPM    = 0.3
 CENTER_MIN_RUN_RPM  = 0.3
 CENTER_KICK_RPM  =8
 CENTER_KICK_RELEASE_TICKS = 30
-CENTER_SEARCH_KICK_RPM =10
-CENTER_SEARCH_KICK_RELEASE_TICKS = 50
+CENTER_SEARCH_KICK_RPM =8
+CENTER_SEARCH_KICK_RELEASE_TICKS = 30
 CENTER_SEARCH_MAX_RPM = 0.5
 CENTER_SEARCH_RAMP_STEP_RPM = 0.1
 CENTER_SEARCH_RAMP_HOLD_S = 1
+CENTER_SEARCH_STALL_TICKS = 5
 
 # Slow-spin / stall-test parameters.  The test commands wheel RPMs, not raw
 # PWM, because the ESP32 firmware exposes an RPM serial protocol.
@@ -251,6 +252,15 @@ class CenterRpmCommand:
         self._moving = False
         self._last_sign = 0.0
         self._kick_active = False
+        self._kick_l_ticks = 0
+        self._kick_r_ticks = 0
+
+    @property
+    def kick_active(self):
+        return self._kick_active
+
+    def force_kick(self):
+        self._kick_active = True
         self._kick_l_ticks = 0
         self._kick_r_ticks = 0
 
@@ -505,6 +515,7 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
     last_search_omega_sign = 1.0
     search_rpm = CENTER_START_RPM
     next_search_step_t = 0.0
+    search_stall_ticks = 0
     rpm_command = CenterRpmCommand()
     omega = 0.0
     v_left = v_right = 0.0
@@ -565,6 +576,17 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                     d_l, d_r = motors.read_encoder_deltas()
                 else:
                     d_l, d_r = 0, 0
+                search_at_max = (
+                    search_mode and desired_rpm >= CENTER_SEARCH_MAX_RPM
+                )
+                search_moved = abs(d_l) > 0 or abs(d_r) > 0
+                if not search_at_max or search_moved or rpm_command.kick_active:
+                    search_stall_ticks = 0
+                else:
+                    search_stall_ticks += 1
+                    if search_stall_ticks >= CENTER_SEARCH_STALL_TICKS:
+                        rpm_command.force_kick()
+                        search_stall_ticks = 0
                 kick_rpm = CENTER_SEARCH_KICK_RPM if search_mode else CENTER_KICK_RPM
                 kick_release_ticks = (
                     CENTER_SEARCH_KICK_RELEASE_TICKS
