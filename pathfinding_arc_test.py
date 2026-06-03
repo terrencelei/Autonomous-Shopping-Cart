@@ -32,6 +32,7 @@ CENTER_REACQUIRE_S  = 0.25
 CENTER_START_RPM    = 0.4
 CENTER_MIN_RUN_RPM  = 0.25
 CENTER_KICK_RPM   = 2
+CENTER_KICK_RELEASE_TICKS = 10
 CENTER_SEARCH_MAX_RPM = 0.5
 CENTER_SEARCH_RAMP_STEP_RPM = 0.05
 CENTER_SEARCH_RAMP_HOLD_S = 0.25
@@ -241,13 +242,17 @@ class CenterRpmCommand:
         self._moving = False
         self._last_sign = 0.0
         self._kick_active = False
+        self._kick_l_ticks = 0
+        self._kick_r_ticks = 0
 
     def reset(self):
         self._moving = False
         self._last_sign = 0.0
         self._kick_active = False
+        self._kick_l_ticks = 0
+        self._kick_r_ticks = 0
 
-    def command(self, rpm, direction, encoder_moved=False):
+    def command(self, rpm, direction, encoder_delta=(0, 0)):
         rpm = clamp_center_rpm(rpm)
         if rpm <= 0.0:
             self.reset()
@@ -256,10 +261,16 @@ class CenterRpmCommand:
         sign = math.copysign(1.0, direction)
         if not self._moving or sign != self._last_sign:
             self._kick_active = True
+            self._kick_l_ticks = 0
+            self._kick_r_ticks = 0
         self._moving = True
         self._last_sign = sign
 
-        if encoder_moved:
+        d_l, d_r = encoder_delta
+        self._kick_l_ticks += abs(d_l)
+        self._kick_r_ticks += abs(d_r)
+        if (self._kick_l_ticks >= CENTER_KICK_RELEASE_TICKS or
+                self._kick_r_ticks >= CENTER_KICK_RELEASE_TICKS):
             self._kick_active = False
 
         if self._kick_active:
@@ -547,10 +558,8 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                     d_l, d_r = motors.read_encoder_deltas()
                 else:
                     d_l, d_r = 0, 0
-                encoder_moved = (abs(d_l) + abs(d_r)) > 0
-
                 omega = rpm_command.command(
-                    desired_rpm, desired_direction, encoder_moved=encoder_moved)
+                    desired_rpm, desired_direction, encoder_delta=(d_l, d_r))
                 v_left, v_right = P._wheel_commands(0.0, omega)
                 pos, heading = update_odometry_from_deltas(odometry, d_l, d_r)
                 P.S.pos = list(pos)
@@ -676,9 +685,8 @@ def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None
                 d_l, d_r = motors.read_encoder_deltas()
             else:
                 d_l, d_r = 0, 0
-            encoder_moved = (abs(d_l) + abs(d_r)) > 0
             omega = rpm_command.command(
-                desired_rpm, desired_direction, encoder_moved=encoder_moved)
+                desired_rpm, desired_direction, encoder_delta=(d_l, d_r))
             v_left, v_right = P._wheel_commands(0.0, omega)
 
             if motors is not None:
