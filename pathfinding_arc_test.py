@@ -27,7 +27,7 @@ _MOTOR_PORT = getattr(P, 'MOTOR_PORT', getattr(P, 'MOTOR_UART_PORT', '/dev/ttyAC
 
 START_POS     = [0.0, 0.0]
 START_HEADING = 0.0
-CENTER_DEADBAND_DEG = 1.0
+CENTER_DEADBAND_DEG = 1.5
 CENTER_REACQUIRE_S  = 0.3
 CENTER_START_RPM    = 0.3
 CENTER_MIN_RUN_RPM  = 0.3
@@ -35,7 +35,9 @@ CENTER_KICK_RPM  =8
 CENTER_KICK_RELEASE_TICKS = 30
 CENTER_SEARCH_KICK_RPM = 8
 CENTER_SEARCH_KICK_RELEASE_TICKS = 30
-CENTER_SEARCH_MAX_RPM = 0.3
+CENTER_SEARCH_DISTANCE_SPLIT_M = 3.0
+CENTER_SEARCH_NEAR_MAX_RPM = 4.0
+CENTER_SEARCH_FAR_MAX_RPM = 0.3
 CENTER_SEARCH_RAMP_STEP_RPM = 0.1
 CENTER_SEARCH_RAMP_HOLD_S = 1
 CENTER_SEARCH_STALL_TICKS = 5
@@ -234,10 +236,16 @@ def spin_omega_to_wheel_rpm(omega):
     return wheel_speed / P.WHEEL_CIRC * 60.0
 
 
-def clamp_center_rpm(rpm):
+def search_max_rpm_for_distance(dist_m):
+    if dist_m is not None and dist_m < CENTER_SEARCH_DISTANCE_SPLIT_M:
+        return CENTER_SEARCH_NEAR_MAX_RPM
+    return CENTER_SEARCH_FAR_MAX_RPM
+
+
+def clamp_center_rpm(rpm, max_rpm=CENTER_SEARCH_FAR_MAX_RPM):
     if rpm <= 0.0:
         return 0.0
-    return min(max(rpm, CENTER_MIN_RUN_RPM), CENTER_SEARCH_MAX_RPM)
+    return min(max(rpm, CENTER_MIN_RUN_RPM), max_rpm)
 
 
 class CenterRpmCommand:
@@ -267,8 +275,9 @@ class CenterRpmCommand:
     def command(
             self, rpm, direction, encoder_delta=(0, 0),
             kick_rpm=CENTER_KICK_RPM,
-            kick_release_ticks=CENTER_KICK_RELEASE_TICKS):
-        rpm = clamp_center_rpm(rpm)
+            kick_release_ticks=CENTER_KICK_RELEASE_TICKS,
+            max_rpm=CENTER_SEARCH_FAR_MAX_RPM):
+        rpm = clamp_center_rpm(rpm, max_rpm)
         if rpm <= 0.0:
             self.reset()
             return 0.0
@@ -512,6 +521,7 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
     last_tick = time.monotonic()
     frame_times = []
     target_visible_since = None
+    last_target_dist_m = None
     last_search_omega_sign = 1.0
     search_rpm = CENTER_START_RPM
     next_search_step_t = 0.0
@@ -539,9 +549,12 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
 
             target_row = next((r for r in rows if r[0] == "TARGET"), None)
             angle_deg = target_row[4] if target_row is not None else None
+            if target_row is not None:
+                last_target_dist_m = target_row[3]
             desired_rpm = 0.0
             desired_direction = 0.0
             search_mode = False
+            search_max_rpm = search_max_rpm_for_distance(last_target_dist_m)
             if angle_deg is None:
                 target_visible_since = None
                 command_angle = None
@@ -561,11 +574,11 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                 desired_rpm, desired_direction = center_turn_request(command_angle)
             elif angle_deg is None:
                 search_mode = True
-                desired_rpm = search_rpm
+                desired_rpm = min(search_rpm, search_max_rpm)
                 desired_direction = last_search_omega_sign
                 if t >= next_search_step_t:
                     search_rpm = min(
-                        CENTER_SEARCH_MAX_RPM,
+                        search_max_rpm,
                         search_rpm + CENTER_SEARCH_RAMP_STEP_RPM,
                     )
                     next_search_step_t = t + CENTER_SEARCH_RAMP_HOLD_S
@@ -577,7 +590,7 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                 else:
                     d_l, d_r = 0, 0
                 search_at_max = (
-                    search_mode and desired_rpm >= CENTER_SEARCH_MAX_RPM
+                    search_mode and desired_rpm >= search_max_rpm
                 )
                 search_moved = abs(d_l) > 0 or abs(d_r) > 0
                 if not search_at_max or search_moved or rpm_command.kick_active:
@@ -595,7 +608,8 @@ def run_center_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                 omega = rpm_command.command(
                     desired_rpm, desired_direction, encoder_delta=(d_l, d_r),
                     kick_rpm=kick_rpm,
-                    kick_release_ticks=kick_release_ticks)
+                    kick_release_ticks=kick_release_ticks,
+                    max_rpm=search_max_rpm)
                 v_left, v_right = P._wheel_commands(0.0, omega)
                 pos, heading = update_odometry_from_deltas(odometry, d_l, d_r)
                 P.S.pos = list(pos)
@@ -895,8 +909,12 @@ def plot(data, out_path="pathfinding_arc_test.png"):
     # ── Turn rate ──────────────────────────────────────────
     ax = axes[1]
     ax.plot(data['t'], np.degrees(data['omega']), 'b-')
+    center_search_plot_cap_rpm = max(
+        CENTER_SEARCH_NEAR_MAX_RPM,
+        CENTER_SEARCH_FAR_MAX_RPM,
+    )
     cap = (
-        math.degrees(wheel_rpm_to_spin_omega(CENTER_SEARCH_MAX_RPM))
+        math.degrees(wheel_rpm_to_spin_omega(center_search_plot_cap_rpm))
         if mode == "center" else math.degrees(P.MAX_TURN)
     )
     ax.axhline(cap, color='gray', ls=':', alpha=0.5, label=f'cap {cap:.0f}°/s')
