@@ -49,7 +49,7 @@ STALL_RAMP_UP_STEP_RPM  = 0.05   # RPM added after each no-movement hold
 STALL_RAMP_DOWN_STEP_RPM = 0.02  # RPM removed after each moving hold
 STALL_STEP_HOLD_SECS    = 1.0  # time to hold each RPM before changing it
 STALL_MAX_RPM           = 2.0  # safety cap for the ramp-up search
-STALL_MOVE_MIN_TICKS    = 10   # total encoder ticks in a hold before counting movement
+STALL_OVERCOME_CUM_RPM  = 100.0 # cumulative encoder RPM in a hold before stall is overcome
 
 # =============================================================================
 
@@ -327,6 +327,7 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
     enc_right_delta, enc_left_delta = [], []
     cum_l, cum_r = 0, 0
     hold_ticks = 0
+    hold_enc_rpm_total = 0.0
     hold_enc_rpm_peak = 0.0
     phase = "ramp_up"
     command_rpm = STALL_RAMP_UP_START_RPM
@@ -365,6 +366,7 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
             enc_rpm_mag = max(abs(enc_rpm_l), abs(enc_rpm_r))
             tick_count = abs(d_l) + abs(d_r)
             hold_ticks += tick_count
+            hold_enc_rpm_total += enc_rpm_mag
             hold_enc_rpm_peak = max(hold_enc_rpm_peak, enc_rpm_mag)
 
             cum_l += d_l; cum_r += d_r
@@ -388,8 +390,9 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
                     command_rpm += STALL_RAMP_UP_STEP_RPM
                     next_step_t = t + STALL_STEP_HOLD_SECS
             elif t >= next_step_t:
-                hold_moved = hold_ticks >= STALL_MOVE_MIN_TICKS
-                if phase == "ramp_up" and hold_moved:
+                stall_overcome = hold_enc_rpm_total >= STALL_OVERCOME_CUM_RPM
+                hold_moved = hold_ticks > 0
+                if phase == "ramp_up" and stall_overcome:
                     initial_move_rpm = command_rpm
                     initial_move_enc_rpm = hold_enc_rpm_peak
                     lowest_move_rpm = command_rpm
@@ -415,6 +418,7 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
                     break
 
                 hold_ticks = 0
+                hold_enc_rpm_total = 0.0
                 hold_enc_rpm_peak = 0.0
                 next_step_t = t + STALL_STEP_HOLD_SECS
 
@@ -424,7 +428,8 @@ def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1
             if i % max(1, int(1.0 / P.DT)) == 0:
                 print(f"t={t:5.1f}s  {phase:9s}  cmd={command_rpm:5.2f} wheel RPM  "
                       f"enc={enc_rpm_mag:5.2f} RPM  "
-                      f"hold_ticks={hold_ticks:4d}/{STALL_MOVE_MIN_TICKS:d}  "
+                      f"hold_rpm={hold_enc_rpm_total:6.1f}/{STALL_OVERCOME_CUM_RPM:.0f}  "
+                      f"hold_ticks={hold_ticks:4d}  "
                       f"ticks=({d_l:+d},{d_r:+d})")
             i += 1
 
