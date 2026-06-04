@@ -122,8 +122,7 @@ To recalibrate: stand at known distances (e.g. 1 m, 2 m, 3 m), record the report
 
 | Window | Contents |
 |--------|----------|
-| **Cart View** | Annotated camera feed — bounding boxes, per-object distance/angle, FPS/latency overlay, mini relative map (top-right corner) |
-| **World Map** | Bird's-eye absolute map: CHUNK_MAP grid, cart position + heading arrow (white), target (green dot), obstacles (red dots), current pathfinder mode |
+| **Cart View** | Annotated camera feed — bounding boxes, per-object distance/angle, FPS/latency overlay |
 
 ---
 
@@ -189,7 +188,9 @@ Entered when the shopper cannot be found after exhausting `FOLLOW_GOAL` or `RETU
 
 ## ESP32 Motor Controller
 
-`firmware/cart_motor/cart_motor.ino` is the Arduino sketch that runs on the ESP32. It receives wheel-velocity commands from the Pi over USB and drives two TB9051FTG-controlled motors, while reporting encoder counts back.
+`firmware/cart_motor/cart_motor.ino` is the Arduino sketch that runs on the ESP32. It receives `L<rpm> R<rpm>` commands from the Pi over USB and drives two TB9051FTG-controlled motors open-loop, while reporting encoder counts back.
+
+The firmware currently treats RPM commands as an open-loop speed scale: `MAX_RPM = 100` maps to full PWM. For example, `L31 R31` is roughly the same output as `firmware/constant_motor_speed/constant_motor_speed.ino` with `MOTOR_DUTY = 80`.
 
 ### Wiring
 
@@ -202,15 +203,38 @@ Connect the ESP32 to the Pi via the CP2102 USB-UART bridge; it will enumerate as
 
 ### Build
 
-1. Install the [TB9051FTGMotorCarrier](https://github.com/pololu/tb9051ftg-motor-driver-carrier) library in Arduino IDE (Library Manager → search "TB9051FTG").
-2. Open `firmware/cart_motor/cart_motor.ino`, select your ESP32 board, and Upload.
+Open `firmware/cart_motor/cart_motor.ino`, select your ESP32 board, and Upload.
 
 ### Protocol
 
 | Direction | Format | Meaning |
 |-----------|--------|---------|
-| Pi → ESP32 | `L<rpm> R<rpm>\n` | Target wheel RPM, each side (e.g. `L42.5 R-30.0\n`) |
+| Pi → ESP32 | `L<rpm> R<rpm>\n` | Open-loop speed command, each side (e.g. `L42.5 R-30.0\n`) |
 | ESP32 → Pi | `E,<l>,<r>\n` | Cumulative signed encoder counts, sent every 50 ms |
+
+### Constant-speed motor test
+
+After flashing `firmware/cart_motor/cart_motor.ino`, run both motors at a constant open-loop speed from the Pi:
+
+```bash
+python3 -c 'import serial,time
+ser=serial.Serial("/dev/ttyUSB0",115200,timeout=0.1)
+print("running L31 R31, Ctrl-C to stop")
+try:
+    while True:
+        ser.write(b"L31 R31\n")
+        while ser.in_waiting:
+            print(ser.readline().decode(errors="replace").rstrip())
+        time.sleep(0.1)
+except KeyboardInterrupt:
+    ser.write(b"L0 R0\n")
+    ser.close()
+    print("stopped")'
+```
+
+Use `L10 R10` for a slower test, `L50 R50` for a faster one, and `L0 R0` to stop. Keep sending the command at least every 500 ms, or the ESP32 watchdog will stop the motors.
+
+There is also a standalone Arduino test sketch at `firmware/constant_motor_speed/constant_motor_speed.ino`. It does not require serial commands; it starts both motors at `MOTOR_DUTY` after upload and prints encoder counts.
 
 ### Safety
 
@@ -220,7 +244,7 @@ A 500 ms watchdog stops the motors if no `L… R…` line arrives — so a host 
 
 ## Standalone Follower (`follow.py`)
 
-A single-process reactive follower built directly from the spin + displacement control sketch — no A\* and no store map. It imports `vision/yolo_detect.py` for the calibrated target distance/angle and drives the ESP32 over the RPM protocol directly. Hardware/calibration constants (wheel geometry, encoder/motor signs, `MAX_SPEED`, `HOLD_DIST`) are imported from `Pathfinding_algorithm.py`; the control logic is independent of its state machine.
+A single-process reactive follower built directly from the spin + displacement control sketch — no A\* and no store map. It imports `vision/yolo_detect.py` for the calibrated target distance/angle and drives the ESP32 over the RPM protocol directly. Hardware/calibration constants live in `follow.py`; the control logic is independent of the pathfinder state machine.
 
 ```bash
 python3 follow.py                 # live camera + drive
@@ -236,8 +260,8 @@ python3 follow.py --trace         # echo serial traffic + control-flow calls
 
 Each frame it reads the locked shopper's `(distance, angle)` and then:
 
-1. **Centering — `Spinner`.** If `|angle| > THETA_THRESH_DEG` (8°) it engages a **non-blocking** point turn to re-square on the shopper, then skips distance that tick. `Spinner.update()` advances one tick per camera frame (it never freezes the loop): a breakaway kick (`KICK_RPM` = 18 rpm, released after `KICK_TICKS` = 45 encoder ticks) then a steady turn at `TURN_RPM`, with the kick's swept angle and inertial coast (`drift`) subtracted so the total lands on `theta`. Each phase is closed-loop on the measured swept angle and bounded by a timeout (`KICK_TIMEOUT_S`, `SPIN_TURN_TIMEOUT_S`) so a stuck/loaded turn always exits without stalling the camera loop.
-2. **Distance — PI.** Inside the centre band it holds `THRESH_M` (= `HOLD_DIST`, 2 m): `S += KP_DIST·dx + KI_DIST·(x − thresh)`, clipped to `MAX_RPM` (= `MAX_SPEED`). `dx` is a smoothed finite difference of distance. On departure from rest a separate `Kick` floors the forward speed at `KICK_RPM` until `KICK_TICKS` of encoder movement confirm breakaway. If the cart is still stalled after `KICK_TIMEOUT_S`, the kick **ramps up** by `KICK_RAMP_STEP` (up to `MAX_RPM`) and keeps trying instead of giving up. Kept out of the control law.
+1. **Centering — `Spinner`.** If `|angle| > THETA_THRESH_DEG` (4°) it engages a **non-blocking** point turn to re-square on the shopper, then skips distance that tick. `Spinner.update()` advances one tick per camera frame: a spin kick (`SPIN_KICK_RPM` = 35 rpm, released after `KICK_TICKS` = 30 encoder ticks) then a steady turn at `TURN_RPM` (= 2 rpm), with drift compensation available through `ANGULAR_INERTIA`.
+2. **Distance — PI.** Inside the centre band it holds `THRESH_M` (= `HOLD_DIST`, 2 m): `S += KP_DIST·dx + KI_DIST·(x − thresh)`, clipped to `MAX_RPM` (= 75 rpm). `dx` is a smoothed finite difference of distance. On departure from rest a separate `Kick` floors the forward speed at `KICK_RPM` (= 50 rpm) until `KICK_TICKS` of encoder movement confirm breakaway. If the cart is still stalled after `KICK_TIMEOUT_S`, the kick ramps up by `KICK_RAMP_STEP` up to `MAX_RPM`.
 3. **Mixing.** Steering `rpm_diff = KP_ANGLE·θ + KD_ANGLE·dθ` is mixed onto the wheels (`R = S + rpm_diff`, `L = S − rpm_diff`) with peak scaling so neither wheel exceeds `MAX_RPM`, then sent as `L<rpm> R<rpm>`.
 4. **Lost → reacquire.** If the shopper leaves the frame, after a `SEARCH_GRACE_S` grace period (so a one-frame dropout doesn't trigger it) the cart tries to get them back, picking by where they were last seen:
    - **Off to the side** (`|last angle| > LOST_SIDE_ANGLE_DEG`) → `Searcher` rotates toward that side, kicking (`SPIN_KICK_RPM`) to beat stall then sweeping at `SEARCH_RPM`; gives up after `SEARCH_MAX_DEG`.
@@ -247,7 +271,35 @@ Each frame it reads the locked shopper's `(distance, angle)` and then:
 
 The gains and `ANGULAR_INERTIA` / `LINEAR_INERTIA` at the top of `follow.py` are placeholders marked `[calibrate]`; inertia defaults to `0`, so drift compensation is skipped until tuned.
 
-The reused Cart View / World Map windows show `follow.py`'s own state in the **Mode** label each tick — `FOLLOW`, `SPIN`, `KICK`, `STOP`, `SEARCH`, `PURSUE`, or `LOST` — not the A\* planner's state machine. (The cart pose and dots on the World Map are still driven by the planner's odometry, which `follow.py` doesn't update, so treat those as decorative here.)
+The Cart View overlay and terminal monitor show `follow.py`'s own state each tick — `FOLLOW`, `SPIN`, `KICK`, `STOP`, `SEARCH`, `PURSUE`, or `LOST` — not the A\* planner's state machine.
+
+---
+
+## Straight Follower (`follow_straight.py`)
+
+`follow_straight.py` is the distance-only follower. It ignores steering angle for control and drives both wheels forward to hold `HOLD_DIST` from the locked shopper.
+
+```bash
+python3 follow_straight.py                 # live camera + drive
+python3 follow_straight.py --no-display    # headless (SSH)
+python3 follow_straight.py --no-drive      # vision only, no serial output
+python3 follow_straight.py --duration 30   # stop after 30 s
+```
+
+Current key limits:
+
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `MAX_RPM` | `75.0` | Maximum open-loop command sent to each wheel |
+| `KICK_RPM` | `18.0` | Breakaway floor when starting from rest |
+| `KICK_TICKS` | `45` | Encoder ticks before releasing the breakaway kick |
+| `DIST_DEADBAND_M` | `0.20` | No-drive band around the 2 m hold distance |
+
+The terminal monitor prints distance, angle, smoothed distance rate, commanded RPM, and encoder-derived actual RPM, for example:
+
+```text
+cmd L+18.0 R+18.0rpm  actual L+14.2 R+13.9rpm
+```
 
 ---
 
@@ -335,11 +387,14 @@ autonomous-shopping-cart/
 │   └── requirements.txt
 ├── Pathfinding_algorithm.py        # A* pathfinder + state machine
 ├── follow.py                       # Standalone reactive follower (spin + PI distance)
+├── follow_straight.py              # Standalone distance-only follower
 ├── pathfinding_arc_test.py         # Hardware test: spin / center / follow / track modes
 ├── start_cart.sh / stop_cart.sh    # Launch / stop the full stack detached from SSH
 ├── firmware/
-│   └── cart_motor/
-│       └── cart_motor.ino          # ESP32 motor controller (TB9051FTG)
+│   ├── cart_motor/
+│   │   └── cart_motor.ino          # ESP32 open-loop motor controller
+│   └── constant_motor_speed/
+│       └── constant_motor_speed.ino # Standalone constant-speed motor test
 └── README.md
 ```
 
