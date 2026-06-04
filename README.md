@@ -257,7 +257,7 @@ python3 pathfinding_arc_test.py --mode center --no-drive --sim-angle 15
 
 Drives the cart forward and backward to maintain `HOLD_DIST` (2.0 m) from the target. **Omega is forced to zero** — no angle correction at all. Use this to isolate and tune the distance PD controller (`DIST_KP`, `DIST_KD`) independently of the steering loop.
 
-Anti-stall kick (same parameters as center mode: `FOLLOW_KICK_RPM = 8`, `FOLLOW_KICK_RELEASE_TICKS = 30`) fires on startup and on every forward↔reverse direction change, releasing once either encoder accumulates 30 ticks.
+Anti-stall kick (reuses the center-mode parameters `CENTER_KICK_RPM = 8`, `CENTER_KICK_RELEASE_TICKS = 30`) fires on startup and on every forward↔reverse direction change, releasing once either encoder accumulates 30 ticks.
 
 ```bash
 python3 pathfinding_arc_test.py --mode follow                            # live camera (default)
