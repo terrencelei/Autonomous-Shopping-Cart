@@ -39,7 +39,7 @@ GEAR_RATIO        = 5            # motor gearbox ratio (check sticker)
 RIGHT_ENC_SIGN     = -1           # flip to +1 if right wheel counts backwards
 LEFT_ENC_SIGN    = +1
 RIGHT_MOTOR_SIGN   = -1           # flip to +1 if right motor drives wrong direction
-LEFT_MOTOR_SIGN  = +1
+LEFT_MOTOR_SIGN    = -1           # flip to +1 if left motor drives wrong direction
 
 MOTOR_PORT  = "/dev/ttyUSB0"     # CP2102 USB-UART bridge
 MOTOR_BAUD  = 115200

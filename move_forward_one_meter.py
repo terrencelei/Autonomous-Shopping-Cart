@@ -32,7 +32,8 @@ def wheel_rpm_to_speed(rpm):
 
 
 def forward_wheel_commands(speed_m_s):
-    return speed_m_s, speed_m_s
+    # LEFT_MOTOR_SIGN=-1 so negate vl to get a positive L command for forward.
+    return -speed_m_s, speed_m_s
 
 
 def flush_motors(motors):
