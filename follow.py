@@ -455,7 +455,7 @@ class FollowController:
 
 def calibrate_angular_inertia(motors, steady_ticks=80, coast_window_s=1.5):
     """Spin at SPIN_KICK_RPM, hard-stop, measure encoder coast → ANGULAR_INERTIA (s).
-    Runs automatically at startup to account for load changes between uses."""
+    Saves encoder data to calibration_angular_inertia.csv and .png."""
     global ANGULAR_INERTIA
 
     print("Calibrating angular inertia — keep the cart clear…")
@@ -466,13 +466,33 @@ def calibrate_angular_inertia(motors, steady_ticks=80, coast_window_s=1.5):
 
     motors.flush()
 
+    # ── recording buffers ──────────────────────────────────────────────────────
+    times      = []   # s since calibration start
+    left_ticks = []   # cumulative signed left encoder ticks
+    right_ticks= []   # cumulative signed right encoder ticks
+    yaws       = []   # cumulative yaw (rad, +CCW)
+    phases     = []   # "drive" or "coast" label per sample
+    cum_dl = cum_dr = 0
+    t_cal_start = time.monotonic()
+
+    def _record(dl, dr, phase):
+        nonlocal cum_dl, cum_dr
+        cum_dl += dl
+        cum_dr += dr
+        times.append(time.monotonic() - t_cal_start)
+        left_ticks.append(cum_dl)
+        right_ticks.append(cum_dr)
+        yaws.append(_ticks_to_yaw(cum_dl, cum_dr))
+        phases.append(phase)
+
     # ── phase 1: spin at SPIN_KICK_RPM until steady_ticks accumulate ──────────
-    motors.send_rpm(-SPIN_KICK_RPM, +SPIN_KICK_RPM)   # CCW point turn
+    motors.send_rpm(-SPIN_KICK_RPM, +SPIN_KICK_RPM)
     drive_ticks = 0
     t0 = time.monotonic()
     while drive_ticks < steady_ticks:
         time.sleep(0.005)
         dl, dr = motors.read_deltas()
+        _record(dl, dr, "drive")
         drive_ticks += abs(dl) + abs(dr)
         if time.monotonic() - t0 > 5.0:
             print("  WARNING: cart did not reach steady_ticks — ANGULAR_INERTIA stays 0.0")
@@ -482,12 +502,14 @@ def calibrate_angular_inertia(motors, steady_ticks=80, coast_window_s=1.5):
     # ── phase 2: hard stop ─────────────────────────────────────────────────────
     motors.stop()
     t_stop = time.monotonic()
+    t_stop_rel = t_stop - t_cal_start   # for the plot marker
 
     # ── phase 3: collect coast ticks ───────────────────────────────────────────
     coast_dl = coast_dr = 0
     while time.monotonic() - t_stop < coast_window_s:
         time.sleep(0.005)
         dl, dr = motors.read_deltas()
+        _record(dl, dr, "coast")
         coast_dl += dl
         coast_dr += dr
 
@@ -500,6 +522,64 @@ def calibrate_angular_inertia(motors, steady_ticks=80, coast_window_s=1.5):
           f"omega {omega_kick:.3f} rad/s  → ANGULAR_INERTIA = {result:.5f} s")
 
     ANGULAR_INERTIA = result
+
+    # ── save CSV ───────────────────────────────────────────────────────────────
+    csv_path = "calibration_angular_inertia.csv"
+    with open(csv_path, "w") as f:
+        f.write("time_s,left_ticks,right_ticks,yaw_rad,yaw_deg,phase\n")
+        for i in range(len(times)):
+            f.write(f"{times[i]:.4f},{left_ticks[i]},{right_ticks[i]},"
+                    f"{yaws[i]:.5f},{math.degrees(yaws[i]):.3f},{phases[i]}\n")
+    print(f"  CSV saved → {csv_path}")
+
+    # ── save PNG ───────────────────────────────────────────────────────────────
+    try:
+        import matplotlib
+        matplotlib.use("Agg")          # always render off-screen first
+        import matplotlib.pyplot as plt
+
+        yaws_deg = [math.degrees(y) for y in yaws]
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+        fig.suptitle(f"Angular Inertia Calibration  —  ANGULAR_INERTIA = {result:.5f} s")
+
+        # top: raw encoder ticks
+        ax1.plot(times, left_ticks,  label="left ticks",  color="steelblue")
+        ax1.plot(times, right_ticks, label="right ticks", color="coral")
+        ax1.axvline(t_stop_rel, color="black", linestyle="--", linewidth=1, label="stop cmd")
+        ax1.set_ylabel("Cumulative encoder ticks")
+        ax1.legend(loc="upper left")
+        ax1.grid(True, alpha=0.3)
+
+        # bottom: yaw
+        ax2.plot(times, yaws_deg, color="mediumpurple", label="yaw (deg)")
+        ax2.axvline(t_stop_rel, color="black", linestyle="--", linewidth=1, label="stop cmd")
+        ax2.axhline(math.degrees(yaws[phases.index("coast")]) if "coast" in phases else 0,
+                    color="grey", linestyle=":", linewidth=1)
+        ax2.set_ylabel("Cumulative yaw (°)")
+        ax2.set_xlabel("Time (s)")
+        ax2.legend(loc="upper left")
+        ax2.grid(True, alpha=0.3)
+
+        # shade drive vs coast regions
+        for ax in (ax1, ax2):
+            ax.axvspan(0, t_stop_rel, alpha=0.06, color="steelblue", label="_drive")
+            ax.axvspan(t_stop_rel, times[-1], alpha=0.06, color="coral", label="_coast")
+
+        plt.tight_layout()
+        png_path = "calibration_angular_inertia.png"
+        plt.savefig(png_path, dpi=150)
+        print(f"  PNG saved → {png_path}")
+
+        if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+            matplotlib.use("TkAgg")    # switch to interactive backend
+            plt.show()
+
+        plt.close(fig)
+
+    except ImportError:
+        print("  matplotlib not found — skipping PNG (pip install matplotlib)")
+
     motors.flush()
     return result
 
