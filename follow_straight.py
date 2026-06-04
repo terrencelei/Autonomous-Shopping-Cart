@@ -190,6 +190,69 @@ class MotorIO:
 
 
 # =============================================================================
+# SPIN  — point-turn through theta_rad (+CCW / left)
+# =============================================================================
+
+def _turn_wheels(motors, wheel_rpm, direction):
+    """Command a point turn at wheel_rpm * direction (+1 = CCW/left)."""
+    motors.send_rpm(-direction * wheel_rpm, +direction * wheel_rpm)
+
+
+def spin(theta_rad, motors):
+    """Re-square on the target by turning through ``theta_rad`` (+CCW/left).
+
+    With encoders present each phase is closed-loop on the measured swept angle;
+    without them it falls back to open-loop timing.
+    """
+    if abs(theta_rad) < math.radians(SPIN_DEADBAND_DEG):
+        return
+    direction = 1.0 if theta_rad > 0 else -1.0
+    target = abs(theta_rad)
+    omega_kick = _rpm_to_yaw(KICK_RPM)
+    omega_turn = _rpm_to_yaw(TURN_RPM)
+    closed_loop = motors is not None and motors.has_serial
+
+    if closed_loop:
+        motors.flush()
+        _turn_wheels(motors, KICK_RPM, direction)
+        acc_ticks = 0
+        phi = 0.0
+        t_timeout = time.monotonic() + 1.5
+        while acc_ticks < KICK_TICKS and time.monotonic() < t_timeout:
+            time.sleep(DT)
+            dl, dr = motors.read_deltas()
+            acc_ticks += abs(dl) + abs(dr)
+            phi += abs(_ticks_to_yaw(dl, dr))
+    else:
+        kick_time = KICK_TICKS / TICKS_PER_SEC
+        if motors is not None:
+            _turn_wheels(motors, KICK_RPM, direction)
+            time.sleep(kick_time)
+        phi = omega_kick * kick_time
+
+    kick_drift = drift(omega_kick, omega_turn, ANGULAR_INERTIA)
+    stop_drift = drift(omega_turn, 0.0, ANGULAR_INERTIA)
+    theta_2 = target - phi - kick_drift - stop_drift
+
+    if theta_2 > 0.0 and omega_turn > 0.0:
+        if closed_loop:
+            _turn_wheels(motors, TURN_RPM, direction)
+            swept = 0.0
+            t_timeout = time.monotonic() + theta_2 / omega_turn + 1.5
+            while swept < theta_2 and time.monotonic() < t_timeout:
+                time.sleep(DT)
+                dl, dr = motors.read_deltas()
+                swept += abs(_ticks_to_yaw(dl, dr))
+        else:
+            if motors is not None:
+                _turn_wheels(motors, TURN_RPM, direction)
+            time.sleep(theta_2 / omega_turn)
+
+    if motors is not None:
+        motors.stop()
+
+
+# =============================================================================
 # FOLLOW CONTROLLER  (per-tick distance + steering, from the pseudocode)
 # =============================================================================
 
@@ -372,7 +435,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
                             S = math.copysign(max(abs(S), KICK_RPM), S)
                             ctrl.S = S      # keep the PI integrator consistent
                     prev_S = S
-                    l_rpm, r_rpm = S
+                    l_rpm = r_rpm = S
                     motors.send_rpm(l_rpm, r_rpm)
 
             if t - last_log >= 0.5:
