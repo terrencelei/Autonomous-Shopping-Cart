@@ -217,7 +217,8 @@ class FollowController:
         if motors is not None:
             motors.send_rpm(0.0, 0.0)
 
-    def step(self, x, angle_deg, dt, motors=None):
+    def step(self, x, dt, motors=None):
+        # Distance is the ONLY input — no angle/steering term by design.
         self._derivatives(x, dt)
 
         error = x - THRESH_M
@@ -311,9 +312,8 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
                 x = angle_deg = None
             else:
                 x = target_row[3]          # calibrated distance (m)
-                angle_deg = target_row[4]  # calibrated angle (deg, +right)
-                res = ctrl.step(x, angle_deg, dt, motors=motors)
-                S = res
+                angle_deg = target_row[4]  # read for the status readout only — never steered on
+                S = ctrl.step(x, dt, motors=motors)
                 d_l, d_r = motors.read_deltas()
                 actual_l_rpm = _ticks_to_rpm(d_l, dt)
                 actual_r_rpm = _ticks_to_rpm(d_r, dt)
@@ -327,7 +327,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
                         S = math.copysign(max(abs(S), KICK_RPM), S)
                         ctrl.S = S         # keep the PI integrator consistent
                 prev_S = S
-                l_rpm = r_rpm = S
+                l_rpm = r_rpm = S          # straight only: identical L/R, no steering
                 cmd_l_rpm, cmd_r_rpm = l_rpm, r_rpm
                 motors.send_rpm(l_rpm, r_rpm)
 
