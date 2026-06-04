@@ -210,6 +210,34 @@ def run_spin(drive=True, port=None, countdown=3):
             # radians when running --no-drive
             if motors is not None:
                 if measured_ticks >= TICKS_360:
+                    motors.stop()
+                    print("Target ticks reached — draining coast ticks...")
+                    # Keep reading until the cart has fully stopped (no new
+                    # ticks for COAST_IDLE_LOOPS consecutive DT periods)
+                    COAST_IDLE_LOOPS = 10
+                    idle = 0
+                    while idle < COAST_IDLE_LOOPS:
+                        time.sleep(P.DT)
+                        d_l, d_r = motors.read_encoder_deltas()
+                        if abs(d_l) + abs(d_r) == 0:
+                            idle += 1
+                        else:
+                            idle = 0
+                        cum_l += d_l; cum_r += d_r
+                        abs_ticks_l += abs(d_l)
+                        abs_ticks_r += abs(d_r)
+                        enc_right_delta.append(d_l); enc_left_delta.append(d_r)
+                        enc_right_cum.append(cum_l); enc_left_cum.append(cum_r)
+                        t_coast = times[-1] + P.DT * (len(enc_right_delta) - len(times))
+                        times.append(t_coast)
+                        encoder_degrees.append(
+                            (sum(t for t in (abs_ticks_l, abs_ticks_r) if t > 0)
+                             / max(sum(1 for t in (abs_ticks_l, abs_ticks_r) if t > 0), 1))
+                            / TICKS_360 * 360.0)
+                        robot_xs.append(pos[0]); robot_ys.append(pos[1])
+                        robot_thetas.append(heading)
+                        v_fwds.append(0.0); omegas.append(0.0)
+                        v_lefts.append(0.0); v_rights.append(0.0)
                     break
             else:
                 if turned >= 2 * math.pi:
@@ -223,7 +251,6 @@ def run_spin(drive=True, port=None, countdown=3):
                     time.sleep(P.DT - elapsed)
     finally:
         if motors is not None:
-            print("\nStopping motors.")
             motors.stop()
 
     elapsed_s = len(times) * P.DT
