@@ -65,7 +65,8 @@ CAM_W, CAM_H, CAM_FPS = 640, 480, 30
 # Proven breakaway kick (see memory: cart-drive-calibration)
 KICK_RPM      = 50.0  # wheel RPM burst to overcome static friction
 KICK_TICKS    = 30    # release the kick once this many encoder ticks accumulate
-KICK_TIMEOUT_S = 1.0  # give up holding the kick after this long if no movement is seen
+KICK_TIMEOUT_S = 1.0  # if still stalled after this long, ramp the kick up (don't give up)
+KICK_RAMP_STEP = 10.0 # wheel RPM added to the kick each KICK_TIMEOUT_S it stays stalled
 TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop fallback
 
 # Spin (point-turn) controller
@@ -362,25 +363,33 @@ class Kick:
     """Encoder-confirmed forward breakaway.
 
     Armed when the cart departs from rest; stays active until KICK_TICKS of
-    encoder movement accumulate (proving it broke free) or KICK_TIMEOUT_S
-    elapses.  While active the caller floors the forward-speed magnitude at
-    KICK_RPM.  Kept separate from the control law so FollowController stays a
-    pure PI + steering controller.
+    encoder movement accumulate (proving it broke free).  While active the
+    caller floors the forward-speed magnitude at ``self.rpm``.  If the cart is
+    still stalled after KICK_TIMEOUT_S, the kick RAMPS UP by KICK_RAMP_STEP
+    (instead of giving up) and keeps trying, up to MAX_RPM.  Kept separate from
+    the control law so FollowController stays a pure PI + steering controller.
     """
 
     def __init__(self):
         self._active = False
         self._ticks = 0
         self._t0 = 0.0
+        self._rpm = KICK_RPM
 
     @property
     def active(self):
         return self._active
 
+    @property
+    def rpm(self):
+        """Current kick floor — starts at KICK_RPM, ramps up while stalled."""
+        return self._rpm
+
     def arm(self):
         self._active = True
         self._ticks = 0
         self._t0 = time.monotonic()
+        self._rpm = KICK_RPM
         _trace(f"kick.arm()  floor forward speed to {KICK_RPM}rpm until {KICK_TICKS} ticks")
 
     def cancel(self):
@@ -389,7 +398,8 @@ class Kick:
 
     def update(self, d_l, d_r):
         """Feed this tick's encoder deltas; release once movement is confirmed
-        (KICK_TICKS) or the timeout expires."""
+        (KICK_TICKS). If still stalled past KICK_TIMEOUT_S, ramp the kick up by
+        KICK_RAMP_STEP (capped at MAX_RPM) and keep trying instead of giving up."""
         if not self._active:
             return
         self._ticks += abs(d_l) + abs(d_r)
@@ -397,8 +407,10 @@ class Kick:
             self._active = False
             _trace(f"kick released: {self._ticks} ticks (breakaway confirmed)")
         elif (time.monotonic() - self._t0) >= KICK_TIMEOUT_S:
-            self._active = False
-            _trace(f"kick released: timeout after {KICK_TIMEOUT_S}s ({self._ticks} ticks)")
+            self._rpm = min(self._rpm + KICK_RAMP_STEP, MAX_RPM)
+            self._ticks = 0
+            self._t0 = time.monotonic()
+            _trace(f"kick ramp → {self._rpm:.0f}rpm (still stalled)")
 
 
 class FollowController:
@@ -726,8 +738,8 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                         if prev_S == 0.0:  # departing from rest
                             kick.arm()
                         kick.update(d_l, d_r)
-                        if kick.active:    # floor the speed until breakaway is confirmed
-                            S = math.copysign(max(abs(S), KICK_RPM), S)
+                        if kick.active:    # floor the speed at the (ramping) kick level
+                            S = math.copysign(max(abs(S), kick.rpm), S)
                             ctrl.S = S      # keep the PI integrator consistent
                         mode_str = "KICK" if kick.active else "FOLLOW"
                     prev_S = S
