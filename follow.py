@@ -661,7 +661,7 @@ def calibrate_angular_inertia(motors, steady_ticks=80, coast_window_s=1.5):
 # =============================================================================
 
 def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
-    global TRACE
+    global TRACE, ANGULAR_INERTIA
     TRACE = trace
     try:
         from vision import yolo_detect as Y
