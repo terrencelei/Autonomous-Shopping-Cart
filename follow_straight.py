@@ -75,6 +75,13 @@ KD_DIST        = 8.0         # RPM per (m/s) target-distance closing rate
 DX_ALPHA       = 0.2         # EMA factor for smoothed dx/dt
 RPM_SLEW_PER_S = 35.0        # max command change per second
 
+# Straight-line heading hold (encoder-driven). Trims the two wheels to keep
+# their travel equal so the cart doesn't curve on uneven friction. NOT camera /
+# angle steering — it only cancels drift to hold the heading it started with.
+STRAIGHT_KP       = 0.20     # RPM trim per tick of accumulated L-R imbalance   [calibrate]
+STRAIGHT_KD       = 2.0      # RPM trim per tick of this-tick L-R imbalance      [calibrate]
+STRAIGHT_TRIM_MAX = 15.0     # cap on the heading-hold trim (RPM)
+
 # =============================================================================
 # HELPERS
 # =============================================================================
@@ -282,6 +289,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
     motors.flush()
     kick = Kick()
     prev_S = 0.0
+    heading_err = 0.0          # accumulated L-R encoder imbalance for the current segment
     start = time.monotonic()
     prev_t = start
     last_log = 0.0
@@ -310,6 +318,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
                 ctrl.target_lost(motors)
                 kick.cancel()
                 prev_S = 0.0
+                heading_err = 0.0
                 cmd_l_rpm = cmd_r_rpm = 0.0
                 actual_l_rpm = actual_r_rpm = 0.0
                 x = angle_deg = None
@@ -320,17 +329,26 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
                 d_l, d_r = motors.read_deltas()
                 actual_l_rpm = _ticks_to_rpm(d_l, dt)
                 actual_r_rpm = _ticks_to_rpm(d_r, dt)
-                if S == 0.0:               # holding station (too close) — no kick
+                if S == 0.0:               # holding station (too close) — stop; reset heading hold
                     kick.cancel()
+                    heading_err = 0.0
+                    l_rpm = r_rpm = 0.0
                 else:
-                    if prev_S == 0.0:      # departing from rest
+                    if prev_S == 0.0:      # departing from rest: start a fresh straight segment
                         kick.arm()
+                        heading_err = 0.0
                     kick.update(d_l, d_r)
                     if kick.active:        # floor the speed until breakaway is confirmed
                         S = math.copysign(max(abs(S), KICK_RPM), S)
-                        ctrl.S = S         # keep the PI integrator consistent
+                        ctrl.S = S         # keep the integrator consistent
+                    # Straight-line heading hold (encoder-driven, NOT camera steering):
+                    # trim the lagging wheel up so left/right travel stays equal.
+                    heading_err += (d_l - d_r)
+                    trim = _clip(STRAIGHT_KP * heading_err + STRAIGHT_KD * (d_l - d_r),
+                                 -STRAIGHT_TRIM_MAX, STRAIGHT_TRIM_MAX)
+                    l_rpm = _clip(S - trim, 0.0, MAX_RPM)
+                    r_rpm = _clip(S + trim, 0.0, MAX_RPM)
                 prev_S = S
-                l_rpm = r_rpm = S          # straight only: identical L/R, no steering
                 cmd_l_rpm, cmd_r_rpm = l_rpm, r_rpm
                 motors.send_rpm(l_rpm, r_rpm)
 
