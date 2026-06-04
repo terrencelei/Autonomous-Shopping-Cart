@@ -682,17 +682,41 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
 
         dist    = m["dist"]
         angle   = m["angle"]
-        clothes = m["color_name"]
+        profile = m["color_profile"]
 
         thickness = 3 if is_target else 2
         cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
 
-        label = f"{role} {label_id} {clothes} {dist:.1f}m {angle:+.1f}deg"
+        label = f"{role} {label_id} {dist:.1f}m {angle:+.1f}deg"
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
         top = max(int(y1) - 10, th + 4)
         cv2.rectangle(out, (int(x1), top - th - 4), (int(x1) + tw, top), color, -1)
         cv2.putText(out, label, (int(x1), top - 2),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
+
+        # Draw the color profile as a vertical strip of swatches just inside
+        # the left edge of the bounding box.  Each swatch is one chunk; its
+        # BGR is converted back from the stored HSV (V re-scaled to a legible
+        # fixed brightness so swatches are readable regardless of scene lighting).
+        if profile is not None:
+            swatch_w = max(6, int((x2 - x1) * 0.06))
+            swatch_h = max(2, int((y2 - y1) / N_PROFILE_CHUNKS))
+            strip_x  = int(x1) + thickness + 1
+            for ci in range(N_PROFILE_CHUNKS):
+                sy1 = int(y1) + ci * swatch_h
+                sy2 = sy1 + swatch_h
+                h_val = float(profile[ci, 0])
+                s_val = float(profile[ci, 1])
+                v_val = float(np.clip(profile[ci, 2] * 128, 0, 255))
+                hsv_px  = np.uint8([[[h_val, s_val, v_val]]])
+                bgr_px  = cv2.cvtColor(hsv_px, cv2.COLOR_HSV2BGR)[0, 0].tolist()
+                cv2.rectangle(out, (strip_x, sy1), (strip_x + swatch_w, sy2),
+                              bgr_px, -1)
+            cv2.rectangle(out,
+                          (strip_x, int(y1) + thickness + 1),
+                          (strip_x + swatch_w,
+                           int(y1) + thickness + 1 + N_PROFILE_CHUNKS * swatch_h),
+                          (255, 255, 255), 1)
 
         rows.append((role, label_id, conf, dist, angle))
 
