@@ -947,7 +947,7 @@ def run_follow(drive=True, port=None, countdown=3, duration=30.0, sim_dist=None)
             v_left, v_right = P._wheel_commands(v_forward, 0.0)
 
             if motors is not None:
-                motors.send(v_left, -v_right)
+                motors.send(v_left, v_right)
 
             cum_l += d_l; cum_r += d_r
             enc_right_delta.append(d_l); enc_left_delta.append(d_r)
@@ -1098,7 +1098,7 @@ def run_follow_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                 cum_l += d_l; cum_r += d_r
 
                 if motors is not None:
-                    motors.send(v_left, -v_right)
+                    motors.send(v_left, v_right)
                 last_tick = now
 
                 times.append(t)
