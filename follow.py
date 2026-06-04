@@ -69,6 +69,7 @@ KICK_TIMEOUT_S = 1.0  # give up holding the kick after this long if no movement 
 TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop fallback
 
 # Spin (point-turn) controller
+SPIN_KICK_RPM     = 9.0    # breakaway burst for a point turn (half the forward KICK_RPM)
 TURN_RPM          = 6.0    # steady wheel RPM during the turn after the kick
 ANGULAR_INERTIA   = 0.0    # s — yaw coast factor; drift = (w0-w1)*inertia   [calibrate]
 THETA_THRESH_DEG  = 8.0    # follow loop: re-centre with spin() once |angle| exceeds this
@@ -268,10 +269,10 @@ class Spinner:
         if self._phase == "kick":
             self._kick_ticks += abs(d_l) + abs(d_r)
             self._phi += swept_inc
-            cmd_rpm = KICK_RPM
+            cmd_rpm = SPIN_KICK_RPM
             if self._kick_ticks >= KICK_TICKS or (now - self._t0) >= KICK_TIMEOUT_S:
                 omega_turn = _rpm_to_yaw(TURN_RPM)
-                kick_drift = drift(_rpm_to_yaw(KICK_RPM), omega_turn, ANGULAR_INERTIA)
+                kick_drift = drift(_rpm_to_yaw(SPIN_KICK_RPM), omega_turn, ANGULAR_INERTIA)
                 stop_drift = drift(omega_turn, 0.0, ANGULAR_INERTIA)
                 self._theta2 = self._target - self._phi - kick_drift - stop_drift
                 self._phase = "turn"
