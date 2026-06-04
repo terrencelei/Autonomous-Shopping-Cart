@@ -62,7 +62,7 @@ RPK_MODEL_PATH = Path(
     "/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk"
 )
 
-PERSON_CONFIDENCE = 0.6
+PERSON_CONFIDENCE = 0.5
 PERSON_CLASS_ID   = 0   # COCO "person" in the labels shipped with imx500-models
 
 PERSON_HEIGHT_M   = 1.8
@@ -410,10 +410,16 @@ class TargetLock:
         self.last_seen               = 0.0
         self.last_dist               = None
         self.last_angle              = None
-        self.reference_profile       = None   # FIXED on first detection
+        self.reference_profile       = None   # set once accumulation is complete
         self.color_profile           = None   # EMA for display only
         self.switch_candidate_id     = None
         self.switch_candidate_frames = 0
+
+        # Accumulation state: collect profiles over the first unbroken bbox run
+        # before committing a reference.  Once reference_profile is set, these
+        # are no longer used.
+        self._accum_id       = None    # track ID being accumulated
+        self._accum_profiles = []      # list of (N_PROFILE_CHUNKS, 3) arrays
 
     def choose(self, measurements, now):
         if not measurements:
@@ -425,18 +431,49 @@ class TargetLock:
             return None
 
         # ------------------------------------------------------------------ #
-        # First ever detection: lock onto the closest person and save their
-        # color profile as the permanent reference.
+        # Accumulation phase: before reference_profile is committed, collect
+        # color profiles over every frame the first person's bbox is unbroken.
+        # The reference is finalised (averaged) as soon as that bbox breaks.
         # ------------------------------------------------------------------ #
         if self.reference_profile is None:
             best = min(measurements, key=lambda m: m["score"])
-            self._lock_first(best, now)
-            prof_status = "color profile saved" if best["color_profile"] is not None \
-                          else "NO color profile (box too small)"
-            print(f"[LOCK] *** INITIAL LOCK on ID{best['track_id']} ***  "
-                  f"dist={best['dist']:.1f}m  angle={best['angle']:+.1f}deg  "
-                  f"{prof_status}")
-            return best["index"]
+            tid  = best["track_id"]
+
+            if self._accum_id is None:
+                # Very first detection — start accumulating
+                self._accum_id = tid
+                if best["color_profile"] is not None:
+                    self._accum_profiles.append(best["color_profile"].copy())
+                self.locked_id  = tid
+                self.last_seen  = now
+                self.last_dist  = best["dist"]
+                self.last_angle = best["angle"]
+                print(f"[LOCK] First detection ID{tid} — accumulating profile "
+                      f"(frame 1)  dist={best['dist']:.1f}m")
+                return best["index"]
+
+            # Check whether the accumulated person is still in frame
+            accum_present = any(m["track_id"] == self._accum_id for m in measurements)
+
+            if accum_present:
+                m_accum = next(m for m in measurements if m["track_id"] == self._accum_id)
+                if m_accum["color_profile"] is not None:
+                    self._accum_profiles.append(m_accum["color_profile"].copy())
+                self.last_seen  = now
+                self.last_dist  = m_accum["dist"]
+                self.last_angle = m_accum["angle"]
+                print(f"[LOCK] Accumulating ID{self._accum_id} — "
+                      f"{len(self._accum_profiles)} frames so far  "
+                      f"dist={m_accum['dist']:.1f}m")
+                return next(i for i, m in enumerate(measurements)
+                            if m["track_id"] == self._accum_id)
+            else:
+                # Bbox broke — commit the averaged reference now
+                self._commit_reference()
+                print(f"[LOCK] *** REFERENCE COMMITTED from {len(self._accum_profiles)} "
+                      f"frames for ID{self._accum_id} ***  "
+                      f"profile={'OK' if self.reference_profile is not None else 'NONE'}")
+                # Fall through to normal tracking logic below
 
         # ------------------------------------------------------------------ #
         # ref_similarity is pre-computed (10-frame smoothed) by annotate_frame.
@@ -538,15 +575,15 @@ class TargetLock:
     # Internal helpers
     # ---------------------------------------------------------------------- #
 
-    def _lock_first(self, measurement, now):
-        """Called exactly once — saves the permanent reference profile."""
-        self.locked_id  = measurement["track_id"]
-        self.last_seen  = now
-        self.last_dist  = measurement["dist"]
-        self.last_angle = measurement["angle"]
-        if measurement["color_profile"] is not None:
-            self.reference_profile = measurement["color_profile"].copy()
-            self.color_profile     = measurement["color_profile"].copy()
+    def _commit_reference(self):
+        """Average all accumulated profiles into the fixed reference."""
+        if self._accum_profiles:
+            stacked = np.stack(self._accum_profiles, axis=0)  # (N, chunks, 3)
+            avg     = stacked.mean(axis=0).astype(np.float32)
+            self.reference_profile = avg
+            self.color_profile     = avg.copy()
+        # Lock onto the accumulated ID
+        self.locked_id               = self._accum_id
         self.switch_candidate_id     = None
         self.switch_candidate_frames = 0
 
