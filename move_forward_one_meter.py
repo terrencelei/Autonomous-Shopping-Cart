@@ -32,8 +32,7 @@ def wheel_rpm_to_speed(rpm):
 
 
 def forward_wheel_commands(speed_m_s):
-    # MotorDriver applies RIGHT_MOTOR_SIGN, so opposite API signs drive straight.
-    return speed_m_s, -speed_m_s
+    return speed_m_s, speed_m_s
 
 
 def flush_motors(motors):
