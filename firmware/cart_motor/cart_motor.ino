@@ -101,7 +101,11 @@ void IRAM_ATTR leftISR() {
 const float MAX_RPM = 100.0f;                 // calibrate to your hardware
 const float ENCODER_PPR = 298.0f;             // must match Pathfinding_algorithm.py
 const float RIGHT_RPM_SIGN = -1.0f;           // flip if measured RPM sign is reversed
-const float LEFT_RPM_SIGN = -1.0f;
+const float LEFT_RPM_SIGN  = +1.0f;           // left encoder counts the opposite way to the
+                                              // right for forward motion (confirmed by the
+                                              // hand-push sniff test); must DIFFER from
+                                              // RIGHT_RPM_SIGN or the left speed loop has
+                                              // positive feedback and runs away to full output.
 
 const unsigned long CONTROL_INTERVAL_MS = 20; // 50 Hz wheel-speed PID
 const unsigned long WATCHDOG_MS        = 500;
@@ -118,6 +122,8 @@ struct WheelPid {
   float integral = 0.0f;
   float output = 0.0f;
   long lastCount = 0;
+  float faultTimer = 0.0f;   // seconds the integrator has been pinned at its limit
+  bool  faulted = false;     // latched off after a sustained feedback fault
 };
 
 WheelPid rightPid;
@@ -128,6 +134,14 @@ const float RPM_KI = 0.020f;
 const float INTEGRAL_LIMIT = 25.0f;
 const float MOTOR_MIN_OUTPUT = 0.08f;
 const float STOP_RPM_EPS = 0.5f;
+
+// Feedback-fault guard. A healthy speed loop settles with a small integrator;
+// if the integrator stays pinned at its limit the wheel is not responding to
+// drive the way its encoder reports (dead / disconnected / reversed encoder, or
+// a stalled wheel). Instead of letting that wind up into a full-throttle
+// runaway, latch that motor off until it is next commanded to stop.
+const float FAULT_INTEGRAL_FRAC = 0.95f;  // integrator this close to the limit = not converging
+const float FAULT_TIME_S        = 0.50f;  // ...held this long before the motor is latched off
 
 float clampf(float v, float lo, float hi) {
   if (v < lo) return lo;
@@ -142,10 +156,19 @@ void readEncoderCounts(long &right, long &left) {
   interrupts();
 }
 
-float updatePid(WheelPid &pid, float measuredRPM, float dt) {
+float updatePid(WheelPid &pid, float measuredRPM, float dt, const char *name) {
   pid.measuredRPM = measuredRPM;
 
   if (fabs(pid.targetRPM) < STOP_RPM_EPS) {
+    pid.integral = 0.0f;
+    pid.output = 0.0f;
+    pid.faultTimer = 0.0f;
+    pid.faulted = false;          // a commanded stop re-arms the guard
+    return 0.0f;
+  }
+
+  // Latched fault: stay off until the next commanded stop clears it above.
+  if (pid.faulted) {
     pid.integral = 0.0f;
     pid.output = 0.0f;
     return 0.0f;
@@ -153,6 +176,22 @@ float updatePid(WheelPid &pid, float measuredRPM, float dt) {
 
   float error = pid.targetRPM - measuredRPM;
   pid.integral = clampf(pid.integral + error * dt, -INTEGRAL_LIMIT, INTEGRAL_LIMIT);
+
+  // A pinned integrator means the loop cannot make the wheel track its target —
+  // lost or wrong-signed encoder feedback, or a stalled wheel. Time it, and latch
+  // the motor off rather than drive it to the full-throttle runaway.
+  if (fabs(pid.integral) >= FAULT_INTEGRAL_FRAC * INTEGRAL_LIMIT) {
+    pid.faultTimer += dt;
+    if (pid.faultTimer >= FAULT_TIME_S) {
+      pid.faulted = true;
+      pid.output = 0.0f;
+      Serial.print("FAULT ");     // announced once; host ignores non-"E," lines
+      Serial.println(name);
+      return 0.0f;
+    }
+  } else {
+    pid.faultTimer = 0.0f;
+  }
 
   float feedforward = pid.targetRPM / MAX_RPM;
   pid.output = clampf(feedforward
@@ -178,6 +217,8 @@ void stopMotors() {
   leftPid.integral = 0.0f;
   rightPid.output = 0.0f;
   leftPid.output = 0.0f;
+  rightPid.faultTimer = leftPid.faultTimer = 0.0f;
+  rightPid.faulted = leftPid.faulted = false;
   rightMotor.setOutput(0.0f);
   leftMotor.setOutput(0.0f);
 }
@@ -200,8 +241,8 @@ void updateMotorPid(unsigned long nowMs) {
   float rightMeasured = RIGHT_RPM_SIGN * (rightDelta / ENCODER_PPR) * (60.0f / dt);
   float leftMeasured = LEFT_RPM_SIGN * (leftDelta / ENCODER_PPR) * (60.0f / dt);
 
-  rightMotor.setOutput(updatePid(rightPid, rightMeasured, dt));
-  leftMotor.setOutput(updatePid(leftPid, leftMeasured, dt));
+  rightMotor.setOutput(updatePid(rightPid, rightMeasured, dt, "R"));
+  leftMotor.setOutput(updatePid(leftPid, leftMeasured, dt, "L"));
 }
 
 // Parse "L<rpm> R<rpm>" — tolerates extra whitespace.
