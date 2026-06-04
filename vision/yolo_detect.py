@@ -75,51 +75,35 @@ ANGLE_OFFSET_DEG  = 2.0
 COLOR_TARGET   = (0, 255, 0)
 COLOR_OBSTACLE = (0, 0, 255)
 
-MAP_SIZE    = 200
-MAP_RANGE_M = 10.0
-
 TARGET_DIST_WEIGHT  = 1.0
 TARGET_ANGLE_WEIGHT = 0.3
 
-DIST_EMA_ALPHA = 0.4
+DIST_EMA_ALPHA  = 0.4
 ANGLE_EMA_ALPHA = 0.4
-TARGET_LOST_TIMEOUT_S = 0.75
-TARGET_SWITCH_MARGIN = 2.0
-TARGET_SWITCH_FRAMES = 12
+
+TARGET_LOST_TIMEOUT_S        = 0.75
+TARGET_SWITCH_MARGIN         = 2.0
+TARGET_SWITCH_FRAMES         = 12
 TARGET_REID_MAX_DIST_DELTA_M = 1.0
 TARGET_REID_MAX_ANGLE_DELTA_DEG = 12.0
-TARGET_COLOR_EMA_ALPHA = 0.25
-TARGET_COLOR_REID_MIN_SCORE = 0.45
-TARGET_COLOR_SWITCH_MIN_SCORE = 0.35
-TARGET_COLOR_SWITCH_PENALTY = 1.5
+
+TARGET_COLOR_EMA_ALPHA        = 0.25
+TARGET_COLOR_REID_MIN_SCORE   = 0.60   # tightened from 0.45
+TARGET_COLOR_SWITCH_MIN_SCORE = 0.50   # tightened from 0.35
+TARGET_COLOR_SWITCH_PENALTY   = 1.5
 
 # --------------------------------------------------------------------------- #
 # Color profile tuning
 # --------------------------------------------------------------------------- #
-# Number of vertical chunks in the 1-D color profile
 N_PROFILE_CHUNKS = 12
 
-# Fraction to trim from each edge of the bounding box before profiling.
-# Reduces background bleed; 0.12 horizontal, 0.08 vertical is a good start.
-BOX_TRIM_X = 0.12
-BOX_TRIM_Y = 0.08
-
-# Width of the surrounding band (pixels each side) used for V normalisation.
-# A wider band is more stable but may sample other objects.
+BOX_TRIM_X  = 0.12
+BOX_TRIM_Y  = 0.08
 SURROUND_PX = 12
+MIN_ROW_PX  = 4
 
-# Minimum number of foreground pixels in a row for the row to be included.
-# Rows below this threshold (e.g. at small distances) are skipped.
-MIN_ROW_PX = 4
-
-# Background-rejection thresholds: a pixel in the box is called "background"
-# and excluded if its H and S are both within these deltas of the surrounding
-# band average.  Set large to disable (effectively no per-pixel rejection).
 BG_HUE_DELTA = 18   # degrees (0-179 OpenCV scale)
 BG_SAT_DELTA = 30   # 0-255
-
-# World-map window
-WORLD_MAP_PX = 500
 
 
 # =========================================================================== #
@@ -151,7 +135,7 @@ class IMX500Capture:
         return True
 
     def read(self):
-        req = self._picam2.capture_request()
+        req   = self._picam2.capture_request()
         frame = req.make_array("main")
         self._meta = req.get_metadata()
         req.release()
@@ -236,7 +220,7 @@ def normalize_track_id(tid):
 
 
 # =========================================================================== #
-# Color profile  (replaces clothing_color_hist)
+# Color profile
 # =========================================================================== #
 
 def clothing_color_profile(hsv_frame, xyxy):
@@ -245,21 +229,17 @@ def clothing_color_profile(hsv_frame, xyxy):
 
     Pipeline
     --------
-    1. Convert full frame to HSV *before* calling this function (done once in
-       annotate_frame and passed in as hsv_frame).
-    2. Tighten the bounding box inward by BOX_TRIM_X / BOX_TRIM_Y.
-    3. Sample the surrounding band (SURROUND_PX wide) to get the local
+    1. Tighten the bounding box inward by BOX_TRIM_X / BOX_TRIM_Y.
+    2. Sample the surrounding band (SURROUND_PX wide) to get the local
        background average H, S, V.
-    4. For each pixel row inside the tightened box:
+    3. For each pixel row inside the tightened box:
          - reject pixels whose H and S are both within BG_HUE_DELTA /
            BG_SAT_DELTA of the surrounding band average (background bleed).
          - average the remaining HSV values.
          - rows with fewer than MIN_ROW_PX valid pixels are skipped (NaN).
-    5. Compress the per-row averages into N_PROFILE_CHUNKS chunks by averaging
-       contiguous groups of rows.
-    6. Divide each chunk's V by the surrounding band's average V to normalise
-       for local lighting.  H and S are left unchanged (already
-       lighting-independent in HSV).
+    4. Compress the per-row averages into N_PROFILE_CHUNKS chunks.
+    5. Divide each chunk's V by the surrounding band's average V to normalise
+       for local lighting.
 
     Returns
     -------
@@ -278,7 +258,7 @@ def clothing_color_profile(hsv_frame, xyxy):
     if box_w < 8 or box_h < N_PROFILE_CHUNKS:
         return None
 
-    # --- Step 2: tighten box ---
+    # Tighten box
     tx = int(box_w * BOX_TRIM_X)
     ty = int(box_h * BOX_TRIM_Y)
     ix1, ix2 = x1 + tx, x2 - tx
@@ -286,12 +266,8 @@ def clothing_color_profile(hsv_frame, xyxy):
     if ix2 <= ix1 or iy2 <= iy1:
         return None
 
-    # --- Step 3: sample surrounding band for background reference ---
-    # Collect pixels from a SURROUND_PX-wide strip just outside each side,
-    # clamped to image boundaries.  We only sample the rows that overlap the
-    # tightened box vertically so the reference is spatially consistent.
+    # Sample surrounding band
     surround_pixels = []
-
     left_x1  = max(0, ix1 - SURROUND_PX)
     left_x2  = ix1
     right_x1 = ix2
@@ -315,42 +291,38 @@ def clothing_color_profile(hsv_frame, xyxy):
         return None
 
     surround_all = np.concatenate(surround_pixels, axis=0).astype(np.float32)
-    surround_avg = surround_all.mean(axis=0)   # [H_bg, S_bg, V_bg]
-    surround_v   = max(surround_avg[2], 1.0)   # avoid divide-by-zero
+    surround_avg = surround_all.mean(axis=0)
+    surround_v   = max(surround_avg[2], 1.0)
 
-    # --- Step 4: per-row averages with background pixel rejection ---
-    inner = hsv_frame[iy1:iy2, ix1:ix2].astype(np.float32)  # (rows, cols, 3)
+    # Per-row averages with background rejection
+    inner  = hsv_frame[iy1:iy2, ix1:ix2].astype(np.float32)
     n_rows = inner.shape[0]
 
     row_avgs = np.full((n_rows, 3), np.nan, dtype=np.float32)
     for r in range(n_rows):
-        row = inner[r]                           # (cols, 3)
+        row   = inner[r]
         h_diff = np.abs(row[:, 0] - surround_avg[0])
-        # Hue wraps at 180 in OpenCV; handle the wrap
         h_diff = np.minimum(h_diff, 180.0 - h_diff)
         s_diff = np.abs(row[:, 1] - surround_avg[1])
         fg_mask = ~((h_diff < BG_HUE_DELTA) & (s_diff < BG_SAT_DELTA))
-
         if fg_mask.sum() >= MIN_ROW_PX:
             row_avgs[r] = row[fg_mask].mean(axis=0)
 
-    # --- Step 5: compress into N_PROFILE_CHUNKS chunks ---
+    # Compress into N_PROFILE_CHUNKS
     chunk_size = n_rows / N_PROFILE_CHUNKS
-    profile = np.full((N_PROFILE_CHUNKS, 3), np.nan, dtype=np.float32)
+    profile    = np.full((N_PROFILE_CHUNKS, 3), np.nan, dtype=np.float32)
     for c in range(N_PROFILE_CHUNKS):
-        r_start = int(round(c * chunk_size))
-        r_end   = int(round((c + 1) * chunk_size))
+        r_start    = int(round(c * chunk_size))
+        r_end      = int(round((c + 1) * chunk_size))
         chunk_rows = row_avgs[r_start:r_end]
-        valid = chunk_rows[~np.isnan(chunk_rows[:, 0])]
+        valid      = chunk_rows[~np.isnan(chunk_rows[:, 0])]
         if len(valid) > 0:
             profile[c] = valid.mean(axis=0)
 
-    # If every chunk is NaN the box is useless
     if np.all(np.isnan(profile[:, 0])):
         return None
 
-    # Fill isolated NaN chunks by interpolating from neighbours so that the
-    # profile vector has no holes (makes distance calculation simpler).
+    # Interpolate isolated NaN chunks
     for c in range(N_PROFILE_CHUNKS):
         if np.isnan(profile[c, 0]):
             prev_c = next((i for i in range(c - 1, -1, -1) if not np.isnan(profile[i, 0])), None)
@@ -362,7 +334,7 @@ def clothing_color_profile(hsv_frame, xyxy):
             elif next_c is not None:
                 profile[c] = profile[next_c]
 
-    # --- Step 6: V-channel lighting normalisation ---
+    # V-channel lighting normalisation
     profile[:, 2] = np.clip(profile[:, 2] / surround_v, 0.0, 4.0)
 
     return profile
@@ -372,45 +344,31 @@ def profile_similarity(a, b):
     """
     Weighted similarity between two (N_PROFILE_CHUNKS, 3) profiles.
 
-    Weights are calibrated from measured bounding boxes at 1.5–3.9 m.
-    Landmark fractions (mean ± std across all distances):
-      chin        0.142 ± 0.014
-      shoulder    0.222 ± 0.023
-      chest       0.319 ± 0.027
-      waist       0.512 ± 0.019
-      hip         0.614 ± 0.017
-      knee        0.817 ± 0.012
-      ankle       0.953 ± 0.008
+    Chunk mapping for N_PROFILE_CHUNKS=12:
+      0-1   head          0.05  (skin/hair varies little between people)
+      2     neck/shoulder 0.30
+      3-5   upper torso   3.50  (shirt/hoodie — most distinctive)
+      6     waist         2.00
+      7-9   legs          3.00  (trousers/jeans — highly distinctive)
+      10    lower legs    0.80
+      11    feet          0.02  (often cut off)
 
-    The detector box proportions are highly stable across this range, so a
-    fixed weight vector (no distance adjustment) is appropriate.
+    Error scaling:
+      - H normalised over 45deg half-range (not 90) so different colours
+        hit max error more readily.
+      - Power of 1.5 amplifies large differences while being lenient on
+        small lighting-induced shifts.
+      - H weighted 70%, S weighted 30%.
 
-    Chunk mapping for N_PROFILE_CHUNKS=12 (each chunk = 1/12 ≈ 8.3% of box):
-      0  [0.000-0.083]  head          0.15
-      1  [0.083-0.167]  head          0.15
-      2  [0.167-0.250]  neck/shoulder 0.40
-      3  [0.250-0.333]  upper torso   2.00  ← hoodie chest
-      4  [0.333-0.417]  mid torso     2.00  ← hoodie body
-      5  [0.417-0.500]  mid torso     2.00
-      6  [0.500-0.583]  waist/hip     1.60
-      7  [0.583-0.667]  upper legs    1.80  ← jeans
-      8  [0.667-0.750]  upper legs    1.80
-      9  [0.750-0.833]  upper legs    1.80
-     10  [0.833-0.917]  lower legs    1.00
-     11  [0.917-1.000]  feet          0.05
-
-    Only H and S channels are compared; V is normalised out.
     Returns a float in [0, 1], or None if either profile is None.
     """
     if a is None or b is None:
         return None
 
-    # Empirically calibrated from 5 screenshots at 1.5, 2.0, 2.4, 2.9, 3.9 m
     weights = np.array(
-        [0.15, 0.15, 0.40, 2.00, 2.00, 2.00, 1.60, 1.80, 1.80, 1.80, 1.00, 0.05],
+        [0.05, 0.05, 0.30, 3.50, 3.50, 3.50, 2.00, 3.00, 3.00, 3.00, 0.80, 0.02],
         dtype=np.float32,
     )
-    # Pad or trim if N_PROFILE_CHUNKS was changed from 12
     if len(weights) != N_PROFILE_CHUNKS:
         weights = np.interp(
             np.linspace(0, 1, N_PROFILE_CHUNKS),
@@ -418,19 +376,17 @@ def profile_similarity(a, b):
             weights,
         ).astype(np.float32)
 
-    # Compare only H and S (columns 0 and 1)
     diff_h = np.abs(a[:, 0] - b[:, 0])
-    diff_h = np.minimum(diff_h, 180.0 - diff_h)   # hue wrap
+    diff_h = np.minimum(diff_h, 180.0 - diff_h)
     diff_s = np.abs(a[:, 1] - b[:, 1])
 
-    # Normalise to [0, 1] range: H max=90 (half-circle), S max=255
-    err = (diff_h / 90.0 + diff_s / 255.0) / 2.0   # per-chunk error in [0,1]
+    err_h = np.clip(diff_h / 45.0, 0.0, 1.0) ** 1.5
+    err_s = np.clip(diff_s / 80.0, 0.0, 1.0) ** 1.5
+
+    err = err_h * 0.70 + err_s * 0.30
+
     weighted_err = np.dot(err, weights) / weights.sum()
     return float(np.clip(1.0 - weighted_err, 0.0, 1.0))
-
-
-def fmt_similarity(value):
-    return "N/A" if value is None else f"{value:.2f}"
 
 
 # =========================================================================== #
@@ -438,13 +394,21 @@ def fmt_similarity(value):
 # =========================================================================== #
 
 class TargetLock:
+    """
+    Locks onto the first person detected and uses their saved color profile
+    as a fixed reference to distinguish them from all subsequent detections.
+
+    reference_profile  — set once on first detection, never modified.
+    color_profile      — EMA-smoothed live profile, used for swatch display only.
+    """
+
     def __init__(self):
         self.locked_id               = None
         self.last_seen               = 0.0
         self.last_dist               = None
         self.last_angle              = None
-        self.reference_profile       = None
-        self.color_profile           = None
+        self.reference_profile       = None   # FIXED on first detection
+        self.color_profile           = None   # EMA for display only
         self.switch_candidate_id     = None
         self.switch_candidate_frames = 0
 
@@ -458,26 +422,17 @@ class TargetLock:
             return None
 
         # ------------------------------------------------------------------ #
-        # First ever detection
+        # First ever detection: lock onto the closest person and save their
+        # color profile as the permanent reference.
         # ------------------------------------------------------------------ #
         if self.reference_profile is None:
             best = min(measurements, key=lambda m: m["score"])
-            tid  = best["track_id"]
-            prof = best["color_profile"]
-
-            if prof is None:
-                print(f"[LOCK] First detection (ID{tid}) — box too small for color profile, "
-                      f"waiting for better view  dist={best['dist']:.1f}m")
-                # Still lock positionally even without a color profile
-                self._lock_first(best, now)
-                print(f"[LOCK] Locked on ID{tid} at {best['dist']:.1f}m "
-                      f"{best['angle']:+.1f}deg  (no color profile yet)")
-                return best["index"]
-
             self._lock_first(best, now)
-            print(f"[LOCK] *** INITIAL LOCK on ID{tid} ***  "
+            prof_status = "color profile saved" if best["color_profile"] is not None \
+                          else "NO color profile (box too small)"
+            print(f"[LOCK] *** INITIAL LOCK on ID{best['track_id']} ***  "
                   f"dist={best['dist']:.1f}m  angle={best['angle']:+.1f}deg  "
-                  f"color_profile={'OK' if prof is not None else 'NONE'}")
+                  f"{prof_status}")
             return best["index"]
 
         # ------------------------------------------------------------------ #
@@ -486,16 +441,18 @@ class TargetLock:
         for m in measurements:
             m["ref_similarity"] = profile_similarity(self.reference_profile,
                                                       m["color_profile"])
+            sim_str = f"{m['ref_similarity']:.2f}" if m["ref_similarity"] is not None else "N/A"
             print(f"[SCORE] ID{m['track_id']}  dist={m['dist']:.1f}m  "
-                  f"angle={m['angle']:+.1f}deg  "
-                  f"ref_sim={fmt_similarity(m['ref_similarity'])}")
+                  f"angle={m['angle']:+.1f}deg  ref_sim={sim_str}")
 
         tracked = [m for m in measurements if m["track_id"] is not None]
 
+        # No tracker IDs yet — fall back to color-only match
         if not tracked:
             best_color = max(measurements, key=lambda m: m["ref_similarity"] or 0.0)
             sim = best_color["ref_similarity"]
-            print(f"[LOCK] No tracked IDs — best color match sim={fmt_similarity(sim)} "
+            sim_str = f"{sim:.2f}" if sim is not None else "N/A"
+            print(f"[LOCK] No tracked IDs — best color match sim={sim_str} "
                   f"(need >={TARGET_COLOR_REID_MIN_SCORE})")
             if sim is not None and sim >= TARGET_COLOR_REID_MIN_SCORE:
                 self._remember(best_color, now)
@@ -506,37 +463,45 @@ class TargetLock:
 
         current = next((m for m in tracked if m["track_id"] == self.locked_id), None)
 
+        # Locked ID not visible — attempt re-identification
         if current is None:
-            if now - self.last_seen <= TARGET_LOST_TIMEOUT_S:
-                print(f"[LOCK] ID{self.locked_id} not in frame — attempting re-ID "
-                      f"({now - self.last_seen:.2f}s since last seen)")
+            elapsed = now - self.last_seen
+            if elapsed <= TARGET_LOST_TIMEOUT_S:
+                print(f"[LOCK] ID{self.locked_id} not in frame — re-ID attempt "
+                      f"({elapsed:.2f}s since last seen)")
                 reid = self._reidentify(tracked)
                 if reid is not None:
-                    print(f"[LOCK] Re-identified as ID{reid['track_id']}  "
-                          f"sim={reid.get('ref_similarity', '?')}")
+                    sim_str = f"{reid.get('ref_similarity', '?'):.2f}" \
+                              if reid.get("ref_similarity") is not None else "N/A"
+                    print(f"[LOCK] Re-identified as ID{reid['track_id']}  sim={sim_str}")
                     self._lock(reid["track_id"], now, reid)
                     return reid["index"]
-                print(f"[LOCK] Re-ID failed — no candidate passed thresholds")
+                print("[LOCK] Re-ID failed — no candidate passed thresholds")
                 return None
+
+            # Timeout expired — try best color match
             best_match = max(tracked, key=lambda m: m["ref_similarity"] or 0.0)
             sim = best_match["ref_similarity"]
+            sim_str = f"{sim:.2f}" if sim is not None else "N/A"
             print(f"[LOCK] Timeout expired — best color match ID{best_match['track_id']} "
-                  f"sim={fmt_similarity(sim)} (need >={TARGET_COLOR_REID_MIN_SCORE})")
+                  f"sim={sim_str} (need >={TARGET_COLOR_REID_MIN_SCORE})")
             if sim is not None and sim >= TARGET_COLOR_REID_MIN_SCORE:
                 self._lock(best_match["track_id"], now, best_match)
                 print(f"[LOCK] Re-locked on ID{best_match['track_id']} after timeout")
                 return best_match["index"]
             self.locked_id = None
-            print(f"[LOCK] Lock dropped — no match above threshold")
+            print("[LOCK] Lock dropped — no match above threshold")
             return None
 
-        # Happy path
+        # Happy path: current target still visible
         self._remember(current, now)
         sim = current.get("ref_similarity")
+        sim_str = f"{sim:.2f}" if sim is not None else "N/A"
         print(f"[LOCK] Tracking ID{self.locked_id}  dist={current['dist']:.1f}m  "
-              f"angle={current['angle']:+.1f}deg  "
-              f"ref_sim={fmt_similarity(sim)}")
+              f"angle={current['angle']:+.1f}deg  ref_sim={sim_str}")
 
+        # Consider switching only if another person is a clearly better color
+        # match AND significantly closer/more central
         for candidate in tracked:
             if candidate["track_id"] == self.locked_id:
                 continue
@@ -567,9 +532,14 @@ class TargetLock:
 
         return current["index"]
 
+    # ---------------------------------------------------------------------- #
+    # Internal helpers
+    # ---------------------------------------------------------------------- #
+
     def _lock_first(self, measurement, now):
-        self.locked_id = measurement["track_id"]
-        self.last_seen = now
+        """Called exactly once — saves the permanent reference profile."""
+        self.locked_id  = measurement["track_id"]
+        self.last_seen  = now
         self.last_dist  = measurement["dist"]
         self.last_angle = measurement["angle"]
         if measurement["color_profile"] is not None:
@@ -591,6 +561,7 @@ class TargetLock:
         for m in measurements:
             dist_delta  = abs(m["dist"]  - self.last_dist)
             angle_delta = abs(m["angle"] - self.last_angle)
+            # Use fixed reference_profile for re-ID — more stable than EMA
             color_score = profile_similarity(self.reference_profile, m["color_profile"])
             color_ok = (
                 self.reference_profile is None or
@@ -614,6 +585,7 @@ class TargetLock:
         self.switch_candidate_frames = 0
 
     def _update_profile(self, measurement):
+        """EMA update of the live color profile. reference_profile is never touched."""
         new_prof = measurement.get("color_profile")
         if new_prof is None:
             return
@@ -642,7 +614,6 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
     img_h, img_w = frame.shape[:2]
     out = frame.copy()
 
-    # Convert the whole frame to HSV once; pass the slice into color profiling.
     hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
     ids = detections.tracker_id if detections.tracker_id is not None else [None] * len(detections)
@@ -685,14 +656,14 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
 
     rows = []
     for m in measurements:
-        i        = m["index"]
+        i               = m["index"]
         x1, y1, x2, y2 = m["xyxy"]
-        conf     = m["confidence"]
-        tid      = m["track_id"]
-        is_target = (i == target_idx)
-        color     = COLOR_TARGET if is_target else COLOR_OBSTACLE
-        role      = "TARGET"    if is_target else "OBSTACLE"
-        label_id  = f"ID{tid}"  if tid is not None else "?"
+        conf            = m["confidence"]
+        tid             = m["track_id"]
+        is_target       = (i == target_idx)
+        color           = COLOR_TARGET   if is_target else COLOR_OBSTACLE
+        role            = "TARGET"       if is_target else "OBSTACLE"
+        label_id        = f"ID{tid}"     if tid is not None else "?"
 
         dist    = m["dist"]
         angle   = m["angle"]
@@ -708,24 +679,20 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
         cv2.putText(out, label, (int(x1), top - 2),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
 
-        # Draw the color profile as a vertical strip of swatches just inside
-        # the left edge of the bounding box.  Each swatch is one chunk; its
-        # BGR is converted back from the stored HSV (V re-scaled to a legible
-        # fixed brightness so swatches are readable regardless of scene lighting).
+        # Color profile swatches
         if profile is not None:
             swatch_w = max(6, int((x2 - x1) * 0.06))
             swatch_h = max(2, int((y2 - y1) / N_PROFILE_CHUNKS))
             strip_x  = int(x1) + thickness + 1
             for ci in range(N_PROFILE_CHUNKS):
-                sy1 = int(y1) + ci * swatch_h
-                sy2 = sy1 + swatch_h
-                h_val = float(profile[ci, 0])
-                s_val = float(profile[ci, 1])
-                v_val = float(np.clip(profile[ci, 2] * 128, 0, 255))
-                hsv_px  = np.uint8([[[h_val, s_val, v_val]]])
-                bgr_px  = cv2.cvtColor(hsv_px, cv2.COLOR_HSV2BGR)[0, 0].tolist()
-                cv2.rectangle(out, (strip_x, sy1), (strip_x + swatch_w, sy2),
-                              bgr_px, -1)
+                sy1    = int(y1) + ci * swatch_h
+                sy2    = sy1 + swatch_h
+                h_val  = float(profile[ci, 0])
+                s_val  = float(profile[ci, 1])
+                v_val  = float(np.clip(profile[ci, 2] * 128, 0, 255))
+                hsv_px = np.uint8([[[h_val, s_val, v_val]]])
+                bgr_px = cv2.cvtColor(hsv_px, cv2.COLOR_HSV2BGR)[0, 0].tolist()
+                cv2.rectangle(out, (strip_x, sy1), (strip_x + swatch_w, sy2), bgr_px, -1)
             cv2.rectangle(out,
                           (strip_x, int(y1) + thickness + 1),
                           (strip_x + swatch_w,
@@ -749,7 +716,8 @@ def print_header():
 def run(no_display=False, no_drive=False):
     if not RPK_MODEL_PATH.exists():
         raise SystemExit(
-            f"ERROR: {RPK_MODEL_PATH} not found. Install with: sudo apt install imx500-models"
+            f"ERROR: {RPK_MODEL_PATH} not found. "
+            f"Install with: sudo apt install imx500-models"
         )
 
     cap = IMX500Capture(model_path=RPK_MODEL_PATH, width=640, height=480, fps=30)
@@ -778,14 +746,15 @@ def run(no_display=False, no_drive=False):
 
     try:
         while True:
-            t0 = time.time()
+            t0  = time.time()
             ret, frame = cap.read()
             if not ret:
                 break
 
             dets    = cap.get_detections()
             tracked = tracker.update_with_detections(dets)
-            out, rows = annotate_frame(frame, tracked, smooth_state, target_lock, time.monotonic())
+            out, rows = annotate_frame(frame, tracked, smooth_state, target_lock,
+                                       time.monotonic())
 
             target_row = next((r for r in rows if r[0] == "TARGET"), None)
             if target_row is not None:
@@ -805,7 +774,7 @@ def run(no_display=False, no_drive=False):
                     motors.send(v_left, v_right)
                 t_last_tick = now
 
-            t1 = time.time()
+            t1         = time.time()
             latency_ms = (t1 - t0) * 1000
             frame_times.append(t1)
             if len(frame_times) > 30:
@@ -814,11 +783,13 @@ def run(no_display=False, no_drive=False):
                 (len(frame_times) - 1) / (frame_times[-1] - frame_times[0])
                 if len(frame_times) > 1 else 0.0
             )
-            cv2.putText(out, f"NPU  FPS: {fps_live:.1f}  {latency_ms:.0f}ms  [{P.S.mode}]",
+            cv2.putText(out,
+                        f"NPU  FPS: {fps_live:.1f}  {latency_ms:.0f}ms  [{P.S.mode}]",
                         (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
 
             for role, label_id, conf, dist, angle in rows:
-                print(f"{role:<10} {label_id:<8} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
+                print(f"{role:<10} {label_id:<8} {conf:>6.0%}  "
+                      f"{dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
 
             if not no_display:
                 cv2.imshow("Cart View", out)
@@ -844,8 +815,10 @@ if __name__ == "__main__":
                         help="run camera and detection but do not command motors")
     args = parser.parse_args()
 
-    if not args.no_display and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+    if not args.no_display and not (os.environ.get("DISPLAY") or
+                                     os.environ.get("WAYLAND_DISPLAY")):
         args.no_display = True
-        print("No display detected — running headless (use --no-display to silence this message).")
+        print("No display detected — running headless "
+              "(use --no-display to silence this message).")
 
     run(no_display=args.no_display, no_drive=args.no_drive)
