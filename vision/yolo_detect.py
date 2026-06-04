@@ -429,6 +429,10 @@ def profile_similarity(a, b):
     return float(np.clip(1.0 - weighted_err, 0.0, 1.0))
 
 
+def fmt_similarity(value):
+    return "N/A" if value is None else f"{value:.2f}"
+
+
 # =========================================================================== #
 # Target lock
 # =========================================================================== #
@@ -484,14 +488,14 @@ class TargetLock:
                                                       m["color_profile"])
             print(f"[SCORE] ID{m['track_id']}  dist={m['dist']:.1f}m  "
                   f"angle={m['angle']:+.1f}deg  "
-                  f"ref_sim={m['ref_similarity']:.2f if m['ref_similarity'] is not None else 'N/A'}")
+                  f"ref_sim={fmt_similarity(m['ref_similarity'])}")
 
         tracked = [m for m in measurements if m["track_id"] is not None]
 
         if not tracked:
             best_color = max(measurements, key=lambda m: m["ref_similarity"] or 0.0)
             sim = best_color["ref_similarity"]
-            print(f"[LOCK] No tracked IDs — best color match sim={sim:.2f if sim else 'N/A'} "
+            print(f"[LOCK] No tracked IDs — best color match sim={fmt_similarity(sim)} "
                   f"(need >={TARGET_COLOR_REID_MIN_SCORE})")
             if sim is not None and sim >= TARGET_COLOR_REID_MIN_SCORE:
                 self._remember(best_color, now)
@@ -517,7 +521,7 @@ class TargetLock:
             best_match = max(tracked, key=lambda m: m["ref_similarity"] or 0.0)
             sim = best_match["ref_similarity"]
             print(f"[LOCK] Timeout expired — best color match ID{best_match['track_id']} "
-                  f"sim={sim:.2f if sim else 'N/A'} (need >={TARGET_COLOR_REID_MIN_SCORE})")
+                  f"sim={fmt_similarity(sim)} (need >={TARGET_COLOR_REID_MIN_SCORE})")
             if sim is not None and sim >= TARGET_COLOR_REID_MIN_SCORE:
                 self._lock(best_match["track_id"], now, best_match)
                 print(f"[LOCK] Re-locked on ID{best_match['track_id']} after timeout")
@@ -531,7 +535,7 @@ class TargetLock:
         sim = current.get("ref_similarity")
         print(f"[LOCK] Tracking ID{self.locked_id}  dist={current['dist']:.1f}m  "
               f"angle={current['angle']:+.1f}deg  "
-              f"ref_sim={sim:.2f if sim is not None else 'N/A'}")
+              f"ref_sim={fmt_similarity(sim)}")
 
         for candidate in tracked:
             if candidate["track_id"] == self.locked_id:
