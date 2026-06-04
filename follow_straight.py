@@ -66,11 +66,14 @@ KICK_TICKS    = 30    # release the kick once this many encoder ticks accumulate
 KICK_TIMEOUT_S = 1.0  # give up holding the kick after this long if no movement is seen
 TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop fallback
 
-# Distance (displacement) controller
+# Distance controller. Use a damped proportional target speed instead of
+# accumulating speed every frame; that avoids overshoot/stop/overshoot cycles.
 THRESH_M       = HOLD_DIST   # standoff distance to hold (m)
-KP_DIST        = 30.0   # RPM speed change per (m/s) of approach rate dx        [calibrate]
-KI_DIST        = 15.0   # RPM speed change per metre of standoff error (x-thresh) [calibrate]
-DX_ALPHA       = 0.3    # EMA factor for the smoothed dx/dt
+DIST_DEADBAND_M = 0.20       # no drive inside this band around hold distance
+KP_DIST        = 10.0        # RPM per metre beyond the deadband
+KD_DIST        = 8.0         # RPM per (m/s) target-distance closing rate
+DX_ALPHA       = 0.2         # EMA factor for smoothed dx/dt
+RPM_SLEW_PER_S = 35.0        # max command change per second
 
 # =============================================================================
 # HELPERS
@@ -152,13 +155,11 @@ class MotorIO:
 # =============================================================================
 
 class Kick:
-    """Encoder-confirmed forward breakaway.
+    """Forward breakaway helper.
 
     Armed when the cart departs from rest; stays active until KICK_TICKS of
-    encoder movement accumulate (proving it broke free) or KICK_TIMEOUT_S
-    elapses.  While active the caller floors the forward-speed magnitude at
-    KICK_RPM.  Kept separate from the control law so FollowController stays a
-    pure PI distance controller.
+    encoder movement accumulate or KICK_TIMEOUT_S elapses. While active the
+    caller floors the forward-speed magnitude at KICK_RPM.
     """
 
     def __init__(self):
@@ -213,12 +214,18 @@ class FollowController:
     def step(self, x, angle_deg, dt, motors=None):
         self._derivatives(x, dt)
 
-        # Distance control (PI). Breakaway kick is applied by the caller's Kick.
-        if x - THRESH_M < 0.0:
-            self.S = 0.0
+        error = x - THRESH_M
+        if abs(error) <= DIST_DEADBAND_M:
+            target_s = 0.0
         else:
-            delta_S = KP_DIST * self.dx + KI_DIST * (x - THRESH_M)
-            self.S = _clip(self.S + delta_S, -MAX_RPM, MAX_RPM)
+            # Positive dx means the target is moving away, so add speed.
+            # Negative dx means the cart is closing in, so reduce speed early.
+            drive_error = math.copysign(abs(error) - DIST_DEADBAND_M, error)
+            target_s = KP_DIST * drive_error + KD_DIST * self.dx
+            target_s = _clip(target_s, -MAX_RPM, MAX_RPM)
+
+        max_delta = RPM_SLEW_PER_S * dt
+        self.S = _clip(target_s, self.S - max_delta, self.S + max_delta)
         return self.S
 
 
