@@ -75,13 +75,18 @@ TURN_RPM          = 2.0    # steady wheel RPM during the turn after the kick
 ANGULAR_INERTIA   = 0.0    # s — yaw coast factor; drift = (w0-w1)*inertia   [calibrate]
 THETA_THRESH_DEG  = 4.0    # follow loop: re-centre with spin() once |angle| exceeds this
 SPIN_DEADBAND_DEG = 0.5    # spin: ignore turn requests smaller than this (no-op)
-SPIN_TURN_TIMEOUT_S = 1.0  # max extra time for the steady-turn phase (exit a stuck/loaded turn)
+SPIN_TURN_TIMEOUT_S = 0.5  # max extra time for the steady-turn phase (exit a stuck/loaded turn)
 
-# Search / reacquire: when the target leaves the frame, rotate toward where it
-# was last seen until it reappears. Kicks first (SPIN_KICK_RPM) to beat stall.
+# Reacquire when the target leaves the frame. If it was last seen off to the
+# side (|angle| > LOST_SIDE_ANGLE_DEG) the cart rotate-SEARCHes toward it;
+# otherwise it was lost straight ahead (too far) so the cart drives forward
+# (PURSUE) to its last-known position. Both kick first to beat stall.
 SEARCH_RPM       = 8.0    # steady wheel RPM of the search sweep              [calibrate]
 SEARCH_MAX_DEG   = 360.0  # give up after sweeping this much with no target
-SEARCH_GRACE_S   = 0.3    # wait this long after losing the target before searching
+SEARCH_GRACE_S   = 0.3    # wait this long after losing the target before reacquiring
+LOST_SIDE_ANGLE_DEG = 20.0  # last-seen |angle| above this → rotate-search; below → drive forward
+PURSUE_RPM       = 30.0   # forward wheel RPM when chasing the last-known position [calibrate]
+PURSUE_MAX_M     = 5.0    # give up after driving this far forward with no target
 
 # Distance (displacement) controller
 THRESH_M       = HOLD_DIST   # standoff distance to hold (m)
@@ -353,6 +358,62 @@ class Searcher:
             _trace("search gave up (swept SEARCH_MAX_DEG)")
             return None
         return (-self._dir * cmd_rpm, +self._dir * cmd_rpm)
+
+
+class Pursuer:
+    """Non-blocking 'drive to the target's last-known position' when it's lost
+    straight ahead (it got too far to detect).
+
+    ``start()`` begins driving forward; ``update`` is called once per camera
+    frame and returns the (straight) wheel command, or ``None`` once it gives
+    up (covered PURSUE_MAX_M with no target). Begins with a breakaway kick that
+    ramps up to beat stall (like the forward Kick), then drives at PURSUE_RPM.
+    The caller cancels it the moment a target reappears.
+    """
+
+    def __init__(self):
+        self._active = False
+
+    @property
+    def active(self):
+        return self._active
+
+    def cancel(self):
+        self._active = False
+
+    def start(self):
+        self._active = True
+        self._phase = "kick"
+        self._kick_ticks = 0
+        self._kick_rpm = KICK_RPM
+        self._dist = 0.0           # forward distance covered (m)
+        self._t0 = time.monotonic()
+        _trace("pursue start  drive forward to last-known position  kick…")
+
+    def update(self, d_l, d_r):
+        """Advance one tick; return (l_rpm, r_rpm) straight forward, or None on give-up."""
+        if not self._active:
+            return None
+        self._dist += abs((d_l + d_r) / 2.0) * M_PER_PULSE
+        now = time.monotonic()
+
+        if self._phase == "kick":
+            self._kick_ticks += abs(d_l) + abs(d_r)
+            if self._kick_ticks >= KICK_TICKS:
+                self._phase = "drive"          # broke free
+            elif (now - self._t0) >= KICK_TIMEOUT_S:
+                self._kick_rpm = min(self._kick_rpm + KICK_RAMP_STEP, MAX_RPM)
+                self._kick_ticks = 0
+                self._t0 = now
+            cmd_rpm = self._kick_rpm
+        else:
+            cmd_rpm = PURSUE_RPM
+
+        if self._dist >= PURSUE_MAX_M:
+            self._active = False
+            _trace(f"pursue gave up (covered {self._dist:.1f}m)")
+            return None
+        return (cmd_rpm, cmd_rpm)   # straight forward: L = R
 
 
 # =============================================================================
@@ -643,10 +704,11 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     kick = Kick()
     spinner = Spinner()
     searcher = Searcher()
+    pursuer = Pursuer()
     prev_S = 0.0
     last_angle_deg = 0.0       # last angle the target was seen at (which way it left)
-    lost_since = None          # when the target was first lost (for the search grace period)
-    search_gave_up = False     # True once a search swept its limit with no target
+    lost_since = None          # when the target was first lost (for the reacquire grace period)
+    reacquire_gave_up = False  # True once a search/pursue ran its limit with no target
     start = time.monotonic()
     prev_t = start
     last_log = 0.0
@@ -685,31 +747,39 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                 if lost_since is None:
                     lost_since = now
 
-                if (not searcher.active and not search_gave_up
-                        and (now - lost_since) >= SEARCH_GRACE_S):
-                    searcher.start(STEER_SIGN * last_angle_deg)
-
-                if searcher.active:
-                    cmd = searcher.update(d_l, d_r)
-                    if cmd is None:          # swept its limit with no target — give up
-                        l_rpm = r_rpm = 0.0
-                        search_gave_up = True
+                l_rpm = r_rpm = 0.0
+                mode_str = "LOST"
+                # After the grace period, run a reacquire maneuver until it
+                # gives up: rotate toward the last-seen side if it left the edge,
+                # else drive forward to its last-known position (lost too far ahead).
+                if not reacquire_gave_up and (now - lost_since) >= SEARCH_GRACE_S:
+                    if not searcher.active and not pursuer.active:
+                        if abs(last_angle_deg) > LOST_SIDE_ANGLE_DEG:
+                            searcher.start(STEER_SIGN * last_angle_deg)
+                        else:
+                            pursuer.start()
+                    if searcher.active:
+                        cmd = searcher.update(d_l, d_r)
+                        mode_str = "SEARCH"
+                    else:
+                        cmd = pursuer.update(d_l, d_r)
+                        mode_str = "PURSUE"
+                    if cmd is None:          # maneuver swept/covered its limit → give up
+                        reacquire_gave_up = True
                         mode_str = "LOST"
                     else:
                         l_rpm, r_rpm = cmd
-                        mode_str = "SEARCH"
-                else:
-                    l_rpm = r_rpm = 0.0      # grace period, or gave up → hold still
-                    mode_str = "LOST"
+
                 cmd_l_rpm, cmd_r_rpm = l_rpm, r_rpm
                 motors.send_rpm(l_rpm, r_rpm)
             else:
                 x = target_row[3]          # calibrated distance (m)
                 angle_deg = target_row[4]  # calibrated angle (deg, +right)
                 last_angle_deg = angle_deg # remember which way it is, in case it leaves
-                lost_since = None          # reacquired → reset search state
-                search_gave_up = False
+                lost_since = None          # reacquired → reset reacquire state
+                reacquire_gave_up = False
                 searcher.cancel()
+                pursuer.cancel()
                 d_l, d_r = motors.read_deltas()
                 actual_l_rpm = _ticks_to_rpm(d_l, dt)
                 actual_r_rpm = _ticks_to_rpm(d_r, dt)
@@ -753,9 +823,9 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
             if t - last_log >= 0.5:
                 last_log = t
                 if target_row is None:
-                    print(f"t={t:5.1f}s  {mode_str:6s}  cmd L{cmd_l_rpm:+5.1f} R{cmd_r_rpm:+5.1f}rpm "
-                          f"(searching toward last-seen {'+L' if STEER_SIGN*last_angle_deg >= 0 else '-R'})"
-                          if mode_str == "SEARCH" else f"t={t:5.1f}s  no target")
+                    extra = (f"  (toward last-seen {'+L' if STEER_SIGN*last_angle_deg >= 0 else '-R'})"
+                             if mode_str == "SEARCH" else "")
+                    print(f"t={t:5.1f}s  {mode_str:6s}  cmd L{cmd_l_rpm:+5.1f} R{cmd_r_rpm:+5.1f}rpm{extra}")
                 else:
                     print(f"t={t:5.1f}s  dist={x:.2f}m  angle={angle_deg:+5.1f}°  "
                           f"dx={ctrl.dx:+.2f}m/s  {mode_str:6s}  "
