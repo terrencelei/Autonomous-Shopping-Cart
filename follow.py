@@ -69,10 +69,10 @@ KICK_TIMEOUT_S = 1.0  # give up holding the kick after this long if no movement 
 TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop fallback
 
 # Spin (point-turn) controller
-SPIN_KICK_RPM     = 20.0    # breakaway burst for a point turn (half the forward KICK_RPM)
+SPIN_KICK_RPM     = 40.0    # breakaway burst for a point turn (half the forward KICK_RPM)
 TURN_RPM          = 2.0    # steady wheel RPM during the turn after the kick
 ANGULAR_INERTIA   = 0.0    # s — yaw coast factor; drift = (w0-w1)*inertia   [calibrate]
-THETA_THRESH_DEG  = 4.0    # follow loop: re-centre with spin() once |angle| exceeds this
+THETA_THRESH_DEG  = 2.0    # follow loop: re-centre with spin() once |angle| exceeds this
 SPIN_DEADBAND_DEG = 0.5    # spin: ignore turn requests smaller than this (no-op)
 SPIN_TURN_TIMEOUT_S = 2.0  # max extra time for the steady-turn phase (exit a stuck/loaded turn)
 
