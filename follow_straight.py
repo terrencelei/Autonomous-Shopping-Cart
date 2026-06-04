@@ -222,14 +222,17 @@ class FollowController:
         self._derivatives(x, dt)
 
         error = x - THRESH_M
-        if abs(error) <= DIST_DEADBAND_M:
+        if error <= DIST_DEADBAND_M:
+            # At the hold distance or closer → stop. Forward-only: this
+            # follower never reverses, it only drives when the shopper is too far.
             target_s = 0.0
         else:
-            # Positive dx means the target is moving away, so add speed.
-            # Negative dx means the cart is closing in, so reduce speed early.
-            drive_error = math.copysign(abs(error) - DIST_DEADBAND_M, error)
+            # Shopper is too far → drive forward.
+            # Positive dx (target moving away) adds speed; negative dx
+            # (closing in) eases off early, but clamped to 0 so it never reverses.
+            drive_error = error - DIST_DEADBAND_M
             target_s = KP_DIST * drive_error + KD_DIST * self.dx
-            target_s = _clip(target_s, -MAX_RPM, MAX_RPM)
+            target_s = _clip(target_s, 0.0, MAX_RPM)
 
         max_delta = RPM_SLEW_PER_S * dt
         self.S = _clip(target_s, self.S - max_delta, self.S + max_delta)
