@@ -381,12 +381,13 @@ class FollowController:
         rpm_diff = KP_ANGLE * theta + KD_ANGLE * dtheta
 
         # Distance control (PI). Breakaway kick is applied by the caller's Kick.
+        # Forward-only: stop at the hold distance or closer, never reverse.
         if x - THRESH_M < 0.0:
             _trace(f"step: dist {x:.2f} < hold {THRESH_M:.2f} → stop")
             self.S = 0.0
         else:
             delta_S = KP_DIST * self.dx + KI_DIST * (x - THRESH_M)
-            self.S = _clip(self.S + delta_S, -MAX_RPM, MAX_RPM)
+            self.S = _clip(self.S + delta_S, 0.0, MAX_RPM)   # clamp >= 0: no reverse
             _trace(f"step: PI dist={x:.2f} dx={self.dx:+.2f} → S={self.S:+.1f} diff={rpm_diff:+.1f}")
         return self.S, rpm_diff
 
