@@ -109,6 +109,12 @@ HOME_DRIVE_KP        = 60.0    # steering RPM per rad of bearing error while dri
 HOME_ANGLE_TOL_DEG   = 5.0     # a turn is "done" within this
 HOME_DIST_TOL_M      = 0.15    # home reached within this
 
+# Slip rejection (odometry): a free-spinning wheel reads more ticks than the
+# cart actually moved. If the wheels diverge beyond the commanded differential
+# by more than this rate, the faster wheel is slipping — trust the slower
+# (gripping) wheel and reconstruct the faster one from it + the commanded turn.
+SLIP_DIFF_TICKS_PER_S = 120.0  # ticks/s of unexplained wheel divergence = slip [calibrate]
+
 # Steering (angle) controller
 KP_ANGLE = 40.0   # RPM of wheel-difference per radian of angle error          [calibrate]
 KD_ANGLE = 0.0    # RPM of wheel-difference per (rad/s) of angular rate         [calibrate]
@@ -438,6 +444,26 @@ class Pursuer:
 # =============================================================================
 # DEAD RECKONING + RETURN-HOME
 # =============================================================================
+
+def deslip(d_l, d_r, cmd_l_rpm, cmd_r_rpm, dt):
+    """Reject single-wheel free-spin slip for odometry.
+
+    A slipping drive wheel spins faster than the cart moves, so its encoder
+    over-reports.  We know the *commanded* wheel RPMs, hence the intended L/R
+    tick difference.  If the measured difference exceeds that by more than the
+    tolerance, the wheel on the high side is free-spinning: trust the slower
+    (gripping) wheel and rebuild the faster wheel from it plus the commanded
+    differential, so odometry sees only the motion the cart actually made.
+    Returns the corrected (d_l, d_r).
+    """
+    exp_diff  = (cmd_r_rpm - cmd_l_rpm) / 60.0 * dt * ENCODER_PPR   # intended d_r - d_l
+    excess    = (d_r - d_l) - exp_diff                              # divergence beyond command
+    if abs(excess) <= SLIP_DIFF_TICKS_PER_S * dt:
+        return d_l, d_r                       # within tolerance — no slip
+    if excess > 0:                            # right moved too much → right slipping
+        return d_l, d_l + exp_diff            # trust left, rebuild right
+    return d_r - exp_diff, d_r                # left slipping → trust right, rebuild left
+
 
 class Odometry:
     """Dead-reckoned cart pose from encoder deltas.
@@ -848,7 +874,9 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
             d_l, d_r = motors.read_deltas()
             actual_l_rpm = _ticks_to_rpm(d_l, dt)
             actual_r_rpm = _ticks_to_rpm(d_r, dt)
-            meas_yaw = odom.update(d_l, d_r)
+            # Dead reckoning runs on slip-rejected deltas (cmd_*_rpm = last tick's command).
+            od_l, od_r = deslip(d_l, d_r, cmd_l_rpm, cmd_r_rpm, dt)
+            meas_yaw = odom.update(od_l, od_r)
             # While we are commanding a full stop, any rotation the encoders see is
             # uncommanded (someone turned the cart). Reset whenever we command motion.
             if abs(cmd_l_rpm) < 0.5 and abs(cmd_r_rpm) < 0.5:

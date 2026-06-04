@@ -282,6 +282,8 @@ Each frame it reads the locked shopper's `(distance, angle)` and then:
 
 Detection: while the commanded wheels are ~0, any rotation the encoders register is accumulated; crossing `HOME_ROT_TRIGGER_DEG ± HOME_ROT_RANGE_DEG` (180° ± 30°) triggers the return. Tunables: `HOME_TURN_RPM`, `HOME_FWD_RPM`, `HOME_DRIVE_KP`, `HOME_ANGLE_TOL_DEG`, `HOME_DIST_TOL_M`. Because it's dead-reckoning-only, accuracy degrades with how far/long the cart has driven (encoder drift).
 
+**Slip rejection.** The odometry runs on slip-corrected encoder deltas (`deslip()`). A free-spinning wheel reads more ticks than the cart actually moved; if the two wheels diverge beyond the *commanded* differential by more than `SLIP_DIFF_TICKS_PER_S`, the faster wheel is slipping, so the odometry trusts the slower (gripping) wheel and rebuilds the faster one from it plus the commanded turn. Real commanded turns are preserved; only the un-commanded excess is dropped. (Encoder-only, so it handles *one* wheel slipping, not both — an IMU would be the robust fix.)
+
 ### Startup calibration
 
 On launch, `follow.py` runs `calibrate_angular_inertia()`: it spins the cart at `SPIN_KICK_RPM`, hard-stops, and measures how far the encoders coast to set `ANGULAR_INERTIA` automatically (logged to `calibration_angular_inertia.csv` / `.png`). **Keep the cart clear at launch.** It is skipped — leaving `ANGULAR_INERTIA = 0` (so `drift()` is a no-op and there is no spin overshoot compensation) — if there's no ESP32 serial (`--no-drive`, or the port didn't open) or the spin can't reach the tick threshold within its timeout. The console prints which case occurred.
