@@ -392,6 +392,11 @@ class FollowRpmCommand:
         return math.copysign(v, sign)
 
 
+def follow_wheel_commands(v_forward):
+    v_left, v_right = P._wheel_commands(v_forward, 0.0)
+    return v_left, -v_right
+
+
 def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1.0):
     pos     = list(START_POS)
     heading = START_HEADING
@@ -944,7 +949,7 @@ def run_follow(drive=True, port=None, countdown=3, duration=30.0, sim_dist=None)
 
             v_forward = rpm_command.command(
                 desired_rpm, desired_dir, encoder_delta=(d_l, d_r))
-            v_left, v_right = P._wheel_commands(v_forward, 0.0)
+            v_left, v_right = follow_wheel_commands(v_forward)
 
             if motors is not None:
                 motors.send(v_left, v_right)
@@ -1090,7 +1095,7 @@ def run_follow_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
 
                 v_forward = rpm_command.command(
                     desired_rpm, desired_dir, encoder_delta=(d_l, d_r))
-                v_left, v_right = P._wheel_commands(v_forward, 0.0)
+                v_left, v_right = follow_wheel_commands(v_forward)
 
                 pos, heading = update_odometry_from_deltas(odometry, d_l, d_r)
                 P.S.pos = list(pos)
