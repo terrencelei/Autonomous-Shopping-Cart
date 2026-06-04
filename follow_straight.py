@@ -311,7 +311,9 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
 
             dets = cap.get_detections()
             tracked = tracker.update_with_detections(dets)
-            out, rows = Y.annotate_frame(frame, tracked, smooth_state, target_lock, now)
+            out, rows = Y.annotate_frame(
+                frame, tracked, smooth_state, target_lock, now, draw=not no_display
+            )
             target_row = next((r for r in rows if r[0] == "TARGET"), None)
 
             if target_row is None:

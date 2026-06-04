@@ -549,9 +549,9 @@ class TargetLock:
 # =========================================================================== #
 
 def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
-                   target_lock: TargetLock, now: float):
+                   target_lock: TargetLock, now: float, draw=True):
     img_h, img_w = frame.shape[:2]
-    out = frame.copy()
+    out = frame.copy() if draw else None
 
     # Convert once per frame — passed into clothing_color_profile
     lab_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
@@ -623,35 +623,36 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
         profile         = m["color_profile"]
         ref_sim         = m.get("ref_similarity")
 
-        thickness = 3 if is_target else 2
-        cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
+        if draw:
+            thickness = 3 if is_target else 2
+            cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
 
-        sim_str = f" sim:{ref_sim:.2f}" if ref_sim is not None else ""
-        label   = f"{role} {label_id} {dist:.1f}m {angle:+.1f}deg{sim_str}"
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-        top = max(int(y1) - 10, th + 4)
-        cv2.rectangle(out, (int(x1), top - th - 4), (int(x1) + tw, top), color, -1)
-        cv2.putText(out, label, (int(x1), top - 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
+            sim_str = f" sim:{ref_sim:.2f}" if ref_sim is not None else ""
+            label   = f"{role} {label_id} {dist:.1f}m {angle:+.1f}deg{sim_str}"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+            top = max(int(y1) - 10, th + 4)
+            cv2.rectangle(out, (int(x1), top - th - 4), (int(x1) + tw, top), color, -1)
+            cv2.putText(out, label, (int(x1), top - 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
 
-        # Swatch strip: reconstruct displayable BGR from a*, b* with fixed L=128
-        if profile is not None:
-            swatch_w = max(6, int((x2 - x1) * 0.06))
-            swatch_h = max(2, int((y2 - y1) / N_PROFILE_CHUNKS))
-            strip_x  = int(x1) + thickness + 1
-            for ci in range(N_PROFILE_CHUNKS):
-                sy1    = int(y1) + ci * swatch_h
-                sy2    = sy1 + swatch_h
-                a_val  = float(np.clip(profile[ci, 0], 0, 255))
-                b_val  = float(np.clip(profile[ci, 1], 0, 255))
-                lab_px = np.uint8([[[128, a_val, b_val]]])
-                bgr_px = cv2.cvtColor(lab_px, cv2.COLOR_LAB2BGR)[0, 0].tolist()
-                cv2.rectangle(out, (strip_x, sy1), (strip_x + swatch_w, sy2), bgr_px, -1)
-            cv2.rectangle(out,
-                          (strip_x, int(y1) + thickness + 1),
-                          (strip_x + swatch_w,
-                           int(y1) + thickness + 1 + N_PROFILE_CHUNKS * swatch_h),
-                          (255, 255, 255), 1)
+            # Swatch strip: reconstruct displayable BGR from a*, b* with fixed L=128
+            if profile is not None:
+                swatch_w = max(6, int((x2 - x1) * 0.06))
+                swatch_h = max(2, int((y2 - y1) / N_PROFILE_CHUNKS))
+                strip_x  = int(x1) + thickness + 1
+                for ci in range(N_PROFILE_CHUNKS):
+                    sy1    = int(y1) + ci * swatch_h
+                    sy2    = sy1 + swatch_h
+                    a_val  = float(np.clip(profile[ci, 0], 0, 255))
+                    b_val  = float(np.clip(profile[ci, 1], 0, 255))
+                    lab_px = np.uint8([[[128, a_val, b_val]]])
+                    bgr_px = cv2.cvtColor(lab_px, cv2.COLOR_LAB2BGR)[0, 0].tolist()
+                    cv2.rectangle(out, (strip_x, sy1), (strip_x + swatch_w, sy2), bgr_px, -1)
+                cv2.rectangle(out,
+                              (strip_x, int(y1) + thickness + 1),
+                              (strip_x + swatch_w,
+                               int(y1) + thickness + 1 + N_PROFILE_CHUNKS * swatch_h),
+                              (255, 255, 255), 1)
 
         rows.append((role, label_id, conf, dist, angle, ref_sim))
 
@@ -698,7 +699,7 @@ def run(no_display=False):
             dets    = cap.get_detections()
             tracked = tracker.update_with_detections(dets)
             out, rows = annotate_frame(frame, tracked, smooth_state,
-                                       target_lock, time.monotonic())
+                                       target_lock, time.monotonic(), draw=not no_display)
 
             t1 = time.time()
             frame_times.append(t1)
@@ -708,9 +709,10 @@ def run(no_display=False):
                 (len(frame_times) - 1) / (frame_times[-1] - frame_times[0])
                 if len(frame_times) > 1 else 0.0
             )
-            cv2.putText(out,
-                        f"NPU  FPS:{fps_live:.1f}  {(t1-t0)*1000:.0f}ms",
-                        (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
+            if not no_display:
+                cv2.putText(out,
+                            f"NPU  FPS:{fps_live:.1f}  {(t1-t0)*1000:.0f}ms",
+                            (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
 
             for role, label_id, conf, dist, angle, ref_sim in rows:
                 sim_str = f"{ref_sim:.2f}" if ref_sim is not None else " N/A"
