@@ -307,7 +307,7 @@ class Searcher:
 
     ``start(direction)`` begins a sweep toward the last-seen side; ``update``
     is called once per camera frame and returns the wheel command, or ``None``
-    once it gives up (swept SEARCH_MAX_DEG or SEARCH_TIMEOUT_S elapsed). Like
+    once it gives up (swept SEARCH_MAX_DEG with no target). Like
     the Spinner it begins with a breakaway kick (SPIN_KICK_RPM, released after
     KICK_TICKS) so it can overcome stall, then sweeps steadily at SEARCH_RPM.
     The caller cancels it the moment a target reappears.
