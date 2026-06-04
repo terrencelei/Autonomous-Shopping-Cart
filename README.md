@@ -270,6 +270,22 @@ The default source is the live IMX500 camera — it locks onto the nearest centr
 
 `--sim-dist` sets a constant target distance. The cart will drive toward `HOLD_DIST` and hold; pass a value above or below 2.0 m to test approach or reverse respectively. Values within `FOLLOW_DIST_DEADBAND_M` (0.05 m) of `HOLD_DIST` produce no output.
 
+#### `--mode track` — combined centre + follow
+
+The integrated tracking controller: the `center` and `follow` behaviours fused into one loop. Each tick it reads the target's distance and FOV angle, then:
+
+1. **Centering (spin).** If `|angle| > TRACK_THETA_THRESH_DEG` (8°), it runs a blocking `spin(theta)` — a drift-compensated open-loop point turn — to re-square on the shopper, then skips distance control that tick. `spin()` fires a breakaway kick (`TRACK_KICK_RPM` = 8 rpm for `TRACK_KICK_TICKS` = 30 ticks) then turns at `TRACK_TURN_RPM`, subtracting the kick angle and the inertial coast (`drift(initial, final, ANGULAR_INERTIA)`) so the total swept angle lands on `theta`.
+2. **Distance (PI).** Inside the centre band it holds `TRACK_DIST_THRESH_M` (= `HOLD_DIST`) with `S += TRACK_KP_DIST·dx + TRACK_KI_DIST·(x − thresh)`, kick-started from rest, clipped to `TRACK_MAX_RPM` (= `MAX_SPEED`).
+3. **Mixing.** Steering `rpm_diff = TRACK_KP_ANGLE·θ + TRACK_KD_ANGLE·dθ` is mixed onto the wheels (`R = S + rpm_diff`, `L = S − rpm_diff`) with peak scaling so neither wheel exceeds `TRACK_MAX_RPM`.
+
+```bash
+python3 pathfinding_arc_test.py --mode track                              # live camera (default)
+python3 pathfinding_arc_test.py --mode track --source udp                 # live UDP feed
+python3 pathfinding_arc_test.py --mode track --no-drive --sim-dist 3 --sim-angle 20
+```
+
+The gains and `ANGULAR_INERTIA` / `LINEAR_INERTIA` in `pathfinding_arc_test.py` are placeholders marked `[calibrate]`; inertia defaults to `0`, so drift compensation is skipped until tuned.
+
 ### Output
 
 Each run saves one or two PNG plots to the working directory (`pathfinding_arc_test.png`, `pathfinding_arc_test_encoders.png`). When run via the `--test` systemd unit the PNGs land in `/home/terrencelei/Autonomous-Shopping-Cart/`.
@@ -285,7 +301,7 @@ autonomous-shopping-cart/
 │   ├── throttle_watch.sh           # CPU/thermal throttle monitor
 │   └── requirements.txt
 ├── Pathfinding_algorithm.py        # A* pathfinder + state machine
-├── pathfinding_arc_test.py         # Hardware test: spin / center / follow modes
+├── pathfinding_arc_test.py         # Hardware test: spin / center / follow / track modes
 ├── start_cart.sh / stop_cart.sh    # Launch / stop the full stack detached from SSH
 ├── firmware/
 │   └── cart_motor/

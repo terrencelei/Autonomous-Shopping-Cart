@@ -10,6 +10,9 @@ Usage:
     python3 pathfinding_arc_test.py --port /dev/ttyUSB0
     python3 pathfinding_arc_test.py --mode follow                  # forward/backward, live camera
     python3 pathfinding_arc_test.py --mode follow --no-drive --sim-dist 3.5  # simulation
+    python3 pathfinding_arc_test.py --mode track                   # centre + follow, live camera
+    python3 pathfinding_arc_test.py --mode track --source udp      # centre + follow from UDP
+    python3 pathfinding_arc_test.py --mode track --no-drive --sim-dist 3 --sim-angle 20
 
 
     logic sequence for general turning:
@@ -64,6 +67,24 @@ CENTER_SEARCH_RAMP_HOLD_S = 1
 CENTER_SEARCH_STALL_TICKS = 5
 
 FOLLOW_DIST_DEADBAND_M    = 0.05   # stop commanding when within this of HOLD_DIST
+
+# --- Combined tracking controller (spin-to-centre + distance follow) --------
+# Speeds below are WHEEL RPM.  Gains/inertia marked "calibrate" are placeholders;
+# inertia defaults to 0 so an un-tuned controller simply skips drift comp.
+TRACK_TICKS_PER_SEC    = 1.0 / P.DT                # control ticks per second (=50)
+TRACK_TURN_RPM         = 6.0                       # steady wheel RPM during a spin turn
+TRACK_KICK_RPM         = CENTER_KICK_RPM           # 8  — breakaway burst (see memory)
+TRACK_KICK_TICKS       = CENTER_KICK_RELEASE_TICKS # 30 — kick duration in control ticks
+ANGULAR_INERTIA        = 0.0    # s — yaw coast factor; drift = (w0-w1)*inertia  [calibrate]
+LINEAR_INERTIA         = 0.0    # s — fwd coast factor, reserved for linear drift  [calibrate]
+TRACK_THETA_THRESH_DEG = 8.0    # |angle| beyond which we stop and re-centre via spin()
+TRACK_KP_ANGLE         = 30.0   # wheel RPM of steering per rad of angle error   [calibrate]
+TRACK_KD_ANGLE         = 0.0    # wheel RPM of steering per (rad/s)              [calibrate]
+TRACK_KP_DIST          = 20.0   # RPM speed change per (m/s) approach rate (dx)  [calibrate]
+TRACK_KI_DIST          = 10.0   # RPM speed change per metre of standoff error   [calibrate]
+TRACK_DIST_THRESH_M    = P.HOLD_DIST               # standoff distance to hold (m)
+TRACK_MAX_RPM          = P._rpm(P.MAX_SPEED)       # wheel RPM cap (= MAX_SPEED)
+TRACK_DX_ALPHA         = 0.3                        # EMA factor for the smoothed dx/dt
 
 # =============================================================================
 
@@ -1059,6 +1080,370 @@ def _plot_follow(data, out_path):
     print(f"Saved: {out_path}")
 
 
+# =============================================================================
+# COMBINED TRACKING CONTROLLER (spin-to-centre + distance follow)
+# =============================================================================
+
+
+def _clip(v, lo, hi):
+    return max(lo, min(hi, v))
+
+
+def drift(initial_rpm, final_rpm, inertia):
+    """Extra travel the cart coasts through when the commanded rate steps from
+    ``initial_rpm`` to ``final_rpm``, modelled as proportional to the change.
+
+    Unit-agnostic: callers using cart yaw (rad/s) pass ``inertia`` in seconds
+    and get radians back.  Returns 0 while ``inertia`` is 0, so an un-tuned
+    controller simply skips drift compensation.
+    """
+    return (initial_rpm - final_rpm) * inertia
+
+
+def _drive_spin(motors, read_deltas, wheel_rpm, direction, seconds):
+    """Hold a constant point turn at ``wheel_rpm`` * ``direction`` for
+    ``seconds``, paced at the control period and draining encoders so the
+    ESP32 watchdog stays fed."""
+    if seconds <= 0.0 or motors is None:
+        return
+    omega = wheel_rpm_to_spin_omega(wheel_rpm, direction)
+    v_left, v_right = P._wheel_commands(0.0, omega)
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        loop0 = time.monotonic()
+        motors.send(v_left, v_right)
+        if read_deltas is not None:
+            read_deltas()
+        rest = P.DT - (time.monotonic() - loop0)
+        if rest > 0:
+            time.sleep(rest)
+
+
+def spin(theta_rad, motors, read_deltas=None,
+         turn_rpm=TRACK_TURN_RPM, kick_rpm=TRACK_KICK_RPM,
+         kick_ticks=TRACK_KICK_TICKS, inertia=ANGULAR_INERTIA):
+    """Open-loop point turn through ``theta_rad`` (rad, +CCW / left).
+
+    Profile: a short breakaway kick at ``kick_rpm`` to beat static friction,
+    then a steady turn at ``turn_rpm`` for the remaining angle.  The angle the
+    kick already sweeps (phi) and the inertial coast on each speed change
+    (kick->turn, turn->0) are subtracted up front so the *total* swept angle
+    lands on theta.
+    """
+    if theta_rad == 0.0 or motors is None:
+        return
+    direction = math.copysign(1.0, theta_rad)
+    target    = abs(theta_rad)
+
+    omega_kick = wheel_rpm_to_spin_omega(kick_rpm)   # cart yaw rate, rad/s
+    omega_turn = wheel_rpm_to_spin_omega(turn_rpm)
+    kick_time  = kick_ticks / TRACK_TICKS_PER_SEC    # seconds
+
+    phi        = omega_kick * kick_time              # angle swept by the kick
+    kick_drift = drift(omega_kick, omega_turn, inertia)
+    stop_drift = drift(omega_turn, 0.0, inertia)
+    theta_2    = target - phi - kick_drift - stop_drift   # angle for steady turn
+
+    flush_motors(motors)
+    _drive_spin(motors, read_deltas, kick_rpm, direction, kick_time)   # breakaway kick
+    if theta_2 > 0.0 and omega_turn > 0.0:                             # steady turn
+        _drive_spin(motors, read_deltas, turn_rpm, direction, theta_2 / omega_turn)
+    motors.stop()
+
+
+class TrackController:
+    """Reactive follow controller: spin to keep the shopper centred, then a
+    PI-on-distance forward speed mixed onto the wheels with peak scaling.
+
+    Distances in metres, angles in degrees (camera convention: +angle = target
+    to the right).  Speeds are wheel RPM internally.  ``step`` returns
+    (left_rpm, right_rpm), or None on a tick that ran a blocking re-centre spin
+    (the caller should not send its own command that tick).
+    """
+
+    def __init__(self):
+        self.S = 0.0            # current forward wheel RPM
+        self.dx = 0.0           # smoothed d(dist)/dt  (m/s)
+        self.dx2 = 0.0          # finite difference of dx (m/s^2)
+        self.spun = False       # True on a tick that re-centred
+        self._prev_x = None
+        self._prev_theta = 0.0
+
+    def reset(self):
+        self.__init__()
+
+    def _update_derivatives(self, x, theta_rad):
+        raw_dx = 0.0 if self._prev_x is None else (x - self._prev_x) / P.DT
+        smooth_dx = (1.0 - TRACK_DX_ALPHA) * self.dx + TRACK_DX_ALPHA * raw_dx
+        self.dx2 = (smooth_dx - self.dx) / P.DT
+        self.dx = smooth_dx
+        dtheta = (theta_rad - self._prev_theta) / P.DT
+        self._prev_x = x
+        self._prev_theta = theta_rad
+        return dtheta
+
+    def step(self, x, angle_deg, motors=None, read_deltas=None):
+        """One control tick.  x = distance to target (m), angle_deg = its FOV
+        angle (deg, +right), or None/None when the target is lost."""
+        self.spun = False
+        if x is None or angle_deg is None:
+            self.S = 0.0               # target lost — coast to a stop
+            return 0.0, 0.0
+
+        theta = math.radians(-angle_deg)   # +CCW (left); sign turns toward target
+        dtheta = self._update_derivatives(x, theta)
+
+        # Centering — always parallel, independent of distance
+        if abs(theta) > math.radians(TRACK_THETA_THRESH_DEG):
+            spin(theta, motors, read_deltas)
+            self.S = 0.0                   # motion stopped during the turn
+            self.spun = True
+            return None                    # skip distance control this tick
+
+        rpm_diff = TRACK_KP_ANGLE * theta + TRACK_KD_ANGLE * dtheta
+
+        # Distance control
+        if x - TRACK_DIST_THRESH_M < 0.0:
+            self.S = 0.0
+        else:
+            if self.S == 0.0:
+                self.S = TRACK_KICK_RPM    # breakaway kick on departure from rest
+            delta_S = TRACK_KP_DIST * self.dx + TRACK_KI_DIST * (x - TRACK_DIST_THRESH_M)
+            self.S = _clip(self.S + delta_S, -TRACK_MAX_RPM, TRACK_MAX_RPM)
+        S = self.S
+
+        # Wheel mixing with peak scaling
+        if max(abs(S + rpm_diff), abs(S - rpm_diff)) > TRACK_MAX_RPM:
+            rpm_diff = math.copysign(
+                min(abs(TRACK_MAX_RPM - abs(S)), abs(TRACK_MAX_RPM + abs(S))),
+                rpm_diff)
+        r_motor = S + rpm_diff
+        l_motor = S - rpm_diff
+        return l_motor, r_motor
+
+
+def _rpm_to_v(wheel_rpm):
+    """Wheel RPM -> linear wheel velocity (m/s) for MotorDriver.send()."""
+    return wheel_rpm * P.WHEEL_CIRC / 60.0
+
+
+def run_track(drive=True, port=None, countdown=3, duration=30.0,
+              sim_dist=None, sim_angle=None):
+    """Combined tracking test: spin-to-centre + PI distance follow.
+
+    Reads (dist, angle) from the vision UDP feed, or holds fixed --sim-dist /
+    --sim-angle values when either is given.
+    """
+    use_sim  = sim_dist is not None or sim_angle is not None
+    motors   = open_motors(drive=drive, port=port, countdown=countdown, action="tracking")
+    receiver = None if use_sim else P.TargetReceiver()
+    ctrl     = TrackController()
+
+    print("Track mode: spin-to-centre + PI distance follow.")
+    print(f"Hold {TRACK_DIST_THRESH_M:.2f} m  centre band ±{TRACK_THETA_THRESH_DEG:.0f}°  "
+          f"turn {TRACK_TURN_RPM} rpm  kick {TRACK_KICK_RPM} rpm/{TRACK_KICK_TICKS} ticks")
+    if use_sim:
+        print(f"Simulated target: dist={sim_dist} m, angle={sim_angle}°")
+    else:
+        print(f"Listening for UDP target readings on port {P.UDP_PORT}.")
+
+    times, v_lefts, v_rights = [], [], []
+    target_dists, dist_errors, target_angles = [], [], []
+    enc_l_cum, enc_r_cum, enc_l_delta, enc_r_delta = [], [], [], []
+    cum_l = cum_r = 0
+    start = time.monotonic()
+    i = 0
+
+    flush_motors(motors)
+    read = motors.read_encoder_deltas if motors is not None else (lambda: (0, 0))
+    try:
+        while True:
+            loop0 = time.monotonic()
+            t = loop0 - start
+            if duration > 0 and t >= duration:
+                break
+
+            if use_sim:
+                reading = (sim_dist, sim_angle if sim_angle is not None else 0.0)
+            else:
+                reading = receiver.get()
+            dist_m  = reading[0] if reading is not None else None
+            angle_d = reading[1] if reading is not None else None
+
+            d_l, d_r = read()
+            out = ctrl.step(dist_m, angle_d, motors=motors, read_deltas=read)
+
+            if out is None:                 # a blocking re-centre spin ran this tick
+                v_left = v_right = 0.0
+            else:
+                l_rpm, r_rpm = out
+                v_left, v_right = _rpm_to_v(l_rpm), _rpm_to_v(r_rpm)
+                if motors is not None:
+                    motors.send(v_left, v_right)
+
+            cum_l += d_l; cum_r += d_r
+            times.append(t)
+            v_lefts.append(v_left); v_rights.append(v_right)
+            target_dists.append(float("nan") if dist_m is None else dist_m)
+            dist_errors.append(float("nan") if dist_m is None else dist_m - TRACK_DIST_THRESH_M)
+            target_angles.append(float("nan") if angle_d is None else angle_d)
+            enc_l_delta.append(d_l); enc_r_delta.append(d_r)
+            enc_l_cum.append(cum_l); enc_r_cum.append(cum_r)
+
+            if i % max(1, int(0.5 / P.DT)) == 0:
+                if dist_m is None:
+                    print(f"t={t:5.1f}s  no target")
+                else:
+                    tag = "SPIN          " if ctrl.spun else f"S={ctrl.S:+7.1f}rpm"
+                    print(f"t={t:5.1f}s  dist={dist_m:.2f}m  angle={angle_d:+5.1f}°  "
+                          f"dx={ctrl.dx:+.2f}m/s  {tag}")
+            i += 1
+
+            rest = P.DT - (time.monotonic() - loop0)
+            if rest > 0:
+                time.sleep(rest)
+    except KeyboardInterrupt:
+        print("\nTracking stopped by user.")
+    finally:
+        if motors is not None:
+            print("\nStopping motors.")
+            motors.stop()
+
+    return dict(
+        mode="track",
+        t=times,
+        v_left=v_lefts, v_right=v_rights,
+        target_dist=target_dists, dist_error=dist_errors, target_angle=target_angles,
+        enc_l_cum=enc_l_cum, enc_r_cum=enc_r_cum,
+        enc_l_delta=enc_l_delta, enc_r_delta=enc_r_delta,
+        drove=(motors is not None),
+    )
+
+
+def run_track_camera(drive=True, port=None, countdown=3, duration=30.0, no_display=False):
+    """Camera-driven combined tracking: spin-to-centre + PI distance follow,
+    reading distance and angle from the live IMX500 target lock."""
+    Y = import_yolo_detect()
+    if not Y.RPK_MODEL_PATH.exists():
+        raise SystemExit(
+            f"ERROR: {Y.RPK_MODEL_PATH} not found. Install with: sudo apt install imx500-models"
+        )
+    try:
+        cap = Y.IMX500Capture(model_path=Y.RPK_MODEL_PATH, width=640, height=480, fps=30)
+    except RuntimeError as e:
+        raise SystemExit(
+            f"ERROR: could not open IMX500 camera: {e}\n"
+            "Check that the Raspberry Pi AI Camera is connected, enabled, and not already in use."
+        )
+
+    motors = open_motors(drive=drive, port=port, countdown=countdown, action="tracking")
+    tracker = Y.sv.ByteTrack(
+        track_activation_threshold=0.25,
+        lost_track_buffer=60,
+        minimum_matching_threshold=0.8,
+        frame_rate=30,
+    )
+    smooth_state = {}
+    target_lock = Y.TargetLock()
+    ctrl = TrackController()
+
+    print("Camera track mode: spin-to-centre + PI distance follow.")
+    print(f"Hold {TRACK_DIST_THRESH_M:.2f} m  centre band ±{TRACK_THETA_THRESH_DEG:.0f}°  "
+          f"turn {TRACK_TURN_RPM} rpm  kick {TRACK_KICK_RPM} rpm/{TRACK_KICK_TICKS} ticks")
+    print("Press Q in the Cart View window to stop." if not no_display else "Display disabled.")
+
+    times, v_lefts, v_rights = [], [], []
+    target_dists, dist_errors, target_angles = [], [], []
+    enc_l_cum, enc_r_cum, enc_l_delta, enc_r_delta = [], [], [], []
+    cum_l = cum_r = 0
+    start = time.monotonic()
+    last_tick = time.monotonic()
+    frame_times = []
+    v_left = v_right = 0.0
+    i = 0
+
+    flush_motors(motors)
+    read = motors.read_encoder_deltas if motors is not None else (lambda: (0, 0))
+    try:
+        while True:
+            loop_start = time.monotonic()
+            t = loop_start - start
+            if duration > 0 and t >= duration:
+                break
+
+            ret, frame = cap.read()
+            if not ret:
+                break
+            dets = cap.get_detections()
+            tracked = tracker.update_with_detections(dets)
+            out, rows = Y.annotate_frame(frame, tracked, smooth_state, target_lock, loop_start)
+            target_row = next((r for r in rows if r[0] == "TARGET"), None)
+            dist_m  = target_row[3] if target_row is not None else None
+            angle_d = target_row[4] if target_row is not None else None
+
+            now = time.monotonic()
+            if now - last_tick >= P.DT:
+                d_l, d_r = read()
+                cmd = ctrl.step(dist_m, angle_d, motors=motors, read_deltas=read)
+                if cmd is None:                 # blocking re-centre spin ran
+                    v_left = v_right = 0.0
+                else:
+                    l_rpm, r_rpm = cmd
+                    v_left, v_right = _rpm_to_v(l_rpm), _rpm_to_v(r_rpm)
+                    if motors is not None:
+                        motors.send(v_left, v_right)
+                last_tick = now
+
+                cum_l += d_l; cum_r += d_r
+                times.append(t)
+                v_lefts.append(v_left); v_rights.append(v_right)
+                target_dists.append(float("nan") if dist_m is None else dist_m)
+                dist_errors.append(float("nan") if dist_m is None else dist_m - TRACK_DIST_THRESH_M)
+                target_angles.append(float("nan") if angle_d is None else angle_d)
+                enc_l_delta.append(d_l); enc_r_delta.append(d_r)
+                enc_l_cum.append(cum_l); enc_r_cum.append(cum_r)
+
+                if i % max(1, int(0.5 / P.DT)) == 0 and dist_m is not None:
+                    tag = "SPIN" if ctrl.spun else f"S={ctrl.S:+7.1f}rpm"
+                    print(f"t={t:5.1f}s  dist={dist_m:.2f}m  angle={angle_d:+5.1f}°  {tag}")
+                i += 1
+
+            frame_times.append(time.time())
+            if len(frame_times) > 30:
+                frame_times.pop(0)
+            fps_live = ((len(frame_times) - 1) / (frame_times[-1] - frame_times[0])
+                        if len(frame_times) > 1 else 0.0)
+            dist_str = f"dist={dist_m:.2f}m" if dist_m is not None else "no target"
+            ang_str = f"ang={angle_d:+.1f}°" if angle_d is not None else ""
+            Y.cv2.putText(out, f"TRACK  FPS:{fps_live:.1f}  {dist_str} {ang_str}",
+                          (10, 25), Y.cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
+            if not no_display:
+                Y.overlay_map(out, rows)
+                Y.cv2.imshow("Cart View", out)
+                Y.cv2.imshow("World Map", Y.draw_world_map(rows))
+                if Y.cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+    except KeyboardInterrupt:
+        print("\nCamera tracking stopped by user.")
+    finally:
+        if motors is not None:
+            print("\nStopping motors.")
+            motors.stop()
+        cap.release()
+        if not no_display:
+            Y.cv2.destroyAllWindows()
+
+    return dict(
+        mode="track",
+        t=times,
+        v_left=v_lefts, v_right=v_rights,
+        target_dist=target_dists, dist_error=dist_errors, target_angle=target_angles,
+        enc_l_cum=enc_l_cum, enc_r_cum=enc_r_cum,
+        enc_l_delta=enc_l_delta, enc_r_delta=enc_r_delta,
+        drove=(motors is not None),
+    )
+
+
 def plot(data, out_path="pathfinding_arc_test.png"):
     try:
         import numpy as np
@@ -1071,7 +1456,7 @@ def plot(data, out_path="pathfinding_arc_test.png"):
 
     mode = data.get("mode", "spin")
 
-    if mode == "follow":
+    if mode in ("follow", "track"):
         _plot_follow(data, out_path)
         return
 
@@ -1168,10 +1553,11 @@ def plot(data, out_path="pathfinding_arc_test.png"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--mode", choices=("center", "spin", "follow"), default="center",
-                        help="center keeps shopper centred; spin runs 360°; follow drives forward/backward only")
+    parser.add_argument("--mode", choices=("center", "spin", "follow", "track"), default="center",
+                        help="center keeps shopper centred; spin runs 360°; follow drives "
+                             "forward/backward only; track combines spin-to-centre + distance follow")
     parser.add_argument("--source", choices=("camera", "udp"), default="camera",
-                        help="target angle source for center mode (default: camera)")
+                        help="target source for center/track modes (default: camera)")
     parser.add_argument("--no-drive", action="store_true",
                         help="simulation only — don't open the ESP32 serial port")
     parser.add_argument("--no-display", action="store_true",
@@ -1188,7 +1574,22 @@ if __name__ == "__main__":
                         help="simulate a fixed target distance (m) for follow mode instead of UDP")
     args = parser.parse_args()
 
-    if args.mode == "follow":
+    if args.mode == "track":
+        if args.sim_dist is not None or args.sim_angle is not None or args.source == "udp":
+            if args.source == "udp" and args.sim_dist is None and args.sim_angle is None:
+                print(f"UDP track mode: listening on port {P.UDP_PORT}.")
+            data = run_track(drive=not args.no_drive, port=args.port,
+                             countdown=args.countdown, duration=args.duration,
+                             sim_dist=args.sim_dist, sim_angle=args.sim_angle)
+        else:
+            no_display = args.no_display
+            if not no_display and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+                no_display = True
+                print("No display detected — running headless (use --no-display to silence this message).")
+            data = run_track_camera(drive=not args.no_drive, port=args.port,
+                                    countdown=args.countdown, duration=args.duration,
+                                    no_display=no_display)
+    elif args.mode == "follow":
         if args.sim_dist is not None or args.source == "udp":
             if args.source == "udp" and args.sim_dist is None:
                 print(f"UDP follow mode: listening on port {P.UDP_PORT}.")
