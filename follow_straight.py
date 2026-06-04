@@ -70,7 +70,7 @@ TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop 
 # accumulating speed every frame; that avoids overshoot/stop/overshoot cycles.
 THRESH_M       = HOLD_DIST   # standoff distance to hold (m)
 DIST_DEADBAND_M = 0.20       # no drive inside this band around hold distance
-KP_DIST        = 20.0        # RPM per metre beyond the deadband
+KP_DIST        = 30.0        # RPM per metre beyond the deadband
 KD_DIST        = 8.0         # RPM per (m/s) target-distance closing rate
 DX_ALPHA       = 0.2         # EMA factor for smoothed dx/dt
 RPM_SLEW_PER_S = 35.0        # max command change per second
