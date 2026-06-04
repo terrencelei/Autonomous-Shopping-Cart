@@ -6,7 +6,6 @@ Usage:
     python3 pathfinding_arc_test.py                    # centre target from live camera
     python3 pathfinding_arc_test.py --source udp       # centre target from UDP
     python3 pathfinding_arc_test.py --mode spin         # one 360° spin
-    python3 pathfinding_arc_test.py --mode slow-spin    # slow in-place spin
     python3 pathfinding_arc_test.py --no-drive --sim-angle 15
     python3 pathfinding_arc_test.py --port /dev/ttyUSB0
     python3 pathfinding_arc_test.py --mode follow                  # forward/backward, live camera
@@ -65,15 +64,6 @@ CENTER_SEARCH_RAMP_HOLD_S = 1
 CENTER_SEARCH_STALL_TICKS = 5
 
 FOLLOW_DIST_DEADBAND_M    = 0.05   # stop commanding when within this of HOLD_DIST
-
-# Slow-spin / stall-test parameters.  The test commands wheel RPMs, not raw
-# PWM, because the ESP32 firmware exposes an RPM serial protocol.
-STALL_RAMP_UP_START_RPM = 0.05   # first commanded wheel RPM during stall search
-STALL_RAMP_UP_STEP_RPM  = 0.05   # RPM added after each no-movement hold
-STALL_RAMP_DOWN_STEP_RPM = 0.05  # RPM removed after each moving hold
-STALL_STEP_HOLD_SECS    = 0.5  # time to hold each RPM before changing it
-STALL_MAX_RPM           = 2.0  # safety cap for the ramp-up search
-STALL_OVERCOME_CUM_RPM  = 100.0 # cumulative encoder RPM in a hold before stall is overcome
 
 # =============================================================================
 
@@ -421,177 +411,6 @@ class FollowRpmCommand:
 
 def follow_wheel_commands(v_forward):
     return P._wheel_commands(v_forward, 0.0)
-
-
-def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1.0):
-    pos     = list(START_POS)
-    heading = START_HEADING
-    motors  = open_motors(drive=drive, port=port, countdown=countdown, action="slow-spinning")
-
-    print("Slow spin stall test: ramp wheel RPM up until encoder ticks appear, "
-          "then ramp down until ticks stop.")
-    print(f"Ramp up: {STALL_RAMP_UP_START_RPM:.1f} RPM +{STALL_RAMP_UP_STEP_RPM:.2f} "
-          f"every {STALL_STEP_HOLD_SECS:.2f}s, max {STALL_MAX_RPM:.1f} RPM.")
-    print(f"Ramp down: -{STALL_RAMP_DOWN_STEP_RPM:.2f} RPM every "
-          f"{STALL_STEP_HOLD_SECS:.2f}s.")
-
-    times, robot_xs, robot_ys, robot_thetas = [], [], [], []
-    omegas_cmd, omegas_enc, command_rpms, enc_rpm_mags = [], [], [], []
-    v_lefts, v_rights = [], []
-    enc_right_cum, enc_left_cum = [], []
-    enc_right_delta, enc_left_delta = [], []
-    cum_l, cum_r = 0, 0
-    hold_ticks = 0
-    hold_enc_rpm_total = 0.0
-    hold_enc_rpm_peak = 0.0
-    phase = "ramp_up"
-    command_rpm = STALL_RAMP_UP_START_RPM
-    next_step_t = STALL_STEP_HOLD_SECS
-    initial_move_rpm = None
-    initial_move_enc_rpm = None
-    lowest_move_rpm = None
-    lowest_move_enc_rpm = None
-    stall_rpm = None
-    stall_omega_deg  = None
-    start = time.monotonic()
-    i = 0
-
-    flush_motors(motors)
-    try:
-        while True:
-            t_loop0 = time.monotonic()
-            t = t_loop0 - start
-
-            wheel_speed = command_rpm * P.WHEEL_CIRC / 60.0
-            omega_cmd = math.copysign(2.0 * wheel_speed / P.TRACK_M, direction)
-
-            v_left, v_right = P._wheel_commands(0.0, omega_cmd)
-            if motors is not None:
-                motors.send(v_left, v_right)
-                d_l, d_r = motors.read_encoder_deltas()
-            else:
-                d_l, d_r = 0, 0
-
-            # Encoder-derived angular velocity
-            enc_rpm_l = encoder_delta_to_wheel_rpm(d_l)
-            enc_rpm_r = encoder_delta_to_wheel_rpm(d_r)
-            vl_enc = enc_rpm_l * P.WHEEL_CIRC / 60.0
-            vr_enc = enc_rpm_r * P.WHEEL_CIRC / 60.0
-            omega_enc = (vr_enc - vl_enc) / P.TRACK_M
-            enc_rpm_mag = max(abs(enc_rpm_l), abs(enc_rpm_r))
-            tick_count = abs(d_l) + abs(d_r)
-            hold_ticks += tick_count
-            hold_enc_rpm_total += enc_rpm_mag
-            hold_enc_rpm_peak = max(hold_enc_rpm_peak, enc_rpm_mag)
-
-            cum_l += d_l; cum_r += d_r
-            enc_left_delta.append(d_l); enc_right_delta.append(d_r)
-            enc_left_cum.append(cum_l); enc_right_cum.append(cum_r)
-
-            times.append(t)
-            robot_xs.append(pos[0]); robot_ys.append(pos[1])
-            robot_thetas.append(heading)
-
-            pos, heading, _v_fwd, _ = integrate_kinematics(
-                pos, heading, v_left, v_right, P.DT)
-            omegas_cmd.append(omega_cmd)
-            omegas_enc.append(omega_enc)
-            command_rpms.append(command_rpm)
-            enc_rpm_mags.append(enc_rpm_mag)
-            v_lefts.append(v_left); v_rights.append(v_right)
-
-            if motors is None:
-                if t >= next_step_t:
-                    command_rpm += STALL_RAMP_UP_STEP_RPM
-                    next_step_t = t + STALL_STEP_HOLD_SECS
-            elif t >= next_step_t:
-                stall_overcome = hold_enc_rpm_total >= STALL_OVERCOME_CUM_RPM
-                hold_moved = hold_ticks > 0
-                if phase == "ramp_up" and stall_overcome:
-                    initial_move_rpm = command_rpm
-                    initial_move_enc_rpm = hold_enc_rpm_peak
-                    lowest_move_rpm = command_rpm
-                    lowest_move_enc_rpm = hold_enc_rpm_peak
-                    phase = "ramp_down"
-                    print(f"Initial movement: cmd={initial_move_rpm:.2f} wheel RPM, "
-                          f"enc≈{initial_move_enc_rpm:.2f} RPM  (t={t:.2f}s)")
-                elif phase == "ramp_up":
-                    if command_rpm >= STALL_MAX_RPM:
-                        print(f"Reached {STALL_MAX_RPM:.1f} RPM without encoder movement.")
-                        break
-                    command_rpm = min(command_rpm + STALL_RAMP_UP_STEP_RPM, STALL_MAX_RPM)
-                elif phase == "ramp_down" and hold_moved:
-                    lowest_move_rpm = command_rpm
-                    lowest_move_enc_rpm = hold_enc_rpm_peak
-                    command_rpm = max(0.0, command_rpm - STALL_RAMP_DOWN_STEP_RPM)
-                elif phase == "ramp_down":
-                    stall_rpm = command_rpm
-                    stall_omega_deg = math.degrees(abs(omega_cmd))
-                    print(f"Stopped moving: lowest moving cmd={lowest_move_rpm:.2f} "
-                          f"wheel RPM, first stopped cmd={stall_rpm:.2f} wheel RPM  "
-                          f"(t={t:.2f}s)")
-                    break
-
-                hold_ticks = 0
-                hold_enc_rpm_total = 0.0
-                hold_enc_rpm_peak = 0.0
-                next_step_t = t + STALL_STEP_HOLD_SECS
-
-            if duration > 0 and t >= duration:
-                break
-
-            if i % max(1, int(1.0 / P.DT)) == 0:
-                print(f"t={t:5.1f}s  {phase:9s}  cmd={command_rpm:5.2f} wheel RPM  "
-                      f"enc={enc_rpm_mag:5.2f} RPM  "
-                      f"hold_rpm={hold_enc_rpm_total:6.1f}/{STALL_OVERCOME_CUM_RPM:.0f}  "
-                      f"hold_ticks={hold_ticks:4d}  "
-                      f"ticks=({d_l:+d},{d_r:+d})")
-            i += 1
-
-            elapsed = time.monotonic() - t_loop0
-            if elapsed < P.DT:
-                time.sleep(P.DT - elapsed)
-    except KeyboardInterrupt:
-        print("\nSlow spin stopped by user.")
-    finally:
-        if motors is not None:
-            print("\nStopping motors.")
-            motors.stop()
-
-    if initial_move_rpm is not None:
-        print(f"\nInitial RPM to overcome stall: {initial_move_rpm:.2f} wheel RPM "
-              f"(encoder≈{initial_move_enc_rpm:.2f} RPM)")
-    else:
-        print("\nInitial movement was not detected.")
-
-    if lowest_move_rpm is not None and stall_rpm is not None:
-        print(f"Lowest RPM before stalling again: {lowest_move_rpm:.2f} wheel RPM "
-              f"(encoder≈{lowest_move_enc_rpm:.2f} RPM)")
-        print(f"First no-tick command after stall: {stall_rpm:.2f} wheel RPM")
-    elif stall_omega_deg is not None:
-        print(f"Stall speed: {stall_omega_deg:.1f}°/s")
-    else:
-        print("No second stall detected within duration.")
-
-    return dict(
-        mode="slow-spin",
-        t=times,
-        rx=robot_xs, ry=robot_ys, rt=robot_thetas,
-        omega=omegas_cmd,
-        omega_enc=omegas_enc,
-        command_rpm=command_rpms,
-        encoder_rpm=enc_rpm_mags,
-        stall_omega_deg=stall_omega_deg,
-        initial_move_rpm=initial_move_rpm,
-        initial_move_enc_rpm=initial_move_enc_rpm,
-        lowest_move_rpm=lowest_move_rpm,
-        lowest_move_enc_rpm=lowest_move_enc_rpm,
-        stall_rpm=stall_rpm,
-        v_left=v_lefts, v_right=v_rights,
-        enc_l_cum=enc_left_cum, enc_r_cum=enc_right_cum,
-        enc_l_delta=enc_left_delta, enc_r_delta=enc_right_delta,
-        drove=(motors is not None),
-    )
 
 
 def import_yolo_detect():
@@ -1240,70 +1059,6 @@ def _plot_follow(data, out_path):
     print(f"Saved: {out_path}")
 
 
-def _plot_slow_spin(data, out_path):
-    try:
-        import numpy as np
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-    except ImportError as e:
-        print(f"Skipping plots: {e}")
-        return
-
-    t            = data['t']
-    cmd_wheel_rpm = data.get(
-        'command_rpm',
-        [spin_omega_to_wheel_rpm(o) for o in data['omega']],
-    )
-    enc_wheel_rpm = data.get(
-        'encoder_rpm',
-        [spin_omega_to_wheel_rpm(o) for o in data.get('omega_enc', [0.0] * len(t))],
-    )
-    rpm_cmd_l    = [v / P.WHEEL_CIRC * 60 for v in data['v_left']]
-    rpm_cmd_r    = [v / P.WHEEL_CIRC * 60 for v in data['v_right']]
-    rpm_enc_l    = [encoder_delta_to_wheel_rpm(d) for d in data['enc_l_delta']]
-    rpm_enc_r    = [encoder_delta_to_wheel_rpm(d) for d in data['enc_r_delta']]
-
-    fig, (ax_omega, ax_rpm) = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
-
-    # ── Commanded vs encoder equivalent wheel RPM ─────────
-    ax_omega.plot(t, cmd_wheel_rpm, 'b-',  label='commanded wheel RPM', lw=1.5)
-    ax_omega.plot(t, enc_wheel_rpm, 'r-',  label='encoder wheel RPM',   lw=1.2, alpha=0.85)
-    stall = data.get('stall_rpm')
-    if stall is not None:
-        ax_omega.axhline(stall, color='orange', ls='--', lw=1.2,
-                         label=f'stall {stall:.2f} RPM')
-    ax_omega.set_ylabel('wheel RPM')
-    ax_omega.set_title('Commanded vs encoder wheel RPM')
-    ax_omega.legend(fontsize=8)
-    ax_omega.grid(True, alpha=0.3)
-
-    # ── Per-wheel commanded vs encoder RPM ────────────────
-    ax_rpm.plot(t, rpm_cmd_l, 'b-',  label='left cmd',  lw=1.5)
-    ax_rpm.plot(t, rpm_cmd_r, 'r-',  label='right cmd', lw=1.5)
-    ax_rpm.plot(t, rpm_enc_l, 'b--', label='left enc',  lw=1.2, alpha=0.8)
-    ax_rpm.plot(t, rpm_enc_r, 'r--', label='right enc', lw=1.2, alpha=0.8)
-    initial = data.get('initial_move_rpm')
-    if initial is not None:
-        ax_rpm.axhline(initial, color='green', ls='--', lw=1.2,
-                       label=f'initial move {initial:.2f} RPM')
-        ax_rpm.axhline(-initial, color='green', ls='--', lw=1.0, alpha=0.45)
-    lowest = data.get('lowest_move_rpm')
-    if lowest is not None:
-        ax_rpm.axhline(lowest, color='orange', ls=':', lw=1.2,
-                       label=f'lowest moving {lowest:.2f} RPM')
-        ax_rpm.axhline(-lowest, color='orange', ls=':', lw=1.0, alpha=0.45)
-    ax_rpm.set_xlabel('time (s)')
-    ax_rpm.set_ylabel('RPM')
-    ax_rpm.set_title('Per-wheel commanded vs encoder RPM')
-    ax_rpm.legend(fontsize=8)
-    ax_rpm.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=110, bbox_inches='tight')
-    print(f"Saved: {out_path}")
-
-
 def plot(data, out_path="pathfinding_arc_test.png"):
     try:
         import numpy as np
@@ -1315,10 +1070,6 @@ def plot(data, out_path="pathfinding_arc_test.png"):
         return
 
     mode = data.get("mode", "spin")
-
-    if mode == "slow-spin":
-        _plot_slow_spin(data, out_path)
-        return
 
     if mode == "follow":
         _plot_follow(data, out_path)
@@ -1417,8 +1168,8 @@ def plot(data, out_path="pathfinding_arc_test.png"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--mode", choices=("center", "spin", "slow-spin", "follow"), default="center",
-                        help="center keeps shopper centred; spin runs 360°; slow-spin turns in place slowly; follow drives forward/backward only")
+    parser.add_argument("--mode", choices=("center", "spin", "follow"), default="center",
+                        help="center keeps shopper centred; spin runs 360°; follow drives forward/backward only")
     parser.add_argument("--source", choices=("camera", "udp"), default="camera",
                         help="target angle source for center mode (default: camera)")
     parser.add_argument("--no-drive", action="store_true",
@@ -1430,9 +1181,7 @@ if __name__ == "__main__":
     parser.add_argument("--countdown", type=int, default=3,
                         help="seconds before motors start (default: 3)")
     parser.add_argument("--duration", type=float, default=0.0,
-                        help="run time in seconds for center/slow-spin; 0 runs until Ctrl-C (default: 0)")
-    parser.add_argument("--direction", choices=("left", "right"), default="left",
-                        help="slow-spin direction (default: left)")
+                        help="run time in seconds for center; 0 runs until Ctrl-C (default: 0)")
     parser.add_argument("--sim-angle", type=float, default=None,
                         help="simulate a fixed target angle instead of listening for UDP")
     parser.add_argument("--sim-dist", type=float, default=None,
@@ -1456,11 +1205,6 @@ if __name__ == "__main__":
                                      no_display=no_display)
     elif args.mode == "spin":
         data = run_spin(drive=not args.no_drive, port=args.port, countdown=args.countdown)
-    elif args.mode == "slow-spin":
-        spin_dir = 1.0 if args.direction == "left" else -1.0
-        data = run_slow_spin(drive=not args.no_drive, port=args.port,
-                             countdown=args.countdown, duration=args.duration,
-                             direction=spin_dir)
     elif args.sim_angle is not None or args.source == "udp":
         if args.source == "udp" and args.sim_angle is None:
             print(f"UDP centering mode: listening on port {P.UDP_PORT}.")

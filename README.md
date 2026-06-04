@@ -218,26 +218,6 @@ A 500 ms watchdog stops the motors if no `L… R…` line arrives — so a host 
 
 ---
 
-## Pathfinding Simulation (offline)
-
-`pathfinding_sim.py` is a standalone 2D simulator of the cart's chase behaviour — no camera, no motors. Useful for tuning the state machine without hardware.
-
-### What It Does
-
-- Generates a store map with configurable aisles
-- Simulates a **moving target** (shopper) navigating the aisles
-- The cart chases using **A\* pathfinding** around shelving obstacles
-- Outputs an MP4 animation (`pathfinding_sim.mp4`)
-
-### Usage
-
-```bash
-pip install matplotlib numpy
-python3 pathfinding_sim.py
-```
-
----
-
 ## Hardware Tests (`pathfinding_arc_test.py`)
 
 Standalone test script for verifying motor control and pathfinder logic without running the full cart stack. Each mode exercises a different part of the drive system in isolation.
@@ -260,15 +240,6 @@ Commands the cart to rotate one complete revolution at `MAX_TURN` and stops when
 ```bash
 python3 pathfinding_arc_test.py --mode spin
 python3 pathfinding_arc_test.py --mode spin --no-drive   # simulated
-```
-
-#### `--mode slow-spin` — stall characterisation
-
-Ramps wheel RPM up from `STALL_RAMP_UP_START_RPM` until encoders report movement, then ramps back down until the motors stall again. Reports the minimum RPM needed to overcome static friction. Run this once after assembly or after changing motors/gearboxes.
-
-```bash
-python3 pathfinding_arc_test.py --mode slow-spin
-python3 pathfinding_arc_test.py --mode slow-spin --direction right --duration 60
 ```
 
 #### `--mode center` — angle-only centering
@@ -314,8 +285,7 @@ autonomous-shopping-cart/
 │   ├── throttle_watch.sh           # CPU/thermal throttle monitor
 │   └── requirements.txt
 ├── Pathfinding_algorithm.py        # A* pathfinder + state machine
-├── pathfinding_arc_test.py         # Hardware test: spin / slow-spin / center / follow modes
-├── pathfinding_sim.py              # 2D simulator used to design the planner
+├── pathfinding_arc_test.py         # Hardware test: spin / center / follow modes
 ├── start_cart.sh / stop_cart.sh    # Launch / stop the full stack detached from SSH
 ├── firmware/
 │   └── cart_motor/

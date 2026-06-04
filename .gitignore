@@ -11,8 +11,7 @@ __pycache__/
 # Runtime logs from start_cart.sh
 logs/
 
-# Generated simulation / test artefacts
-pathfinding_sim.mp4
+# Generated test artefacts
 pathfinding_arc_test.png
 pathfinding_arc_test_trajectory.png
 pathfinding_arc_test_motors.png
