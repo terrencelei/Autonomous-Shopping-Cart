@@ -4,8 +4,7 @@ A self-following shopping cart that tracks a designated shopper and treats all o
 
 | Component | Role | Technology |
 |-----------|------|------------|
-| **Vision** | Sensing (primary) | SSD-MobileNetV2 on IMX500 NPU + ByteTrack |
-| **UWB** | Sensing (backup) | Apple Ultra-Wideband, iPhone-to-iPhone ranging |
+| **Vision** | Sensing | SSD-MobileNetV2 on IMX500 NPU + ByteTrack |
 | **Pathfinder** | Planning | A\* + state machine on a known store map |
 | **ESP32** | Motor control | Dual TB9051FTG drivers with quadrature encoders |
 
@@ -78,7 +77,7 @@ In `--live` mode, **don't also run `./start_cart.sh`** — both copies would fig
 
 ---
 
-## Vision System (Primary)
+## Vision System
 
 A detection pipeline that runs entirely on the Raspberry Pi AI Camera (IMX500). The SSD-MobileNetV2 object detector executes on the IMX500's on-chip neural processor — no inference on the Pi CPU — and the result is streamed back over CSI alongside each frame. The host then runs ByteTrack to assign stable track IDs, locks onto the closest centred shopper, and maps everyone else as an obstacle.
 
@@ -306,47 +305,6 @@ Each run saves one or two PNG plots to the working directory (`pathfinding_arc_t
 
 ---
 
-## UWB System (Backup / Redundancy)
-
-Two iPhones use Apple's Ultra-Wideband chip to maintain a precise distance and angle measurement between the shopper and the cart, independent of the camera.
-
-### Apps
-
-#### Shopper (Tag App) — `uwb/UWBCart/`
-Runs on the **shopper's iPhone**. Advertises over MultipeerConnectivity and acts as a UWB beacon.
-
-#### CartView (Viewer App) — `uwb/ViewerApp/`
-Runs on the **cart's iPhone**. Displays:
-- Top-down radar with the shopper's position
-- Smoothed distance in metres
-- Smoothed horizontal angle
-- Auto-scaling range rings
-
-### How It Works
-
-1. Shopper app advertises via MultipeerConnectivity (`_uwb-cart._tcp`)
-2. CartView discovers and connects to the Shopper
-3. Both devices exchange NearbyInteraction discovery tokens
-4. UWB ranging begins — distance and angle update continuously
-5. Sessions auto-restart if the peer goes out of range
-
-### Smoothing & Calibration
-
-Raw UWB readings are filtered through an EMA (α = 0.2). Both distance and angle support zeroing:
-- **Zero Dist** — samples 20 readings and averages for the offset
-- **Zero Angle** — captures current heading as the zero reference
-- **Reset All** — clears both offsets
-
-Offsets persist in UserDefaults across launches.
-
-### Requirements
-
-- Two iPhones with U2 chip (iPhone 14 Pro or later for angle support)
-- iOS 16.0+
-- Both devices on the same local network
-
----
-
 ## Project Structure
 
 ```
@@ -362,10 +320,6 @@ autonomous-shopping-cart/
 ├── firmware/
 │   └── cart_motor/
 │       └── cart_motor.ino          # ESP32 motor controller (TB9051FTG)
-├── uwb/                            # Backup: UWB positioning
-│   ├── UWBCart/                    # Shopper app source
-│   ├── ViewerApp/                  # CartView app source
-│   └── UWBCart.xcodeproj
 └── README.md
 ```
 
@@ -402,15 +356,3 @@ Check `RIGHT_ENC_SIGN` / `LEFT_ENC_SIGN` — if either encoder counts the wrong 
 
 **Obstacle avoidance not triggering:**
 The cart only avoids from `IN_VIEW`, `FOLLOW_GOAL`, and `RETURN_CENTER`. If the cart is in a search state (`SPIN` etc.) when an obstacle appears, avoidance does not interrupt it. This is by design — avoidance is only relevant while actively following.
-
-**Xcode "Executable is not codesigned":**
-1. **Product → Clean Build Folder** (⇧⌘K)
-2. **Settings → General → VPN & Device Management → Trust** on the iPhone
-3. Reconnect and run again
-
-**UWB angle shows nil:**
-- Grant camera permission to CartView
-- Move the cart phone slightly to initialise ARKit world tracking
-
-**UWB disconnects frequently:**
-Keep both phones within ~10m with clear line of sight. Metal shelving attenuates the UWB signal. Sessions auto-restart on reconnect.
