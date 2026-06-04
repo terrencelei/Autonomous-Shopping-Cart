@@ -68,9 +68,10 @@ KICK_TICKS = 30      # release the kick once this many encoder ticks accumulate
 TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop fallback
 
 # Spin (point-turn) controller
-TURN_RPM         = 6.0    # steady wheel RPM during the turn after the kick
-ANGULAR_INERTIA  = 0.0    # s — yaw coast factor; drift = (w0-w1)*inertia   [calibrate]
-THETA_THRESH_DEG = 8.0    # re-centre with spin() once |angle| exceeds this
+TURN_RPM          = 6.0    # steady wheel RPM during the turn after the kick
+ANGULAR_INERTIA   = 0.0    # s — yaw coast factor; drift = (w0-w1)*inertia   [calibrate]
+THETA_THRESH_DEG  = 8.0    # follow loop: re-centre with spin() once |angle| exceeds this
+SPIN_DEADBAND_DEG = 0.5    # spin(): ignore turn requests smaller than this (no-op)
 
 # Distance (displacement) controller
 THRESH_M       = HOLD_DIST   # standoff distance to hold (m)
@@ -207,7 +208,7 @@ def spin(theta_rad, motors):
     With encoders present each phase is closed-loop on the measured swept angle
     (robust); without them it falls back to open-loop timing.
     """
-    if abs(theta_rad) < math.radians(0.5):
+    if abs(theta_rad) < math.radians(SPIN_DEADBAND_DEG):
         return
     direction  = 1.0 if theta_rad > 0 else -1.0
     target     = abs(theta_rad)
