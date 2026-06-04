@@ -9,8 +9,8 @@ spin + displacement pseudocode.
     reads "E,<l>,<r>\\n" encoder feedback.  The proven breakaway kick
     (KICK_RPM = 8 released after KICK_TICKS = 30 encoder ticks) is reused.
   * Control: implemented fresh from the pseudocode (drift / spin / follow).
-    Independent of Pathfinding_algorithm.py's A* state machine — only
-    hardware + calibration constants are imported from it.
+    Fully independent of Pathfinding_algorithm.py — the hardware/dimensional
+    specs it needs are cloned below (keep in sync if the cart is re-measured).
 
 Usage:
     python3 follow.py                 # live camera + drive
@@ -26,7 +26,34 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import Pathfinding_algorithm as P   # hardware + calibration constants only
+
+# =============================================================================
+# HARDWARE / DIMENSIONAL SPECS  (cloned from Pathfinding_algorithm.py so this
+# follower stands alone — keep in sync if the cart is re-measured)
+# =============================================================================
+
+WHEEL_DIAMETER_M = 0.06778        # outer drive-wheel diameter (m)
+TRACK_M          = 0.333          # wheel spacing, centre-to-centre (m)
+ENCODER_PPR      = 298            # encoder pulses per wheel rev (post-gearbox, 4x quadrature)
+GEAR_RATIO       = 5              # motor gearbox ratio
+
+WHEEL_CIRC  = math.pi * WHEEL_DIAMETER_M   # metres per wheel revolution
+M_PER_PULSE = WHEEL_CIRC / ENCODER_PPR     # metres of wheel travel per encoder tick
+
+# Drive direction / encoder polarity (flip if a wheel counts or drives backwards)
+RIGHT_ENC_SIGN   = -1
+LEFT_ENC_SIGN    = +1
+RIGHT_MOTOR_SIGN = +1             # +1 = forward
+LEFT_MOTOR_SIGN  = +1
+
+# Serial link to the ESP32
+MOTOR_PORT = "/dev/ttyUSB0"       # CP2102 USB-UART bridge
+MOTOR_BAUD = 115200
+
+# Motion limits / loop rate
+MAX_SPEED = 0.5                   # m/s forward
+DT        = 0.02                  # control loop period (s)
+HOLD_DIST = 2.0                   # target hold distance (m)
 
 # =============================================================================
 # CALIBRATION  (speeds are WHEEL RPM unless noted; angles in radians, +CCW/left)
@@ -38,7 +65,7 @@ CAM_W, CAM_H, CAM_FPS = 640, 480, 30
 # Proven breakaway kick (see memory: cart-drive-calibration)
 KICK_RPM   = 8.0     # wheel RPM burst to overcome static friction
 KICK_TICKS = 30      # release the kick once this many encoder ticks accumulate
-TICKS_PER_SEC = 1.0 / P.DT   # control ticks per second (=50); used for open-loop fallback
+TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop fallback
 
 # Spin (point-turn) controller
 TURN_RPM         = 6.0    # steady wheel RPM during the turn after the kick
@@ -46,7 +73,7 @@ ANGULAR_INERTIA  = 0.0    # s — yaw coast factor; drift = (w0-w1)*inertia   [c
 THETA_THRESH_DEG = 8.0    # re-centre with spin() once |angle| exceeds this
 
 # Distance (displacement) controller
-THRESH_M       = P.HOLD_DIST   # standoff distance to hold (m)
+THRESH_M       = HOLD_DIST   # standoff distance to hold (m)
 LINEAR_INERTIA = 0.0    # s — forward coast factor, reserved for linear drift  [calibrate]
 KP_DIST        = 30.0   # RPM speed change per (m/s) of approach rate dx        [calibrate]
 KI_DIST        = 15.0   # RPM speed change per metre of standoff error (x-thresh) [calibrate]
@@ -57,7 +84,7 @@ KP_ANGLE = 40.0   # RPM of wheel-difference per radian of angle error          [
 KD_ANGLE = 0.0    # RPM of wheel-difference per (rad/s) of angular rate         [calibrate]
 
 # Limits
-MAX_RPM = P.MAX_SPEED / P.WHEEL_CIRC * 60.0   # wheel RPM cap (= MAX_SPEED)
+MAX_RPM = MAX_SPEED / WHEEL_CIRC * 60.0   # wheel RPM cap (= MAX_SPEED)
 
 
 # =============================================================================
@@ -70,15 +97,15 @@ def _clip(v, lo, hi):
 
 def _rpm_to_yaw(wheel_rpm):
     """Point-turn wheel RPM -> cart yaw rate (rad/s), magnitude."""
-    v = wheel_rpm * P.WHEEL_CIRC / 60.0      # wheel linear speed (m/s)
-    return 2.0 * v / P.TRACK_M               # differential yaw rate
+    v = wheel_rpm * WHEEL_CIRC / 60.0      # wheel linear speed (m/s)
+    return 2.0 * v / TRACK_M               # differential yaw rate
 
 
 def _ticks_to_yaw(d_left, d_right):
     """Encoder tick deltas -> swept yaw (rad), +CCW (right wheel ahead of left)."""
-    left_m  = d_left  * P.M_PER_PULSE
-    right_m = d_right * P.M_PER_PULSE
-    return (right_m - left_m) / P.TRACK_M
+    left_m  = d_left  * M_PER_PULSE
+    right_m = d_right * M_PER_PULSE
+    return (right_m - left_m) / TRACK_M
 
 
 def drift(initial_rpm, final_rpm, inertia):
@@ -106,8 +133,8 @@ class MotorIO:
             return
         try:
             import serial
-            self._ser = serial.Serial(port or P.MOTOR_PORT, P.MOTOR_BAUD, timeout=0.01)
-            print(f"ESP32 connected on {port or P.MOTOR_PORT}")
+            self._ser = serial.Serial(port or MOTOR_PORT, MOTOR_BAUD, timeout=0.01)
+            print(f"ESP32 connected on {port or MOTOR_PORT}")
         except Exception as e:
             print(f"WARNING: ESP32 unavailable ({e}) — running without drive")
 
@@ -118,7 +145,7 @@ class MotorIO:
     def send_rpm(self, l_rpm, r_rpm):
         if not self.has_serial:
             return
-        cmd = f"L{P.LEFT_MOTOR_SIGN * l_rpm:.1f} R{P.RIGHT_MOTOR_SIGN * r_rpm:.1f}\n"
+        cmd = f"L{LEFT_MOTOR_SIGN * l_rpm:.1f} R{RIGHT_MOTOR_SIGN * r_rpm:.1f}\n"
         self._ser.write(cmd.encode())
 
     def stop(self):
@@ -139,8 +166,8 @@ class MotorIO:
                 continue
             try:
                 _, ls, rs = line.split(",", 2)
-                lc = P.LEFT_ENC_SIGN * int(ls)
-                rc = P.RIGHT_ENC_SIGN * int(rs)
+                lc = LEFT_ENC_SIGN * int(ls)
+                rc = RIGHT_ENC_SIGN * int(rs)
             except ValueError:
                 continue
             if self._last_l is not None:
@@ -196,7 +223,7 @@ def spin(theta_rad, motors):
         phi = 0.0
         t_timeout = time.monotonic() + 1.5
         while acc_ticks < KICK_TICKS and time.monotonic() < t_timeout:
-            time.sleep(P.DT)
+            time.sleep(DT)
             dl, dr = motors.read_deltas()
             acc_ticks += abs(dl) + abs(dr)
             phi += abs(_ticks_to_yaw(dl, dr))
@@ -218,7 +245,7 @@ def spin(theta_rad, motors):
             swept = 0.0
             t_timeout = time.monotonic() + theta_2 / omega_turn + 1.5
             while swept < theta_2 and time.monotonic() < t_timeout:
-                time.sleep(P.DT)
+                time.sleep(DT)
                 dl, dr = motors.read_deltas()
                 swept += abs(_ticks_to_yaw(dl, dr))
         else:
@@ -355,7 +382,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
             dt = now - prev_t
             prev_t = now
             if dt <= 0.0:
-                dt = P.DT
+                dt = DT
 
             dets = cap.get_detections()
             tracked = tracker.update_with_detections(dets)
