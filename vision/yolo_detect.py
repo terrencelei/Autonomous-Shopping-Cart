@@ -435,12 +435,13 @@ def profile_similarity(a, b):
 
 class TargetLock:
     def __init__(self):
-        self.locked_id             = None
-        self.last_seen             = 0.0
-        self.last_dist             = None
-        self.last_angle            = None
-        self.color_profile         = None   # (N_PROFILE_CHUNKS, 3) float32
-        self.switch_candidate_id   = None
+        self.locked_id               = None
+        self.last_seen               = 0.0
+        self.last_dist               = None
+        self.last_angle              = None
+        self.reference_profile       = None   # FIXED on first detection, never updated
+        self.color_profile           = None   # EMA-smoothed, used for display/debug
+        self.switch_candidate_id     = None
         self.switch_candidate_frames = 0
 
     def choose(self, measurements, now):
@@ -451,48 +452,107 @@ class TargetLock:
                 self.locked_id = None
             return None
 
-        best = min(measurements, key=lambda m: m["score"])
-        if all(m["track_id"] is None for m in measurements):
+        # ------------------------------------------------------------------ #
+        # First ever detection: lock onto whoever we see and save their
+        # color profile as the permanent reference.  Never overwrite it.
+        # ------------------------------------------------------------------ #
+        if self.reference_profile is None:
+            # Pick the closest person (lowest score = closest + most centred)
+            best = min(measurements, key=lambda m: m["score"])
+            self._lock_first(best, now)
             return best["index"]
 
-        best_tracked = min(
-            (m for m in measurements if m["track_id"] is not None),
-            key=self._target_score,
-        )
-        current = next((m for m in measurements if m["track_id"] == self.locked_id), None)
+        # ------------------------------------------------------------------ #
+        # Score every detection against the fixed reference profile
+        # ------------------------------------------------------------------ #
+        for m in measurements:
+            m["ref_similarity"] = profile_similarity(self.reference_profile,
+                                                      m["color_profile"])
 
+        # The TARGET candidate is whichever tracked person best matches the
+        # reference.  Untracked detections (tid=None) are ignored for locking
+        # but still returned as OBSTACLE.
+        tracked = [m for m in measurements if m["track_id"] is not None]
+
+        if not tracked:
+            # No tracker IDs yet — fall back to closest match by color
+            best_color = max(measurements,
+                             key=lambda m: m["ref_similarity"] or 0.0)
+            if (best_color["ref_similarity"] is not None and
+                    best_color["ref_similarity"] >= TARGET_COLOR_REID_MIN_SCORE):
+                self._remember(best_color, now)
+                return best_color["index"]
+            if now - self.last_seen > TARGET_LOST_TIMEOUT_S:
+                self.locked_id = None
+            return None
+
+        # Among tracked detections, find whoever currently holds the locked ID
+        current = next((m for m in tracked if m["track_id"] == self.locked_id), None)
+
+        # Re-ID: if we lost the locked ID, search by color + geometry
         if current is None:
-            if self.locked_id is not None and now - self.last_seen <= TARGET_LOST_TIMEOUT_S:
-                reid = self._reidentify(measurements)
+            if now - self.last_seen <= TARGET_LOST_TIMEOUT_S:
+                reid = self._reidentify(tracked)
                 if reid is not None:
                     self._lock(reid["track_id"], now, reid)
                     return reid["index"]
                 return None
-            self._lock(best_tracked["track_id"], now, best_tracked)
-            return best_tracked["index"]
+            # Timeout expired — pick the best color match above threshold
+            best_match = max(tracked, key=lambda m: m["ref_similarity"] or 0.0)
+            if (best_match["ref_similarity"] is not None and
+                    best_match["ref_similarity"] >= TARGET_COLOR_REID_MIN_SCORE):
+                self._lock(best_match["track_id"], now, best_match)
+                return best_match["index"]
+            self.locked_id = None
+            return None
 
+        # Happy path: current target still visible
         self._remember(current, now)
-        candidate_similarity = profile_similarity(self.color_profile, best_tracked["color_profile"])
-        color_ok = (
-            candidate_similarity is None or
-            candidate_similarity >= TARGET_COLOR_SWITCH_MIN_SCORE
-        )
-        if (color_ok and best_tracked["track_id"] != self.locked_id and
-                self._target_score(best_tracked) + TARGET_SWITCH_MARGIN < self._target_score(current)):
-            if best_tracked["track_id"] == self.switch_candidate_id:
-                self.switch_candidate_frames += 1
-            else:
-                self.switch_candidate_id     = best_tracked["track_id"]
-                self.switch_candidate_frames = 1
 
-            if self.switch_candidate_frames >= TARGET_SWITCH_FRAMES:
-                self._lock(best_tracked["track_id"], now, best_tracked)
-                return best_tracked["index"]
+        # Consider switching only if another tracked person is a *better*
+        # color match AND significantly closer/more central
+        for candidate in tracked:
+            if candidate["track_id"] == self.locked_id:
+                continue
+            c_sim = candidate["ref_similarity"] or 0.0
+            t_sim = current["ref_similarity"]   or 0.0
+            color_improvement = c_sim - t_sim
+
+            if (color_improvement > 0.15 and
+                    c_sim >= TARGET_COLOR_SWITCH_MIN_SCORE and
+                    candidate["score"] + TARGET_SWITCH_MARGIN < current["score"]):
+                if candidate["track_id"] == self.switch_candidate_id:
+                    self.switch_candidate_frames += 1
+                else:
+                    self.switch_candidate_id     = candidate["track_id"]
+                    self.switch_candidate_frames = 1
+
+                if self.switch_candidate_frames >= TARGET_SWITCH_FRAMES:
+                    self._lock(candidate["track_id"], now, candidate)
+                    return candidate["index"]
+                break
         else:
             self.switch_candidate_id     = None
             self.switch_candidate_frames = 0
 
         return current["index"]
+
+    # ---------------------------------------------------------------------- #
+    # Internal helpers
+    # ---------------------------------------------------------------------- #
+
+    def _lock_first(self, measurement, now):
+        """Called exactly once — saves the permanent reference profile."""
+        self.locked_id         = measurement["track_id"]
+        self.last_seen         = now
+        self.last_dist         = measurement["dist"]
+        self.last_angle        = measurement["angle"]
+        # Store as both the fixed reference AND the live EMA profile
+        if measurement["color_profile"] is not None:
+            self.reference_profile = measurement["color_profile"].copy()
+            self.color_profile     = measurement["color_profile"].copy()
+        self.switch_candidate_id     = None
+        self.switch_candidate_frames = 0
 
     def _remember(self, measurement, now):
         self.last_seen  = now
@@ -503,14 +563,15 @@ class TargetLock:
     def _reidentify(self, measurements):
         if self.last_dist is None or self.last_angle is None:
             return None
-
         candidates = []
         for m in measurements:
             dist_delta  = abs(m["dist"]  - self.last_dist)
             angle_delta = abs(m["angle"] - self.last_angle)
-            color_score = profile_similarity(self.color_profile, m["color_profile"])
+            # Use reference_profile (not the EMA) for re-ID — more stable
+            color_score = profile_similarity(self.reference_profile,
+                                             m["color_profile"])
             color_ok = (
-                self.color_profile is None or
+                self.reference_profile is None or
                 color_score is None or
                 color_score >= TARGET_COLOR_REID_MIN_SCORE
             )
@@ -518,7 +579,7 @@ class TargetLock:
                     angle_delta <= TARGET_REID_MAX_ANGLE_DELTA_DEG and color_ok):
                 color_bonus = color_score if color_score is not None else 0.0
                 candidates.append((dist_delta + 0.1 * angle_delta - color_bonus, m))
-        return min(candidates, key=lambda item: item[0])[1] if candidates else None
+        return min(candidates, key=lambda x: x[0])[1] if candidates else None
 
     def _lock(self, track_id, now, measurement=None):
         self.locked_id = track_id
@@ -530,15 +591,8 @@ class TargetLock:
         self.switch_candidate_id     = None
         self.switch_candidate_frames = 0
 
-    def _target_score(self, measurement):
-        score        = measurement["score"]
-        color_score  = profile_similarity(self.color_profile, measurement["color_profile"])
-        if self.color_profile is not None and color_score is not None:
-            score += TARGET_COLOR_SWITCH_PENALTY * (1.0 - color_score)
-        return score
-
     def _update_profile(self, measurement):
-        """EMA update of the stored color profile."""
+        """EMA update of the live color profile — reference_profile is never touched."""
         new_prof = measurement.get("color_profile")
         if new_prof is None:
             return
@@ -546,9 +600,17 @@ class TargetLock:
             self.color_profile = new_prof.copy()
             return
         self.color_profile = (
-            TARGET_COLOR_EMA_ALPHA       * new_prof +
+            TARGET_COLOR_EMA_ALPHA         * new_prof +
             (1.0 - TARGET_COLOR_EMA_ALPHA) * self.color_profile
         )
+
+    def _target_score(self, measurement):
+        score       = measurement["score"]
+        color_score = profile_similarity(self.reference_profile,
+                                         measurement["color_profile"])
+        if self.reference_profile is not None and color_score is not None:
+            score += TARGET_COLOR_SWITCH_PENALTY * (1.0 - color_score)
+        return score
 
 
 # =========================================================================== #
