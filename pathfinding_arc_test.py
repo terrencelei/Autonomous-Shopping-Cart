@@ -44,10 +44,6 @@ CENTER_SEARCH_RAMP_STEP_RPM = 0.1
 CENTER_SEARCH_RAMP_HOLD_S = 1
 CENTER_SEARCH_STALL_TICKS = 5
 
-# Follow (distance-only) stall-combat parameters — same values as center kick
-FOLLOW_KICK_RPM           = CENTER_KICK_RPM
-FOLLOW_KICK_RELEASE_TICKS = CENTER_KICK_RELEASE_TICKS
-FOLLOW_MIN_RUN_RPM        = CENTER_MIN_RUN_RPM
 FOLLOW_DIST_DEADBAND_M    = 0.05   # stop commanding when within this of HOLD_DIST
 
 # Slow-spin / stall-test parameters.  The test commands wheel RPMs, not raw
@@ -348,8 +344,8 @@ class FollowRpmCommand:
         return self._kick_active
 
     def command(self, rpm, direction, encoder_delta=(0, 0),
-                kick_rpm=FOLLOW_KICK_RPM,
-                kick_release_ticks=FOLLOW_KICK_RELEASE_TICKS):
+                kick_rpm=CENTER_KICK_RPM,
+                kick_release_ticks=CENTER_KICK_RELEASE_TICKS):
         """rpm: desired wheel RPM (>= 0); direction: +1 forward, -1 reverse.
         Returns v_forward in m/s with the correct sign."""
         if rpm <= 0.0:
@@ -869,7 +865,7 @@ def run_follow(drive=True, port=None, countdown=3, duration=30.0, sim_dist=None)
     """Distance-only follow test: PD forward/backward, omega forced to zero.
 
     Uses the same kick-on-start stall combat as the center spin tests
-    (FOLLOW_KICK_RPM / FOLLOW_KICK_RELEASE_TICKS).  Reads distance from UDP
+    (CENTER_KICK_RPM / CENTER_KICK_RELEASE_TICKS).  Reads distance from UDP
     unless --sim-dist is given.
     """
     motors  = open_motors(drive=drive, port=port, countdown=countdown, action="following")
@@ -878,7 +874,7 @@ def run_follow(drive=True, port=None, countdown=3, duration=30.0, sim_dist=None)
     print("Follow mode: distance PD control only, omega=0, no angle correction.")
     print(f"Hold distance: {P.HOLD_DIST:.2f} m  "
           f"Kp={P.DIST_KP}  Kd={P.DIST_KD}  "
-          f"kick={FOLLOW_KICK_RPM} RPM / {FOLLOW_KICK_RELEASE_TICKS} ticks")
+          f"kick={CENTER_KICK_RPM} RPM / {CENTER_KICK_RELEASE_TICKS} ticks")
     if sim_dist is not None:
         print(f"Simulated target distance: {sim_dist:.2f} m")
     else:
@@ -911,7 +907,7 @@ def run_follow(drive=True, port=None, countdown=3, duration=30.0, sim_dist=None)
                 v_pd = P.DIST_KP * e + P.DIST_KD * de_dt
                 prev_dist = dist_m
                 if abs(e) > FOLLOW_DIST_DEADBAND_M:
-                    desired_rpm = max(abs(v_pd) / P.WHEEL_CIRC * 60.0, FOLLOW_MIN_RUN_RPM)
+                    desired_rpm = max(abs(v_pd) / P.WHEEL_CIRC * 60.0, CENTER_MIN_RUN_RPM)
                     desired_dir = math.copysign(1.0, v_pd)
                 else:
                     desired_rpm = 0.0
@@ -1009,7 +1005,7 @@ def run_follow_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
 
     print("Camera follow mode: distance PD control only, omega=0, no angle correction.")
     print(f"Hold distance: {P.HOLD_DIST:.2f} m  Kp={P.DIST_KP}  Kd={P.DIST_KD}  "
-          f"kick={FOLLOW_KICK_RPM} RPM / {FOLLOW_KICK_RELEASE_TICKS} ticks")
+          f"kick={CENTER_KICK_RPM} RPM / {CENTER_KICK_RELEASE_TICKS} ticks")
     print("Press Q in the Cart View window to stop." if not no_display else "Display disabled.")
 
     times, v_fwds, v_lefts, v_rights = [], [], [], []
@@ -1061,7 +1057,7 @@ def run_follow_camera(drive=True, port=None, countdown=3, duration=30.0, no_disp
                     v_pd = P.DIST_KP * e + P.DIST_KD * de_dt
                     prev_dist = dist_m
                     if abs(e) > FOLLOW_DIST_DEADBAND_M:
-                        desired_rpm = max(abs(v_pd) / P.WHEEL_CIRC * 60.0, FOLLOW_MIN_RUN_RPM)
+                        desired_rpm = max(abs(v_pd) / P.WHEEL_CIRC * 60.0, CENTER_MIN_RUN_RPM)
                         desired_dir = math.copysign(1.0, v_pd)
                     else:
                         desired_rpm = 0.0
