@@ -393,8 +393,7 @@ class FollowRpmCommand:
 
 
 def follow_wheel_commands(v_forward):
-    v_left, v_right = P._wheel_commands(v_forward, 0.0)
-    return v_left, -v_right
+    return P._wheel_commands(v_forward, 0.0)
 
 
 def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1.0):
