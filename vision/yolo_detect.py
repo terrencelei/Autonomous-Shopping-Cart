@@ -88,8 +88,11 @@ TARGET_REID_MAX_DIST_DELTA_M = 1.0
 TARGET_REID_MAX_ANGLE_DELTA_DEG = 12.0
 
 TARGET_COLOR_EMA_ALPHA        = 0.25
-TARGET_COLOR_REID_MIN_SCORE   = 0.60   # tightened from 0.45
-TARGET_COLOR_SWITCH_MIN_SCORE = 0.50   # tightened from 0.35
+TARGET_COLOR_REID_MIN_SCORE   = 0.70
+TARGET_COLOR_SWITCH_MIN_SCORE = 0.70
+
+# Number of frames over which ref_similarity is averaged per track ID
+SIM_SMOOTH_WINDOW = 10
 TARGET_COLOR_SWITCH_PENALTY   = 1.5
 
 # --------------------------------------------------------------------------- #
@@ -436,11 +439,10 @@ class TargetLock:
             return best["index"]
 
         # ------------------------------------------------------------------ #
-        # Score every detection against the fixed reference profile
+        # ref_similarity is pre-computed (10-frame smoothed) by annotate_frame.
+        # Just log it here.
         # ------------------------------------------------------------------ #
         for m in measurements:
-            m["ref_similarity"] = profile_similarity(self.reference_profile,
-                                                      m["color_profile"])
             sim_str = f"{m['ref_similarity']:.2f}" if m["ref_similarity"] is not None else "N/A"
             print(f"[SCORE] ID{m['track_id']}  dist={m['dist']:.1f}m  "
                   f"angle={m['angle']:+.1f}deg  ref_sim={sim_str}")
@@ -561,8 +563,8 @@ class TargetLock:
         for m in measurements:
             dist_delta  = abs(m["dist"]  - self.last_dist)
             angle_delta = abs(m["angle"] - self.last_angle)
-            # Use fixed reference_profile for re-ID — more stable than EMA
-            color_score = profile_similarity(self.reference_profile, m["color_profile"])
+            # Use the pre-computed smoothed ref_similarity (already in the measurement)
+            color_score = m.get("ref_similarity")
             color_ok = (
                 self.reference_profile is None or
                 color_score is None or
@@ -599,7 +601,7 @@ class TargetLock:
 
     def _target_score(self, measurement):
         score       = measurement["score"]
-        color_score = profile_similarity(self.reference_profile, measurement["color_profile"])
+        color_score = measurement.get("ref_similarity")
         if self.reference_profile is not None and color_score is not None:
             score += TARGET_COLOR_SWITCH_PENALTY * (1.0 - color_score)
         return score
@@ -637,15 +639,32 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
             dist  = raw_dist
             angle = raw_angle
 
+        color_profile = clothing_color_profile(hsv_frame, (x1, y1, x2, y2))
+
+        # Compute raw ref_similarity then smooth over last SIM_SMOOTH_WINDOW frames
+        # so momentary profile glitches don't flip the lock decision.
+        raw_sim = profile_similarity(
+            target_lock.reference_profile, color_profile
+        ) if target_lock.reference_profile is not None else None
+
+        if tid is not None and raw_sim is not None:
+            buf = smooth_state.get(tid, {}).get("sim_buf", [])
+            buf = (buf + [raw_sim])[-SIM_SMOOTH_WINDOW:]
+            smooth_state.setdefault(tid, {})["sim_buf"] = buf
+            smoothed_sim = float(np.mean(buf))
+        else:
+            smoothed_sim = raw_sim   # None or untracked — pass through as-is
+
         measurements.append({
-            "index":         i,
-            "track_id":      tid,
-            "xyxy":          (x1, y1, x2, y2),
-            "confidence":    conf,
-            "dist":          dist,
-            "angle":         angle,
-            "score":         detection_score(dist, angle),
-            "color_profile": clothing_color_profile(hsv_frame, (x1, y1, x2, y2)),
+            "index":          i,
+            "track_id":       tid,
+            "xyxy":           (x1, y1, x2, y2),
+            "confidence":     conf,
+            "dist":           dist,
+            "angle":          angle,
+            "score":          detection_score(dist, angle),
+            "color_profile":  color_profile,
+            "ref_similarity": smoothed_sim,   # pre-computed smoothed value
         })
 
     for tid, state in list(smooth_state.items()):
@@ -668,11 +687,13 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
         dist    = m["dist"]
         angle   = m["angle"]
         profile = m["color_profile"]
+        ref_sim = m.get("ref_similarity")
 
         thickness = 3 if is_target else 2
         cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
 
-        label = f"{role} {label_id} {dist:.1f}m {angle:+.1f}deg"
+        sim_str = f" sim:{ref_sim:.2f}" if ref_sim is not None else ""
+        label = f"{role} {label_id} {dist:.1f}m {angle:+.1f}deg{sim_str}"
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
         top = max(int(y1) - 10, th + 4)
         cv2.rectangle(out, (int(x1), top - th - 4), (int(x1) + tw, top), color, -1)
@@ -699,7 +720,7 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
                            int(y1) + thickness + 1 + N_PROFILE_CHUNKS * swatch_h),
                           (255, 255, 255), 1)
 
-        rows.append((role, label_id, conf, dist, angle))
+        rows.append((role, label_id, conf, dist, angle, ref_sim))
 
     return out, rows
 
@@ -709,8 +730,8 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
 # =========================================================================== #
 
 def print_header():
-    print(f"\n{'Role':<10} {'ID':<8} {'Conf':>6}  {'Distance':>10}  {'Angle':>8}")
-    print("-" * 52)
+    print(f"\n{'Role':<10} {'ID':<8} {'Conf':>6}  {'Distance':>10}  {'Angle':>8}  {'Sim':>6}")
+    print("-" * 62)
 
 
 def run(no_display=False, no_drive=False):
@@ -758,7 +779,7 @@ def run(no_display=False, no_drive=False):
 
             target_row = next((r for r in rows if r[0] == "TARGET"), None)
             if target_row is not None:
-                _role, _id, _conf, t_dist, t_angle = target_row
+                _role, _id, _conf, t_dist, t_angle, _sim = target_row
                 latest_target = (t_dist, t_angle)
             else:
                 latest_target = None
@@ -787,9 +808,10 @@ def run(no_display=False, no_drive=False):
                         f"NPU  FPS: {fps_live:.1f}  {latency_ms:.0f}ms  [{P.S.mode}]",
                         (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
 
-            for role, label_id, conf, dist, angle in rows:
+            for role, label_id, conf, dist, angle, ref_sim in rows:
+                sim_str = f"{ref_sim:.2f}" if ref_sim is not None else " N/A"
                 print(f"{role:<10} {label_id:<8} {conf:>6.0%}  "
-                      f"{dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
+                      f"{dist:>8.1f}m  {angle:>+7.1f}°  sim:{sim_str}  [f{frame_idx}]")
 
             if not no_display:
                 cv2.imshow("Cart View", out)
