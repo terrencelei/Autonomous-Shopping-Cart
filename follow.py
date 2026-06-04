@@ -80,7 +80,6 @@ SPIN_TURN_TIMEOUT_S = 2.0  # max extra time for the steady-turn phase (exit a st
 # was last seen until it reappears. Kicks first (SPIN_KICK_RPM) to beat stall.
 SEARCH_RPM       = 8.0    # steady wheel RPM of the search sweep              [calibrate]
 SEARCH_MAX_DEG   = 360.0  # give up after sweeping this much with no target
-SEARCH_TIMEOUT_S = 8.0    # hard time cap on one search (then hold still)
 SEARCH_GRACE_S   = 0.3    # wait this long after losing the target before searching
 
 # Distance (displacement) controller
@@ -348,9 +347,9 @@ class Searcher:
         else:
             cmd_rpm = SEARCH_RPM
 
-        if self._swept >= math.radians(SEARCH_MAX_DEG) or (now - self._t0) >= SEARCH_TIMEOUT_S:
+        if self._swept >= math.radians(SEARCH_MAX_DEG):
             self._active = False
-            _trace("search gave up (swept max / timeout)")
+            _trace("search gave up (swept SEARCH_MAX_DEG)")
             return None
         return (-self._dir * cmd_rpm, +self._dir * cmd_rpm)
 
