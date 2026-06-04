@@ -453,6 +453,55 @@ class FollowController:
             _trace(f"step: PI dist={x:.2f} dx={self.dx:+.2f} → S={self.S:+.1f} diff={rpm_diff:+.1f}")
         return self.S, rpm_diff
 
+def calibrate_angular_inertia(motors, steady_ticks=80, coast_window_s=1.5):
+    """Spin at SPIN_KICK_RPM, hard-stop, measure encoder coast → ANGULAR_INERTIA (s).
+    Runs automatically at startup to account for load changes between uses."""
+    global ANGULAR_INERTIA
+
+    print("Calibrating angular inertia — keep the cart clear…")
+
+    if not motors.has_serial:
+        print("  no serial connection — skipping, ANGULAR_INERTIA stays 0.0")
+        return ANGULAR_INERTIA
+
+    motors.flush()
+
+    # ── phase 1: spin at SPIN_KICK_RPM until steady_ticks accumulate ──────────
+    motors.send_rpm(-SPIN_KICK_RPM, +SPIN_KICK_RPM)   # CCW point turn
+    drive_ticks = 0
+    t0 = time.monotonic()
+    while drive_ticks < steady_ticks:
+        time.sleep(0.005)
+        dl, dr = motors.read_deltas()
+        drive_ticks += abs(dl) + abs(dr)
+        if time.monotonic() - t0 > 5.0:
+            print("  WARNING: cart did not reach steady_ticks — ANGULAR_INERTIA stays 0.0")
+            motors.stop()
+            return ANGULAR_INERTIA
+
+    # ── phase 2: hard stop ─────────────────────────────────────────────────────
+    motors.stop()
+    t_stop = time.monotonic()
+
+    # ── phase 3: collect coast ticks ───────────────────────────────────────────
+    coast_dl = coast_dr = 0
+    while time.monotonic() - t_stop < coast_window_s:
+        time.sleep(0.005)
+        dl, dr = motors.read_deltas()
+        coast_dl += dl
+        coast_dr += dr
+
+    # ── phase 4: compute ───────────────────────────────────────────────────────
+    overshoot_rad = abs(_ticks_to_yaw(coast_dl, coast_dr))
+    omega_kick    = _rpm_to_yaw(SPIN_KICK_RPM)
+    result        = overshoot_rad / omega_kick if omega_kick > 0 else 0.0
+
+    print(f"  overshoot {math.degrees(overshoot_rad):.2f}°  "
+          f"omega {omega_kick:.3f} rad/s  → ANGULAR_INERTIA = {result:.5f} s")
+
+    ANGULAR_INERTIA = result
+    motors.flush()
+    return result
 
 # =============================================================================
 # RUN  — wire vision + drive together
@@ -497,6 +546,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
             time.sleep(1)
         print("  GO!\n")
 
+    ANGULAR_INERTIA = calibrate_angular_inertia(motors)
     motors.flush()
     kick = Kick()
     spinner = Spinner()
