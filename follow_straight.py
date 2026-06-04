@@ -328,9 +328,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
                 dist_str = f"dist={x:.2f}m ang={angle_deg:+.0f}°" if target_row else "no target"
                 Y.cv2.putText(out, f"FOLLOW  {dist_str}", (10, 25),
                               Y.cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
-                Y.overlay_map(out, rows)
                 Y.cv2.imshow("Cart View", out)
-                Y.cv2.imshow("World Map", Y.draw_world_map(rows))
                 if Y.cv2.waitKey(1) & 0xFF == ord("q"):
                     break
     except KeyboardInterrupt:
