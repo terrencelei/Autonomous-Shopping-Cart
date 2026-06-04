@@ -9,8 +9,8 @@ Usage:
     python3 pathfinding_arc_test.py --mode slow-spin    # slow in-place spin
     python3 pathfinding_arc_test.py --no-drive --sim-angle 15
     python3 pathfinding_arc_test.py --port /dev/ttyUSB0
-    python3 pathfinding_arc_test.py --mode follow --sim-dist 3.5   # forward/backward only
-    python3 pathfinding_arc_test.py --mode follow --no-drive --sim-dist 3.5
+    python3 pathfinding_arc_test.py --mode follow                  # forward/backward, live camera
+    python3 pathfinding_arc_test.py --mode follow --no-drive --sim-dist 3.5  # simulation
 """
 
 import argparse
@@ -976,6 +976,174 @@ def run_follow(drive=True, port=None, countdown=3, duration=30.0, sim_dist=None)
     )
 
 
+def run_follow_camera(drive=True, port=None, countdown=3, duration=30.0, no_display=False):
+    """Camera-driven distance-only follow test. Uses IMX500 for distance readings.
+
+    Identical control logic to run_follow but reads distance from the live
+    camera instead of UDP/sim. Omega is forced to zero — no angle correction.
+    """
+    Y = import_yolo_detect()
+    if not Y.RPK_MODEL_PATH.exists():
+        raise SystemExit(
+            f"ERROR: {Y.RPK_MODEL_PATH} not found. Install with: sudo apt install imx500-models"
+        )
+
+    try:
+        cap = Y.IMX500Capture(model_path=Y.RPK_MODEL_PATH, width=640, height=480, fps=30)
+    except RuntimeError as e:
+        raise SystemExit(
+            f"ERROR: could not open IMX500 camera: {e}\n"
+            "Check that the Raspberry Pi AI Camera is connected, enabled, and not already in use."
+        )
+
+    motors = open_motors(drive=drive, port=port, countdown=countdown, action="following")
+    odometry = P.Odometry(lambda: (0, 0))
+    tracker = Y.sv.ByteTrack(
+        track_activation_threshold=0.25,
+        lost_track_buffer=60,
+        minimum_matching_threshold=0.8,
+        frame_rate=30,
+    )
+    smooth_state = {}
+    target_lock = Y.TargetLock()
+
+    print("Camera follow mode: distance PD control only, omega=0, no angle correction.")
+    print(f"Hold distance: {P.HOLD_DIST:.2f} m  Kp={P.DIST_KP}  Kd={P.DIST_KD}  "
+          f"kick={FOLLOW_KICK_RPM} RPM / {FOLLOW_KICK_RELEASE_TICKS} ticks")
+    print("Press Q in the Cart View window to stop." if not no_display else "Display disabled.")
+
+    times, v_fwds, v_lefts, v_rights = [], [], [], []
+    target_dists, dist_errors = [], []
+    enc_right_cum, enc_left_cum = [], []
+    enc_right_delta, enc_left_delta = [], []
+    cum_l, cum_r = 0, 0
+    prev_dist = None
+    start = time.monotonic()
+    last_tick = time.monotonic()
+    frame_times = []
+    target_visible_since = None
+    rpm_command = FollowRpmCommand()
+    v_forward = 0.0
+    v_left = v_right = 0.0
+    i = 0
+
+    flush_motors(motors)
+    try:
+        while True:
+            loop_start = time.monotonic()
+            t = loop_start - start
+            if duration > 0 and t >= duration:
+                break
+
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            dets = cap.get_detections()
+            tracked = tracker.update_with_detections(dets)
+            out, rows = Y.annotate_frame(frame, tracked, smooth_state, target_lock, loop_start)
+
+            target_row = next((r for r in rows if r[0] == "TARGET"), None)
+            dist_m = target_row[3] if target_row is not None else None
+
+            now = time.monotonic()
+            if now - last_tick >= P.DT:
+                if motors is not None:
+                    d_l, d_r = motors.read_encoder_deltas()
+                else:
+                    d_l, d_r = 0, 0
+
+                if dist_m is not None:
+                    if target_visible_since is None:
+                        target_visible_since = now
+                    e = dist_m - P.HOLD_DIST
+                    de_dt = (dist_m - prev_dist) / P.DT if prev_dist is not None else 0.0
+                    v_pd = P.DIST_KP * e + P.DIST_KD * de_dt
+                    prev_dist = dist_m
+                    if abs(e) > FOLLOW_DIST_DEADBAND_M:
+                        desired_rpm = max(abs(v_pd) / P.WHEEL_CIRC * 60.0, FOLLOW_MIN_RUN_RPM)
+                        desired_dir = math.copysign(1.0, v_pd)
+                    else:
+                        desired_rpm = 0.0
+                        desired_dir = 0.0
+                else:
+                    target_visible_since = None
+                    desired_rpm = 0.0
+                    desired_dir = 0.0
+                    prev_dist = None
+
+                v_forward = rpm_command.command(
+                    desired_rpm, desired_dir, encoder_delta=(d_l, d_r))
+                v_left, v_right = P._wheel_commands(v_forward, 0.0)
+
+                pos, heading = update_odometry_from_deltas(odometry, d_l, d_r)
+                P.S.pos = list(pos)
+                P.S.heading = heading
+                cum_l += d_l; cum_r += d_r
+
+                if motors is not None:
+                    motors.send(v_left, v_right)
+                last_tick = now
+
+                times.append(t)
+                v_fwds.append(v_forward)
+                v_lefts.append(v_left); v_rights.append(v_right)
+                target_dists.append(float("nan") if dist_m is None else dist_m)
+                dist_errors.append(float("nan") if dist_m is None else e)
+                enc_right_delta.append(d_l); enc_left_delta.append(d_r)
+                enc_right_cum.append(cum_l); enc_left_cum.append(cum_r)
+
+                if i % max(1, int(0.5 / P.DT)) == 0:
+                    if dist_m is None:
+                        label = "no target          "
+                    else:
+                        fwd_rpm = v_forward / P.WHEEL_CIRC * 60.0
+                        kick_str = " KICK" if rpm_command.kick_active else "     "
+                        label = f"dist={dist_m:.2f}m e={e:+.2f}m"
+                        print(f"t={t:5.1f}s  {label:<22}  cmd={fwd_rpm:+6.2f}rpm{kick_str}")
+                i += 1
+
+            frame_times.append(time.time())
+            if len(frame_times) > 30:
+                frame_times.pop(0)
+            fps_live = (
+                (len(frame_times) - 1) / (frame_times[-1] - frame_times[0])
+                if len(frame_times) > 1 else 0.0
+            )
+            fwd_rpm = v_forward / P.WHEEL_CIRC * 60.0
+            dist_str = f"dist={dist_m:.2f}m" if dist_m is not None else "no target"
+            Y.cv2.putText(out, f"FOLLOW  FPS:{fps_live:.1f}  {dist_str}  cmd={fwd_rpm:+.2f}rpm",
+                          (10, 25), Y.cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
+
+            if not no_display:
+                Y.overlay_map(out, rows)
+                Y.cv2.imshow("Cart View", out)
+                Y.cv2.imshow("World Map", Y.draw_world_map(rows))
+                if Y.cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+    except KeyboardInterrupt:
+        print("\nCamera follow stopped by user.")
+    finally:
+        if motors is not None:
+            print("\nStopping motors.")
+            motors.stop()
+        cap.release()
+        if not no_display:
+            Y.cv2.destroyAllWindows()
+
+    return dict(
+        mode="follow",
+        t=times,
+        v_fwd=v_fwds,
+        v_left=v_lefts, v_right=v_rights,
+        target_dist=target_dists,
+        dist_error=dist_errors,
+        enc_l_cum=enc_right_cum, enc_r_cum=enc_left_cum,
+        enc_l_delta=enc_right_delta, enc_r_delta=enc_left_delta,
+        drove=(motors is not None),
+    )
+
+
 def _plot_follow(data, out_path):
     try:
         import numpy as np
@@ -1225,9 +1393,20 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.mode == "follow":
-        data = run_follow(drive=not args.no_drive, port=args.port,
-                          countdown=args.countdown, duration=args.duration,
-                          sim_dist=args.sim_dist)
+        if args.sim_dist is not None or args.source == "udp":
+            if args.source == "udp" and args.sim_dist is None:
+                print(f"UDP follow mode: listening on port {P.UDP_PORT}.")
+            data = run_follow(drive=not args.no_drive, port=args.port,
+                              countdown=args.countdown, duration=args.duration,
+                              sim_dist=args.sim_dist)
+        else:
+            no_display = args.no_display
+            if not no_display and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+                no_display = True
+                print("No display detected — running headless (use --no-display to silence this message).")
+            data = run_follow_camera(drive=not args.no_drive, port=args.port,
+                                     countdown=args.countdown, duration=args.duration,
+                                     no_display=no_display)
     elif args.mode == "spin":
         data = run_spin(drive=not args.no_drive, port=args.port, countdown=args.countdown)
     elif args.mode == "slow-spin":

@@ -290,10 +290,13 @@ Drives the cart forward and backward to maintain `HOLD_DIST` (2.0 m) from the ta
 Anti-stall kick (same parameters as center mode: `FOLLOW_KICK_RPM = 8`, `FOLLOW_KICK_RELEASE_TICKS = 30`) fires on startup and on every forward↔reverse direction change, releasing once either encoder accumulates 30 ticks.
 
 ```bash
-python3 pathfinding_arc_test.py --mode follow                       # live UDP
-python3 pathfinding_arc_test.py --mode follow --sim-dist 3.5        # fixed 3.5 m target
+python3 pathfinding_arc_test.py --mode follow                            # live camera (default)
+python3 pathfinding_arc_test.py --mode follow --source udp               # live UDP feed
+python3 pathfinding_arc_test.py --mode follow --sim-dist 3.5             # fixed 3.5 m target
 python3 pathfinding_arc_test.py --mode follow --no-drive --sim-dist 3.5 --duration 10
 ```
+
+The default source is the live IMX500 camera — it locks onto the nearest centred person and uses their bounding-box distance. Pass `--source udp` to read from `yolo_detect.py` over UDP instead, or `--sim-dist` for a constant distance without any camera.
 
 `--sim-dist` sets a constant target distance. The cart will drive toward `HOLD_DIST` and hold; pass a value above or below 2.0 m to test approach or reverse respectively. Values within `FOLLOW_DIST_DEADBAND_M` (0.05 m) of `HOLD_DIST` produce no output.
 
