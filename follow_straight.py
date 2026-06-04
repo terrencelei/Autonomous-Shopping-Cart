@@ -49,7 +49,7 @@ MOTOR_PORT = "/dev/ttyUSB0"       # CP2102 USB-UART bridge
 MOTOR_BAUD = 115200
 
 # Motion limits / loop rate
-MAX_RPM   = 50.0                  # open-loop cap; cart_motor.ino maps 100 RPM to full PWM
+MAX_RPM   = 75.0                  # open-loop cap; cart_motor.ino maps 100 RPM to full PWM
 DT        = 0.02                  # control loop period (s)
 HOLD_DIST = 2.0                   # target hold distance (m)
 

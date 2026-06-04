@@ -86,7 +86,7 @@ KP_ANGLE = 40.0   # RPM of wheel-difference per radian of angle error          [
 KD_ANGLE = 0.0    # RPM of wheel-difference per (rad/s) of angular rate         [calibrate]
 
 # Limits
-MAX_RPM = MAX_SPEED / WHEEL_CIRC * 60.0   # wheel RPM cap (= MAX_SPEED)
+MAX_RPM = 75.0   # wheel RPM cap (cart_motor.ino maps ~100 RPM to full PWM)
 
 
 # =============================================================================
