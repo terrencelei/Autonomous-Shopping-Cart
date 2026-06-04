@@ -1,13 +1,14 @@
 // Autonomous Shopping Cart — ESP32 motor controller.
 //
-// Drives two TB9051FTG-controlled brushed DC motors and reports wheel
-// encoder counts back over USB serial.  The matching host code is
+// Drives two TB9051FTG-controlled brushed DC motors open-loop and reports
+// wheel encoder counts back over USB serial.  The matching host code is
 // Pathfinding_algorithm.py / MotorDriver.send_velocities() running on
 // the Raspberry Pi.
 //
 // ── Serial protocol (115200 baud) ──────────────────────────────
 //   Host  → ESP32 :  "L<rpm> R<rpm>\n"   e.g.  "L42.5 R-30.0\n"
-//                                        Target wheel RPM for each side.
+//                                        Open-loop speed command for each side.
+//                                        MAX_RPM maps to full PWM output.
 //   ESP32 → Host  :  "E,<left_ticks>,<right_ticks>\n"
 //                                        Cumulative encoder counts, sent
 //                                        every REPORT_INTERVAL_MS.
@@ -22,13 +23,8 @@
 //   M2 (LEFT): PWM 22 / 23, encoder A=25 B=26
 //
 // ── Calibration ────────────────────────────────────────────────
-//   MAX_RPM below is the wheel-shaft RPM that corresponds to a full-
-//   scale motor output of 1.0.  Measure it by running the cart at 100 % for
-//   a few seconds, counting encoder ticks, and converting:
-//       rpm = (ticks_per_sec / ENCODER_PPR) * 60
-//   Update the constant once measured.
-
-struct WheelPid;
+//   This sketch does not use encoders for feedback. MAX_RPM only scales
+//   incoming L/R commands into PWM duty: output = command / MAX_RPM.
 
 #include <math.h>
 
@@ -105,14 +101,7 @@ void IRAM_ATTR leftISR() {
 
 // ── Tunables ──────────────────────────────────────────────────
 const float MAX_RPM = 100.0f;                 // calibrate to your hardware
-const float ENCODER_PPR = 298.0f;             // must match Pathfinding_algorithm.py
-// Speed-loop feedback signs, set from the rpm_log runaway capture: with
-// L=+1/R=-1 BOTH loops were positive-feedback and accelerated to ~1000 rpm on a
-// 0.5 rpm command. The runaway direction gives the stable signs directly.
-const float RIGHT_RPM_SIGN = +1.0f;           // was -1.0f (that made the right loop unstable)
-const float LEFT_RPM_SIGN  = -1.0f;           // was +1.0f (an earlier guess; also unstable)
-
-const unsigned long CONTROL_INTERVAL_MS = 20; // 50 Hz wheel-speed PID
+const unsigned long CONTROL_INTERVAL_MS = 20; // 50 Hz open-loop command refresh
 const unsigned long WATCHDOG_MS        = 500;
 const unsigned long REPORT_INTERVAL_MS = 20;  // 50 Hz encoder report
 
@@ -121,34 +110,8 @@ unsigned long lastControlMs = 0;
 unsigned long lastReportMs = 0;
 String        buf;
 
-struct WheelPid {
-  float targetRPM = 0.0f;
-  float measuredRPM = 0.0f;
-  float integral = 0.0f;
-  float output = 0.0f;
-  long lastCount = 0;
-  float faultTimer = 0.0f;   // seconds the integrator has been pinned at its limit
-  bool  faulted = false;     // latched off after a sustained feedback fault
-};
-
-WheelPid rightPid;
-WheelPid leftPid;
-
-const float RPM_KP = 0.006f;
-const float RPM_KI = 0.020f;
-const float INTEGRAL_LIMIT = 25.0f;
-const float MOTOR_MIN_OUTPUT = 0.08f;
-const float STOP_RPM_EPS = 0.5f;
-
-// Feedback-fault guard. A healthy speed loop settles with a small integrator;
-// if the integrator stays pinned at its limit the wheel is not responding to
-// drive the way its encoder reports (dead / disconnected / reversed encoder, or
-// a stalled wheel). Instead of letting that wind up into a full-throttle
-// runaway, latch that motor off until it is next commanded to stop.
-const float FAULT_INTEGRAL_FRAC = 0.95f;  // integrator this close to the limit = not converging
-const float FAULT_TIME_S        = 0.50f;  // ...held this long before the motor is latched off
-const float OVERSPEED_RPM       = 2.0f * MAX_RPM;  // |measured| past this = loop lost control;
-                                                   // latch off in one tick (fast runaway cutoff)
+float rightTargetRPM = 0.0f;
+float leftTargetRPM = 0.0f;
 
 float clampf(float v, float lo, float hi) {
   if (v < lo) return lo;
@@ -163,71 +126,11 @@ void readEncoderCounts(long &right, long &left) {
   interrupts();
 }
 
-float updatePid(WheelPid &pid, float measuredRPM, float dt, const char *name) {
-  pid.measuredRPM = measuredRPM;
-
-  if (fabs(pid.targetRPM) < STOP_RPM_EPS) {
-    pid.integral = 0.0f;
-    pid.output = 0.0f;
-    pid.faultTimer = 0.0f;
-    pid.faulted = false;          // a commanded stop re-arms the guard
-    return 0.0f;
-  }
-
-  // Latched fault: stay off until the next commanded stop clears it above.
-  if (pid.faulted) {
-    pid.integral = 0.0f;
-    pid.output = 0.0f;
-    return 0.0f;
-  }
-
-  // Fast runaway cutoff: a stable loop can never spin the wheel far past MAX_RPM.
-  // If measured blows past OVERSPEED_RPM the feedback is wrong or lost — latch off
-  // in a single tick instead of waiting out the integrator timer.
-  if (fabs(measuredRPM) > OVERSPEED_RPM) {
-    pid.faulted = true;
-    pid.integral = 0.0f;
-    pid.output = 0.0f;
-    Serial.print("FAULT overspeed ");
-    Serial.println(name);
-    return 0.0f;
-  }
-
-  float error = pid.targetRPM - measuredRPM;
-  pid.integral = clampf(pid.integral + error * dt, -INTEGRAL_LIMIT, INTEGRAL_LIMIT);
-
-  // A pinned integrator means the loop cannot make the wheel track its target —
-  // lost or wrong-signed encoder feedback, or a stalled wheel. Time it, and latch
-  // the motor off rather than drive it to the full-throttle runaway.
-  if (fabs(pid.integral) >= FAULT_INTEGRAL_FRAC * INTEGRAL_LIMIT) {
-    pid.faultTimer += dt;
-    if (pid.faultTimer >= FAULT_TIME_S) {
-      pid.faulted = true;
-      pid.output = 0.0f;
-      Serial.print("FAULT ");     // announced once; host ignores non-"E," lines
-      Serial.println(name);
-      return 0.0f;
-    }
-  } else {
-    pid.faultTimer = 0.0f;
-  }
-
-  float feedforward = pid.targetRPM / MAX_RPM;
-  pid.output = clampf(feedforward
-                      + RPM_KP * error
-                      + RPM_KI * pid.integral,
-                      -1.0f, 1.0f);
-  if (fabs(pid.output) < MOTOR_MIN_OUTPUT) {
-    pid.output = (pid.targetRPM > 0.0f) ? MOTOR_MIN_OUTPUT : -MOTOR_MIN_OUTPUT;
-  }
-  return pid.output;
-}
-
 void setRightRPM(float rpm)  {
-  rightPid.targetRPM = clampf(rpm, -MAX_RPM, MAX_RPM);
+  rightTargetRPM = clampf(rpm, -MAX_RPM, MAX_RPM);
 }
 void setLeftRPM(float rpm) {
-  leftPid.targetRPM = clampf(rpm, -MAX_RPM, MAX_RPM);
+  leftTargetRPM = clampf(rpm, -MAX_RPM, MAX_RPM);
 }
 
 void setMotorOutput(int pwm1, int pwm2, float output, int motorDir) {
@@ -255,38 +158,18 @@ void setLeftOutput(float output) {
 }
 
 void stopMotors() {
-  rightPid.targetRPM = 0.0f;
-  leftPid.targetRPM = 0.0f;
-  rightPid.integral = 0.0f;
-  leftPid.integral = 0.0f;
-  rightPid.output = 0.0f;
-  leftPid.output = 0.0f;
-  rightPid.faultTimer = leftPid.faultTimer = 0.0f;
-  rightPid.faulted = leftPid.faulted = false;
+  rightTargetRPM = 0.0f;
+  leftTargetRPM = 0.0f;
   setRightOutput(0.0f);
   setLeftOutput(0.0f);
 }
 
-void updateMotorPid(unsigned long nowMs) {
+void updateMotorOutputs(unsigned long nowMs) {
   if (nowMs - lastControlMs < CONTROL_INTERVAL_MS) return;
-
-  float dt = (nowMs - lastControlMs) / 1000.0f;
   lastControlMs = nowMs;
-  if (dt <= 0.0f) return;
 
-  long rightNow, leftNow;
-  readEncoderCounts(rightNow, leftNow);
-
-  long rightDelta = rightNow - rightPid.lastCount;
-  long leftDelta = leftNow - leftPid.lastCount;
-  rightPid.lastCount = rightNow;
-  leftPid.lastCount = leftNow;
-
-  float rightMeasured = RIGHT_RPM_SIGN * (rightDelta / ENCODER_PPR) * (60.0f / dt);
-  float leftMeasured = LEFT_RPM_SIGN * (leftDelta / ENCODER_PPR) * (60.0f / dt);
-
-  setRightOutput(updatePid(rightPid, rightMeasured, dt, "R"));
-  setLeftOutput(updatePid(leftPid, leftMeasured, dt, "L"));
+  setRightOutput(rightTargetRPM / MAX_RPM);
+  setLeftOutput(leftTargetRPM / MAX_RPM);
 }
 
 // Parse "L<rpm> R<rpm>" — tolerates extra whitespace.
@@ -331,10 +214,9 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(LEFT_ENC_A), leftISR, CHANGE);
   attachInterrupt(digitalPinToInterrupt(LEFT_ENC_B), leftISR, CHANGE);
 
-  readEncoderCounts(rightPid.lastCount, leftPid.lastCount);
   lastControlMs = millis();
   stopMotors();
-  Serial.println("cart_motor ready v4  direct-ledc  MOTOR_DIR L=-1 R=+1  RPM_SIGN L=-1 R=+1");
+  Serial.println("cart_motor ready v5  open-loop direct-ledc  MOTOR_DIR L=-1 R=+1");
 }
 
 void loop() {
@@ -355,9 +237,9 @@ void loop() {
     stopMotors();
   }
 
-  // 3. Closed-loop wheel-speed control.
+  // 3. Open-loop motor output.
   unsigned long nowMs = millis();
-  updateMotorPid(nowMs);
+  updateMotorOutputs(nowMs);
 
   // 4. Periodic encoder report.
   if (nowMs - lastReportMs >= REPORT_INTERVAL_MS) {
