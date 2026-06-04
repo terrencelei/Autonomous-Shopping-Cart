@@ -197,6 +197,20 @@ def normalize_track_id(tid):
 
 
 def clothing_color_hist(frame, xyxy):
+    crop = clothing_crop(frame, xyxy)
+    if crop is None:
+        return None
+
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, (0, 25, 35), (179, 255, 255))
+    if cv2.countNonZero(mask) < 20:
+        mask = None
+    hist = cv2.calcHist([hsv], [0, 1], mask, [24, 16], [0, 180, 0, 256])
+    cv2.normalize(hist, hist, 0.0, 1.0, cv2.NORM_MINMAX)
+    return hist
+
+
+def clothing_crop(frame, xyxy):
     h, w = frame.shape[:2]
     x1, y1, x2, y2 = xyxy
     x1 = max(0, min(w - 1, int(x1)))
@@ -219,14 +233,50 @@ def clothing_color_hist(frame, xyxy):
     crop = frame[ty1:ty2, tx1:tx2]
     if crop.size == 0:
         return None
+    return crop
+
+
+def clothing_color_name(frame, xyxy):
+    crop = clothing_crop(frame, xyxy)
+    if crop is None:
+        return "unknown"
 
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, (0, 25, 35), (179, 255, 255))
-    if cv2.countNonZero(mask) < 20:
-        mask = None
-    hist = cv2.calcHist([hsv], [0, 1], mask, [24, 16], [0, 180, 0, 256])
-    cv2.normalize(hist, hist, 0.0, 1.0, cv2.NORM_MINMAX)
-    return hist
+    mask = cv2.inRange(hsv, (0, 20, 30), (179, 255, 255))
+    if cv2.countNonZero(mask) >= 20:
+        mean_bgr = cv2.mean(crop, mask=mask)[:3]
+        mean_hsv = cv2.mean(hsv, mask=mask)[:3]
+    else:
+        mean_bgr = cv2.mean(crop)[:3]
+        mean_hsv = cv2.mean(hsv)[:3]
+
+    b, g, r = mean_bgr
+    hue, sat, val = mean_hsv
+    if val < 55:
+        return "black"
+    if sat < 35:
+        if val > 190:
+            return "white"
+        return "gray"
+    if r > 185 and g > 185 and b < 120:
+        return "yellow"
+    if r > 160 and g > 110 and b < 100:
+        return "orange"
+    if hue < 10 or hue >= 170:
+        return "red"
+    if hue < 25:
+        return "orange"
+    if hue < 40:
+        return "yellow"
+    if hue < 85:
+        return "green"
+    if hue < 105:
+        return "cyan"
+    if hue < 135:
+        return "blue"
+    if hue < 160:
+        return "purple"
+    return "pink"
 
 
 def color_similarity(a, b):
@@ -384,6 +434,7 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict, target_
             "angle": angle,
             "score": detection_score(dist, angle),
             "color_hist": clothing_color_hist(frame, (x1, y1, x2, y2)),
+            "color_name": clothing_color_name(frame, (x1, y1, x2, y2)),
         })
 
     for tid, state in list(smooth_state.items()):
@@ -405,11 +456,12 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict, target_
 
         dist = m["dist"]
         angle = m["angle"]
+        clothes = m["color_name"]
 
         thickness = 3 if is_target else 2
         cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
 
-        label = f"{role} {label_id} {dist:.1f}m {angle:+.1f}deg"
+        label = f"{role} {label_id} {clothes} {dist:.1f}m {angle:+.1f}deg"
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
         top = max(int(y1) - 10, th + 4)
         cv2.rectangle(out, (int(x1), top - th - 4), (int(x1) + tw, top), color, -1)
