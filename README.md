@@ -227,7 +227,10 @@ python3 follow.py                 # live camera + drive
 python3 follow.py --no-display    # headless (SSH)
 python3 follow.py --no-drive      # vision only, no serial output
 python3 follow.py --duration 30   # stop after 30 s (0 = until Ctrl-C / Q)
+python3 follow.py --trace         # echo serial traffic + control-flow calls
 ```
+
+`--trace` turns the terminal into a live monitor: each tick it prints the control branch taken (`step: PI…`, `spin()`, `kick.arm()`, `stop`), the raw encoder packets received (`RX  E,<l>,<r>`) with the net delta, and the wheel commands sent (`TX  L<rpm> R<rpm>`).
 
 ### Control loop
 

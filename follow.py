@@ -93,6 +93,14 @@ MAX_RPM = MAX_SPEED / WHEEL_CIRC * 60.0   # wheel RPM cap (= MAX_SPEED)
 # HELPERS
 # =============================================================================
 
+TRACE = False   # set by run(); when True, echo serial traffic + control-flow trace
+
+
+def _trace(msg):
+    if TRACE:
+        print(msg)
+
+
 def _clip(v, lo, hi):
     return max(lo, min(hi, v))
 
@@ -154,9 +162,10 @@ class MotorIO:
         return self._ser is not None and self._ser.is_open
 
     def send_rpm(self, l_rpm, r_rpm):
+        cmd = f"L{LEFT_MOTOR_SIGN * l_rpm:.1f} R{RIGHT_MOTOR_SIGN * r_rpm:.1f}\n"
+        _trace(f"  TX  {cmd.strip()}")
         if not self.has_serial:
             return
-        cmd = f"L{LEFT_MOTOR_SIGN * l_rpm:.1f} R{RIGHT_MOTOR_SIGN * r_rpm:.1f}\n"
         self._ser.write(cmd.encode())
 
     def stop(self):
@@ -175,6 +184,7 @@ class MotorIO:
                 break
             if not line.startswith("E,"):
                 continue
+            _trace(f"  RX  {line}")
             try:
                 _, ls, rs = line.split(",", 2)
                 lc = LEFT_ENC_SIGN * int(ls)
@@ -185,6 +195,8 @@ class MotorIO:
                 dl += lc - self._last_l
                 dr += rc - self._last_r
             self._last_l, self._last_r = lc, rc
+        if dl or dr:
+            _trace(f"  enc Δ  L{dl:+d} R{dr:+d}")
         return dl, dr
 
     def flush(self):
@@ -225,6 +237,8 @@ def spin(theta_rad, motors):
     omega_kick = _rpm_to_yaw(KICK_RPM)
     omega_turn = _rpm_to_yaw(TURN_RPM)
     closed_loop = motors is not None and motors.has_serial
+    _trace(f"spin({math.degrees(theta_rad):+.1f}°, "
+           f"{'closed-loop' if closed_loop else 'open-loop'})  kick…")
 
     # --- breakaway kick: hold until KICK_TICKS ticks; measure swept angle ----
     if closed_loop:
@@ -248,6 +262,7 @@ def spin(theta_rad, motors):
     kick_drift = drift(omega_kick, omega_turn, ANGULAR_INERTIA)
     stop_drift = drift(omega_turn, 0.0, ANGULAR_INERTIA)
     theta_2 = target - phi - kick_drift - stop_drift
+    _trace(f"  spin: phi={math.degrees(phi):.1f}° → turn {math.degrees(max(theta_2,0)):.1f}° @ {TURN_RPM}rpm")
 
     # --- steady turn for the remaining angle ---------------------------------
     if theta_2 > 0.0 and omega_turn > 0.0:
@@ -295,6 +310,7 @@ class Kick:
         self._active = True
         self._ticks = 0
         self._t0 = time.monotonic()
+        _trace(f"kick.arm()  floor forward speed to {KICK_RPM}rpm until {KICK_TICKS} ticks")
 
     def cancel(self):
         self._active = False
@@ -306,8 +322,12 @@ class Kick:
         if not self._active:
             return
         self._ticks += abs(d_l) + abs(d_r)
-        if self._ticks >= KICK_TICKS or (time.monotonic() - self._t0) >= KICK_TIMEOUT_S:
+        if self._ticks >= KICK_TICKS:
             self._active = False
+            _trace(f"kick released: {self._ticks} ticks (breakaway confirmed)")
+        elif (time.monotonic() - self._t0) >= KICK_TIMEOUT_S:
+            self._active = False
+            _trace(f"kick released: timeout after {KICK_TIMEOUT_S}s ({self._ticks} ticks)")
 
 
 class FollowController:
@@ -345,6 +365,7 @@ class FollowController:
 
         # Centering — always parallel, independent of distance
         if abs(theta) > math.radians(THETA_THRESH_DEG):
+            _trace(f"step: |angle|={abs(angle_deg):.1f}° > {THETA_THRESH_DEG}° → spin()")
             spin(theta, motors)
             self.S = 0.0
             self._prev_x = None            # distance derivative invalid after the turn
@@ -355,10 +376,12 @@ class FollowController:
 
         # Distance control (PI). Breakaway kick is applied by the caller's Kick.
         if x - THRESH_M < 0.0:
+            _trace(f"step: dist {x:.2f} < hold {THRESH_M:.2f} → stop")
             self.S = 0.0
         else:
             delta_S = KP_DIST * self.dx + KI_DIST * (x - THRESH_M)
             self.S = _clip(self.S + delta_S, -MAX_RPM, MAX_RPM)
+            _trace(f"step: PI dist={x:.2f} dx={self.dx:+.2f} → S={self.S:+.1f} diff={rpm_diff:+.1f}")
         return self.S, rpm_diff
 
 
@@ -366,7 +389,9 @@ class FollowController:
 # RUN  — wire vision + drive together
 # =============================================================================
 
-def run(drive=True, no_display=False, countdown=3, duration=0.0):
+def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
+    global TRACE
+    TRACE = trace
     try:
         from vision import yolo_detect as Y
     except Exception as e:
@@ -429,6 +454,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
             target_row = next((r for r in rows if r[0] == "TARGET"), None)
 
             if target_row is None:
+                _trace("follow: target lost → stop")
                 ctrl.target_lost(motors)
                 kick.cancel()
                 prev_S = 0.0
@@ -496,6 +522,8 @@ if __name__ == "__main__":
                         help="seconds before the cart starts moving (default: 3)")
     parser.add_argument("--duration", type=float, default=0.0,
                         help="run time in seconds; 0 runs until Ctrl-C / Q (default: 0)")
+    parser.add_argument("--trace", action="store_true",
+                        help="echo serial traffic (TX/RX) and control-flow calls each tick")
     args = parser.parse_args()
 
     no_display = args.no_display
@@ -504,4 +532,4 @@ if __name__ == "__main__":
         print("No display detected — running headless (use --no-display to silence).")
 
     run(drive=not args.no_drive, no_display=no_display,
-        countdown=args.countdown, duration=args.duration)
+        countdown=args.countdown, duration=args.duration, trace=args.trace)
