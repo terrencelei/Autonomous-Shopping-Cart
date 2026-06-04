@@ -218,6 +218,29 @@ A 500 ms watchdog stops the motors if no `L… R…` line arrives — so a host 
 
 ---
 
+## Standalone Follower (`follow.py`)
+
+A single-process reactive follower built directly from the spin + displacement control sketch — no A\* and no store map. It imports `vision/yolo_detect.py` for the calibrated target distance/angle and drives the ESP32 over the RPM protocol directly. Hardware/calibration constants (wheel geometry, encoder/motor signs, `MAX_SPEED`, `HOLD_DIST`) are imported from `Pathfinding_algorithm.py`; the control logic is independent of its state machine.
+
+```bash
+python3 follow.py                 # live camera + drive
+python3 follow.py --no-display    # headless (SSH)
+python3 follow.py --no-drive      # vision only, no serial output
+python3 follow.py --duration 30   # stop after 30 s (0 = until Ctrl-C / Q)
+```
+
+### Control loop
+
+Each frame it reads the locked shopper's `(distance, angle)` and then:
+
+1. **Centering — `spin(theta)`.** If `|angle| > THETA_THRESH_DEG` (8°) it runs a blocking point turn to re-square on the shopper, then skips distance that tick. The turn fires the proven breakaway kick (`KICK_RPM` = 8 rpm, released after `KICK_TICKS` = 30 encoder ticks), then turns at `TURN_RPM`. The kick's swept angle and the inertial coast (`drift(initial, final, ANGULAR_INERTIA)`) are subtracted so the total swept angle lands on `theta`. With encoders connected each phase is closed-loop on the measured swept angle; without them it falls back to open-loop timing.
+2. **Distance — PI.** Inside the centre band it holds `THRESH_M` (= `HOLD_DIST`, 2 m): `S += KP_DIST·dx + KI_DIST·(x − thresh)`, kick-started from rest, clipped to `MAX_RPM` (= `MAX_SPEED`). `dx` is a smoothed finite difference of distance.
+3. **Mixing.** Steering `rpm_diff = KP_ANGLE·θ + KD_ANGLE·dθ` is mixed onto the wheels (`R = S + rpm_diff`, `L = S − rpm_diff`) with peak scaling so neither wheel exceeds `MAX_RPM`, then sent as `L<rpm> R<rpm>`.
+
+The gains and `ANGULAR_INERTIA` / `LINEAR_INERTIA` at the top of `follow.py` are placeholders marked `[calibrate]`; inertia defaults to `0`, so drift compensation is skipped until tuned.
+
+---
+
 ## Hardware Tests (`pathfinding_arc_test.py`)
 
 Standalone test script for verifying motor control and pathfinder logic without running the full cart stack. Each mode exercises a different part of the drive system in isolation.
@@ -301,6 +324,7 @@ autonomous-shopping-cart/
 │   ├── throttle_watch.sh           # CPU/thermal throttle monitor
 │   └── requirements.txt
 ├── Pathfinding_algorithm.py        # A* pathfinder + state machine
+├── follow.py                       # Standalone reactive follower (spin + PI distance)
 ├── pathfinding_arc_test.py         # Hardware test: spin / center / follow / track modes
 ├── start_cart.sh / stop_cart.sh    # Launch / stop the full stack detached from SSH
 ├── firmware/
