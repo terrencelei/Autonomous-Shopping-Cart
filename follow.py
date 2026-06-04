@@ -51,7 +51,6 @@ MOTOR_PORT = "/dev/ttyUSB0"       # CP2102 USB-UART bridge
 MOTOR_BAUD = 115200
 
 # Motion limits / loop rate
-MAX_SPEED = 2                   # m/s forward
 DT        = 0.02                  # control loop period (s)
 HOLD_DIST = 2.0                   # target hold distance (m)
 
@@ -97,7 +96,7 @@ DX_ALPHA       = 0.3    # EMA factor for the smoothed dx/dt
 
 # Basic obstacle avoidance: pause forward motion when an obstacle is closer than
 # the target and roughly in the path; resume normal follow once it clears.
-OBSTACLE_BLOCK_DEG = 15.0   # obstacle within this of straight-ahead counts as "in the way"
+OBSTACLE_BLOCK_DEG = 10.0   # obstacle within this of straight-ahead counts as "in the way"
 OBSTACLE_MARGIN_M  = 0.3    # obstacle must be at least this much closer than the target to block
 
 # Steering (angle) controller
@@ -107,7 +106,7 @@ STEER_SIGN = +1   # angle→turn polarity for BOTH steering and re-centre spins.
                   # Flip to -1 if the cart corrects the WRONG way.
 
 # Limits
-MAX_RPM = 75.0   # wheel RPM cap (cart_motor.ino maps ~100 RPM to full PWM)
+MAX_RPM = 100.0  # wheel RPM cap (= cart_motor.ino's ~100 RPM full-PWM point)
 
 
 # =============================================================================
