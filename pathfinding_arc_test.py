@@ -11,6 +11,26 @@ Usage:
     python3 pathfinding_arc_test.py --port /dev/ttyUSB0
     python3 pathfinding_arc_test.py --mode follow                  # forward/backward, live camera
     python3 pathfinding_arc_test.py --mode follow --no-drive --sim-dist 3.5  # simulation
+
+
+    logic sequence for general turning:
+    inertia = something (via calibration)
+
+    Function drift (initial_rpm, final_rpm, inertia)
+	    Some calculation, such as (initial-final)*inertia)
+	    Return drift
+
+    Function turn (theta)
+
+	    Send kick_rpm for kick_ticks
+	    Kick_drift = drift(kick_rpm, turn_rpm, inertia)
+	    phi = kick_rpm * kick_ticks / ticks_per_sec
+	
+        turn_Drift = drift(turn_rpm, 0, inertia)
+        theta_2 = theta - phi - turn_drift - kick_drift
+
+	    Send turn_rpm for t = theta_2/turn_rpm 
+
 """
 
 import argparse
