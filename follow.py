@@ -64,7 +64,7 @@ CAM_W, CAM_H, CAM_FPS = 640, 480, 30
 
 # Proven breakaway kick (see memory: cart-drive-calibration)
 KICK_RPM      = 30.0  # wheel RPM burst to overcome static friction
-KICK_TICKS    = 20    # release the kick once this many encoder ticks accumulate
+KICK_TICKS    = 30    # release the kick once this many encoder ticks accumulate
 KICK_TIMEOUT_S = 1.0  # give up holding the kick after this long if no movement is seen
 TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop fallback
 
@@ -86,6 +86,8 @@ DX_ALPHA       = 0.3    # EMA factor for the smoothed dx/dt
 # Steering (angle) controller
 KP_ANGLE = 40.0   # RPM of wheel-difference per radian of angle error          [calibrate]
 KD_ANGLE = 0.0    # RPM of wheel-difference per (rad/s) of angular rate         [calibrate]
+STEER_SIGN = +1   # angle→turn polarity for BOTH steering and re-centre spins.
+                  # Flip to -1 if the cart corrects the WRONG way.
 
 # Limits
 MAX_RPM = 75.0   # wheel RPM cap (cart_motor.ino maps ~100 RPM to full PWM)
@@ -378,7 +380,7 @@ class FollowController:
         """Distance + in-band steering. Returns (S, rpm_diff). Big re-centre
         turns are handled by the non-blocking Spinner in the run loop, so this
         only does small steering corrections while following."""
-        theta = math.radians(-angle_deg)   # +CCW/left: positive gains steer toward target
+        theta = math.radians(STEER_SIGN * angle_deg)   # signed turn-toward-target error
         dtheta = self._derivatives(x, theta, dt)
         rpm_diff = KP_ANGLE * theta + KD_ANGLE * dtheta
 
@@ -484,7 +486,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
 
                 # Engage a non-blocking re-centre spin when too far off-centre.
                 if not spinner.active and abs(angle_deg) > THETA_THRESH_DEG:
-                    spinner.start(math.radians(-angle_deg))
+                    spinner.start(math.radians(STEER_SIGN * angle_deg))
                     kick.cancel()
                     ctrl.after_spin()
                     prev_S = 0.0
