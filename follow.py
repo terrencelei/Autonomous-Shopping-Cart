@@ -96,8 +96,18 @@ DX_ALPHA       = 0.3    # EMA factor for the smoothed dx/dt
 
 # Basic obstacle avoidance: pause forward motion when an obstacle is closer than
 # the target and roughly in the path; resume normal follow once it clears.
-OBSTACLE_BLOCK_DEG = 10.0   # obstacle within this of straight-ahead counts as "in the way"
+OBSTACLE_BLOCK_DEG = 15.0   # obstacle within this of straight-ahead counts as "in the way"
 OBSTACLE_MARGIN_M  = 0.3    # obstacle must be at least this much closer than the target to block
+
+# Return-home: if the cart is spun ~180° while stopped (i.e. an uncommanded
+# rotation), dead-reckon back to the start pose (0,0,0) along a direct line.
+HOME_ROT_TRIGGER_DEG = 180.0   # uncommanded rotation (while stopped) that triggers a return
+HOME_ROT_RANGE_DEG   = 30.0    # ± tolerance band around the trigger angle
+HOME_TURN_RPM        = 40.0    # wheel RPM for return-home point turns               [calibrate]
+HOME_FWD_RPM         = 50.0    # wheel RPM for the drive-home leg                     [calibrate]
+HOME_DRIVE_KP        = 60.0    # steering RPM per rad of bearing error while driving  [calibrate]
+HOME_ANGLE_TOL_DEG   = 5.0     # a turn is "done" within this
+HOME_DIST_TOL_M      = 0.15    # home reached within this
 
 # Steering (angle) controller
 KP_ANGLE = 40.0   # RPM of wheel-difference per radian of angle error          [calibrate]
@@ -123,6 +133,11 @@ def _trace(msg):
 
 def _clip(v, lo, hi):
     return max(lo, min(hi, v))
+
+
+def _wrap_pi(a):
+    """Wrap an angle (rad) to [-pi, pi]."""
+    return (a + math.pi) % (2.0 * math.pi) - math.pi
 
 
 def _rpm_to_yaw(wheel_rpm):
@@ -421,6 +436,100 @@ class Pursuer:
 
 
 # =============================================================================
+# DEAD RECKONING + RETURN-HOME
+# =============================================================================
+
+class Odometry:
+    """Dead-reckoned cart pose from encoder deltas.
+
+    Origin (0, 0, heading 0) at construction = the start pose ('home'). x/y in
+    metres, heading in radians (+CCW, 0 = the start facing direction). Uses the
+    same encoder sign convention as ``_ticks_to_yaw`` so it stays consistent
+    with the turn commands.
+    """
+
+    def __init__(self):
+        self.x = 0.0
+        self.y = 0.0
+        self.heading = 0.0
+
+    def update(self, d_l, d_r):
+        d_left   = d_l * M_PER_PULSE
+        d_right  = d_r * M_PER_PULSE
+        d_centre = (d_left + d_right) / 2.0
+        d_theta  = (d_right - d_left) / TRACK_M   # +CCW (matches _ticks_to_yaw)
+        mid = self.heading + d_theta / 2.0        # midpoint integration
+        self.x += d_centre * math.cos(mid)
+        self.y += d_centre * math.sin(mid)
+        self.heading += d_theta
+        return d_theta
+
+
+class ReturnHome:
+    """Non-blocking dead-reckoned return to the start pose (0, 0, 0).
+
+    Drives a *direct line* home in three phases: turn to face home → drive to
+    home (steering to hold the bearing) → turn to the original heading.
+    ``update(odom, …)`` returns wheel commands once per tick, or None when the
+    start pose is reached. Closed-loop on the odometry, so it self-corrects.
+    """
+
+    def __init__(self):
+        self._active = False
+
+    @property
+    def active(self):
+        return self._active
+
+    def cancel(self):
+        self._active = False
+
+    def start(self, odom):
+        self._active = True
+        self._phase = "turn_to_home"
+        _trace(f"return-home from ({odom.x:.2f},{odom.y:.2f}) "
+               f"hdg {math.degrees(odom.heading):.0f}°")
+
+    def _point_turn(self, err):
+        direction = 1.0 if err > 0 else -1.0       # +CCW
+        return (-direction * HOME_TURN_RPM, +direction * HOME_TURN_RPM)
+
+    def update(self, odom, d_l, d_r):
+        if not self._active:
+            return None
+        dist = math.hypot(odom.x, odom.y)          # distance to home (0,0)
+        bearing = math.atan2(-odom.y, -odom.x)     # direction toward home
+
+        if self._phase == "turn_to_home":
+            if dist < HOME_DIST_TOL_M:
+                self._phase = "turn_to_orig"       # already at home position
+            else:
+                err = _wrap_pi(bearing - odom.heading)
+                if abs(err) < math.radians(HOME_ANGLE_TOL_DEG):
+                    self._phase = "drive"
+                else:
+                    return self._point_turn(err)
+
+        if self._phase == "drive":
+            if dist < HOME_DIST_TOL_M:
+                self._phase = "turn_to_orig"
+            else:
+                err = _wrap_pi(bearing - odom.heading)
+                steer = _clip(HOME_DRIVE_KP * err, -HOME_TURN_RPM, HOME_TURN_RPM)
+                return (HOME_FWD_RPM - steer, HOME_FWD_RPM + steer)
+
+        if self._phase == "turn_to_orig":
+            err = _wrap_pi(0.0 - odom.heading)     # back to the start heading
+            if abs(err) < math.radians(HOME_ANGLE_TOL_DEG):
+                self._active = False
+                _trace("return-home: arrived at start pose")
+                return None
+            return self._point_turn(err)
+
+        return None
+
+
+# =============================================================================
 # FOLLOW CONTROLLER  (per-tick distance + steering, from the pseudocode)
 # =============================================================================
 
@@ -709,6 +818,9 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     spinner = Spinner()
     searcher = Searcher()
     pursuer = Pursuer()
+    odom = Odometry()          # dead-reckoned pose; origin = the start pose ('home')
+    returnhome = ReturnHome()
+    unexpected_yaw = 0.0       # rotation seen by the encoders while commanding a full stop
     prev_S = 0.0
     last_angle_deg = 0.0       # last angle the target was seen at (which way it left)
     lost_since = None          # when the target was first lost (for the reacquire grace period)
@@ -732,12 +844,42 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
             if dt <= 0.0:
                 dt = DT
 
+            # --- encoders + dead reckoning + uncommanded-rotation detection ----
+            d_l, d_r = motors.read_deltas()
+            actual_l_rpm = _ticks_to_rpm(d_l, dt)
+            actual_r_rpm = _ticks_to_rpm(d_r, dt)
+            meas_yaw = odom.update(d_l, d_r)
+            # While we are commanding a full stop, any rotation the encoders see is
+            # uncommanded (someone turned the cart). Reset whenever we command motion.
+            if abs(cmd_l_rpm) < 0.5 and abs(cmd_r_rpm) < 0.5:
+                unexpected_yaw += meas_yaw
+            else:
+                unexpected_yaw = 0.0
+            spun_around = (abs(abs(unexpected_yaw) - math.radians(HOME_ROT_TRIGGER_DEG))
+                           <= math.radians(HOME_ROT_RANGE_DEG))
+
             dets = cap.get_detections()
             tracked = tracker.update_with_detections(dets)
             out, rows = Y.annotate_frame(frame, tracked, smooth_state, target_lock, now)
             target_row = next((r for r in rows if r[0] == "TARGET"), None)
 
-            if target_row is None:
+            if returnhome.active or spun_around:
+                # Highest priority: an uncommanded ~180° spin → dead-reckon home.
+                if not returnhome.active:
+                    returnhome.start(odom)
+                    unexpected_yaw = 0.0
+                ctrl.target_lost(); kick.cancel(); spinner.cancel()
+                searcher.cancel(); pursuer.cancel(); prev_S = 0.0
+                x = angle_deg = None
+                cmd = returnhome.update(odom, d_l, d_r)
+                if cmd is None:             # back at the start pose
+                    returnhome.cancel()
+                    l_rpm = r_rpm = 0.0
+                    mode_str = "HOME"
+                else:
+                    l_rpm, r_rpm = cmd
+                    mode_str = "RETURN"
+            elif target_row is None:
                 # Target lost: after a short grace period, rotate toward where it
                 # was last seen (kick first to beat stall) until it reappears.
                 ctrl.target_lost()          # reset forward state (don't send 0 — search drives)
@@ -745,9 +887,6 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                 spinner.cancel()
                 prev_S = 0.0
                 x = angle_deg = None
-                d_l, d_r = motors.read_deltas()
-                actual_l_rpm = _ticks_to_rpm(d_l, dt)
-                actual_r_rpm = _ticks_to_rpm(d_r, dt)
                 if lost_since is None:
                     lost_since = now
 
@@ -773,9 +912,6 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                         mode_str = "LOST"
                     else:
                         l_rpm, r_rpm = cmd
-
-                cmd_l_rpm, cmd_r_rpm = l_rpm, r_rpm
-                motors.send_rpm(l_rpm, r_rpm)
             else:
                 x = target_row[3]          # calibrated distance (m)
                 angle_deg = target_row[4]  # calibrated angle (deg, +right)
@@ -784,9 +920,6 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                 reacquire_gave_up = False
                 searcher.cancel()
                 pursuer.cancel()
-                d_l, d_r = motors.read_deltas()
-                actual_l_rpm = _ticks_to_rpm(d_l, dt)
-                actual_r_rpm = _ticks_to_rpm(d_r, dt)
 
                 # Basic obstacle avoidance: an obstacle closer than the target and
                 # roughly in our forward path blocks advancing toward the target.
@@ -831,14 +964,14 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                     prev_S = S
                     l_rpm, r_rpm = mix_wheels(S, rpm_diff)
 
-                cmd_l_rpm, cmd_r_rpm = l_rpm, r_rpm
-                motors.send_rpm(l_rpm, r_rpm)
+            cmd_l_rpm, cmd_r_rpm = l_rpm, r_rpm
+            motors.send_rpm(l_rpm, r_rpm)
 
             Y.P.S.mode = mode_str
 
             if t - last_log >= 0.5:
                 last_log = t
-                if target_row is None:
+                if x is None:    # lost / search / pursue / return-home (no live distance)
                     extra = (f"  (toward last-seen {'+L' if STEER_SIGN*last_angle_deg >= 0 else '-R'})"
                              if mode_str == "SEARCH" else "")
                     print(f"t={t:5.1f}s  {mode_str:6s}  cmd L{cmd_l_rpm:+5.1f} R{cmd_r_rpm:+5.1f}rpm{extra}")
@@ -849,7 +982,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                           f"actual L{actual_l_rpm:+5.1f} R{actual_r_rpm:+5.1f}rpm")
 
             if not no_display:
-                dist_str = f"dist={x:.2f}m ang={angle_deg:+.0f}°" if target_row else "no target"
+                dist_str = f"dist={x:.2f}m ang={angle_deg:+.0f}°" if x is not None else "no target"
                 Y.cv2.putText(out, f"{mode_str}  {dist_str}", (10, 25),
                               Y.cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
                 Y.cv2.imshow("Cart View", out)

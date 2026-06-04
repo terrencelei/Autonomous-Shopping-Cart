@@ -272,13 +272,23 @@ Each frame it reads the locked shopper's `(distance, angle)` and then:
    Either one stops the instant a target reappears (then normal follow resumes); both are non-blocking. After giving up it holds still (`Mode: LOST`).
 5. **Obstacle hold.** Each tick, if any `OBSTACLE` detection is closer than the target (by at least `OBSTACLE_MARGIN_M`) and within `±OBSTACLE_BLOCK_DEG` of straight ahead, forward motion is paused (`S = 0`, `Mode: BLOCKED`) — the cart holds position (steering still keeps it aimed at the target) rather than driving into the obstacle. It resumes normal follow automatically once the obstacle clears the path. This is intentionally minimal: it only *stops*, it does not route around.
 
+### Return-home (spun-around recovery)
+
+`follow.py` dead-reckons its pose from the encoders the whole time (`Odometry`, origin = the start pose). If the cart is **physically rotated ~180° while it was commanding a full stop** — i.e. an *uncommanded* spin, someone turned it around — it abandons following and drives **back to the start position and heading** along a direct line (`ReturnHome`, `Mode: RETURN`, then `HOME` on arrival):
+
+1. Turn to face the start position.
+2. Drive straight to it (steering on the odometry bearing to stay on the line).
+3. Turn to the original heading.
+
+Detection: while the commanded wheels are ~0, any rotation the encoders register is accumulated; crossing `HOME_ROT_TRIGGER_DEG ± HOME_ROT_RANGE_DEG` (180° ± 30°) triggers the return. Tunables: `HOME_TURN_RPM`, `HOME_FWD_RPM`, `HOME_DRIVE_KP`, `HOME_ANGLE_TOL_DEG`, `HOME_DIST_TOL_M`. Because it's dead-reckoning-only, accuracy degrades with how far/long the cart has driven (encoder drift).
+
 ### Startup calibration
 
 On launch, `follow.py` runs `calibrate_angular_inertia()`: it spins the cart at `SPIN_KICK_RPM`, hard-stops, and measures how far the encoders coast to set `ANGULAR_INERTIA` automatically (logged to `calibration_angular_inertia.csv` / `.png`). **Keep the cart clear at launch.** It is skipped — leaving `ANGULAR_INERTIA = 0` (so `drift()` is a no-op and there is no spin overshoot compensation) — if there's no ESP32 serial (`--no-drive`, or the port didn't open) or the spin can't reach the tick threshold within its timeout. The console prints which case occurred.
 
 The other gains and `LINEAR_INERTIA` at the top of `follow.py` are placeholders marked `[calibrate]`.
 
-The Cart View overlay and terminal monitor show `follow.py`'s own state each tick — `FOLLOW`, `SPIN`, `KICK`, `STOP`, `BLOCKED`, `SEARCH`, `PURSUE`, or `LOST` — not the A\* planner's state machine.
+The Cart View overlay and terminal monitor show `follow.py`'s own state each tick — `FOLLOW`, `SPIN`, `KICK`, `STOP`, `BLOCKED`, `SEARCH`, `PURSUE`, `RETURN`, `HOME`, or `LOST` — not the A\* planner's state machine.
 
 ---
 
