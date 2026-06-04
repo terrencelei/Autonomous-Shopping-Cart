@@ -51,7 +51,7 @@ MOTOR_PORT = "/dev/ttyUSB0"       # CP2102 USB-UART bridge
 MOTOR_BAUD = 115200
 
 # Motion limits / loop rate
-MAX_SPEED = 1                   # m/s forward
+MAX_SPEED = 2                   # m/s forward
 DT        = 0.02                  # control loop period (s)
 HOLD_DIST = 2.0                   # target hold distance (m)
 
@@ -94,6 +94,11 @@ LINEAR_INERTIA = 0.0    # s — forward coast factor, reserved for linear drift 
 KP_DIST        = 20.0   # RPM speed change per (m/s) of approach rate dx        [calibrate]
 KI_DIST        = 0.0    # RPM speed change per metre of standoff error (x-thresh) [calibrate]
 DX_ALPHA       = 0.3    # EMA factor for the smoothed dx/dt
+
+# Basic obstacle avoidance: pause forward motion when an obstacle is closer than
+# the target and roughly in the path; resume normal follow once it clears.
+OBSTACLE_BLOCK_DEG = 15.0   # obstacle within this of straight-ahead counts as "in the way"
+OBSTACLE_MARGIN_M  = 0.3    # obstacle must be at least this much closer than the target to block
 
 # Steering (angle) controller
 KP_ANGLE = 40.0   # RPM of wheel-difference per radian of angle error          [calibrate]
@@ -784,6 +789,13 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                 actual_l_rpm = _ticks_to_rpm(d_l, dt)
                 actual_r_rpm = _ticks_to_rpm(d_r, dt)
 
+                # Basic obstacle avoidance: an obstacle closer than the target and
+                # roughly in our forward path blocks advancing toward the target.
+                blocked = any(
+                    obs[3] < x - OBSTACLE_MARGIN_M and abs(obs[4]) <= OBSTACLE_BLOCK_DEG
+                    for obs in rows if obs[0] == "OBSTACLE"
+                )
+
                 # Engage a non-blocking re-centre spin when too far off-centre.
                 if not spinner.active and abs(angle_deg) > THETA_THRESH_DEG:
                     spinner.start(math.radians(STEER_SIGN * angle_deg))
@@ -801,7 +813,12 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                     mode_str = "SPIN"
                 else:
                     S, rpm_diff = ctrl.step(x, angle_deg, dt)
-                    if S == 0.0:           # holding station (too close) — no kick
+                    if blocked:            # obstacle in the way — hold, don't advance
+                        S = 0.0
+                        ctrl.S = 0.0       # stay put (steering still keeps us aimed)
+                        kick.cancel()
+                        mode_str = "BLOCKED"
+                    elif S == 0.0:         # holding station (too close) — no kick
                         kick.cancel()
                         mode_str = "STOP"
                     else:

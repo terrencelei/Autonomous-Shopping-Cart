@@ -270,6 +270,7 @@ Each frame it reads the locked shopper's `(distance, angle)` and then:
    - **Roughly centered** (lost because it got too far ahead) → `Pursuer` drives **straight forward to the last-known position**, kicking (ramps up to beat stall) then driving at `PURSUE_RPM`; gives up after covering `PURSUE_MAX_M`.
 
    Either one stops the instant a target reappears (then normal follow resumes); both are non-blocking. After giving up it holds still (`Mode: LOST`).
+5. **Obstacle hold.** Each tick, if any `OBSTACLE` detection is closer than the target (by at least `OBSTACLE_MARGIN_M`) and within `±OBSTACLE_BLOCK_DEG` of straight ahead, forward motion is paused (`S = 0`, `Mode: BLOCKED`) — the cart holds position (steering still keeps it aimed at the target) rather than driving into the obstacle. It resumes normal follow automatically once the obstacle clears the path. This is intentionally minimal: it only *stops*, it does not route around.
 
 ### Startup calibration
 
@@ -277,7 +278,7 @@ On launch, `follow.py` runs `calibrate_angular_inertia()`: it spins the cart at 
 
 The other gains and `LINEAR_INERTIA` at the top of `follow.py` are placeholders marked `[calibrate]`.
 
-The Cart View overlay and terminal monitor show `follow.py`'s own state each tick — `FOLLOW`, `SPIN`, `KICK`, `STOP`, `SEARCH`, `PURSUE`, or `LOST` — not the A\* planner's state machine.
+The Cart View overlay and terminal monitor show `follow.py`'s own state each tick — `FOLLOW`, `SPIN`, `KICK`, `STOP`, `BLOCKED`, `SEARCH`, `PURSUE`, or `LOST` — not the A\* planner's state machine.
 
 ---
 
