@@ -76,6 +76,13 @@ THETA_THRESH_DEG  = 4.0    # follow loop: re-centre with spin() once |angle| exc
 SPIN_DEADBAND_DEG = 0.5    # spin: ignore turn requests smaller than this (no-op)
 SPIN_TURN_TIMEOUT_S = 2.0  # max extra time for the steady-turn phase (exit a stuck/loaded turn)
 
+# Search / reacquire: when the target leaves the frame, rotate toward where it
+# was last seen until it reappears. Kicks first (SPIN_KICK_RPM) to beat stall.
+SEARCH_RPM       = 8.0    # steady wheel RPM of the search sweep              [calibrate]
+SEARCH_MAX_DEG   = 360.0  # give up after sweeping this much with no target
+SEARCH_TIMEOUT_S = 8.0    # hard time cap on one search (then hold still)
+SEARCH_GRACE_S   = 0.3    # wait this long after losing the target before searching
+
 # Distance (displacement) controller
 THRESH_M       = HOLD_DIST   # standoff distance to hold (m)
 LINEAR_INERTIA = 0.0    # s — forward coast factor, reserved for linear drift  [calibrate]
@@ -296,6 +303,58 @@ class Spinner:
         return (-self._dir * cmd_rpm, +self._dir * cmd_rpm)
 
 
+class Searcher:
+    """Non-blocking 'look for the lost target' rotation.
+
+    ``start(direction)`` begins a sweep toward the last-seen side; ``update``
+    is called once per camera frame and returns the wheel command, or ``None``
+    once it gives up (swept SEARCH_MAX_DEG or SEARCH_TIMEOUT_S elapsed). Like
+    the Spinner it begins with a breakaway kick (SPIN_KICK_RPM, released after
+    KICK_TICKS) so it can overcome stall, then sweeps steadily at SEARCH_RPM.
+    The caller cancels it the moment a target reappears.
+    """
+
+    def __init__(self):
+        self._active = False
+
+    @property
+    def active(self):
+        return self._active
+
+    def cancel(self):
+        self._active = False
+
+    def start(self, direction):
+        self._active = True
+        self._dir = 1.0 if direction >= 0 else -1.0   # +CCW / left
+        self._phase = "kick"
+        self._kick_ticks = 0
+        self._swept = 0.0
+        self._t0 = time.monotonic()
+        _trace(f"search start dir={'+L' if self._dir > 0 else '-R'}  kick…")
+
+    def update(self, d_l, d_r):
+        """Advance one tick; return (l_rpm, r_rpm), or None once it gives up."""
+        if not self._active:
+            return None
+        now = time.monotonic()
+        self._swept += abs(_ticks_to_yaw(d_l, d_r))
+
+        if self._phase == "kick":
+            self._kick_ticks += abs(d_l) + abs(d_r)
+            cmd_rpm = SPIN_KICK_RPM
+            if self._kick_ticks >= KICK_TICKS or (now - self._t0) >= KICK_TIMEOUT_S:
+                self._phase = "sweep"
+        else:
+            cmd_rpm = SEARCH_RPM
+
+        if self._swept >= math.radians(SEARCH_MAX_DEG) or (now - self._t0) >= SEARCH_TIMEOUT_S:
+            self._active = False
+            _trace("search gave up (swept max / timeout)")
+            return None
+        return (-self._dir * cmd_rpm, +self._dir * cmd_rpm)
+
+
 # =============================================================================
 # FOLLOW CONTROLLER  (per-tick distance + steering, from the pseudocode)
 # =============================================================================
@@ -442,7 +501,11 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     motors.flush()
     kick = Kick()
     spinner = Spinner()
+    searcher = Searcher()
     prev_S = 0.0
+    last_angle_deg = 0.0       # last angle the target was seen at (which way it left)
+    lost_since = None          # when the target was first lost (for the search grace period)
+    search_gave_up = False     # True once a search swept its limit with no target
     start = time.monotonic()
     prev_t = start
     last_log = 0.0
@@ -468,18 +531,44 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
             target_row = next((r for r in rows if r[0] == "TARGET"), None)
 
             if target_row is None:
-                _trace("follow: target lost → stop")
-                ctrl.target_lost(motors)
+                # Target lost: after a short grace period, rotate toward where it
+                # was last seen (kick first to beat stall) until it reappears.
+                ctrl.target_lost()          # reset forward state (don't send 0 — search drives)
                 kick.cancel()
                 spinner.cancel()
                 prev_S = 0.0
-                cmd_l_rpm = cmd_r_rpm = 0.0
-                actual_l_rpm = actual_r_rpm = 0.0
                 x = angle_deg = None
-                mode_str = "LOST"
+                d_l, d_r = motors.read_deltas()
+                actual_l_rpm = _ticks_to_rpm(d_l, dt)
+                actual_r_rpm = _ticks_to_rpm(d_r, dt)
+                if lost_since is None:
+                    lost_since = now
+
+                if (not searcher.active and not search_gave_up
+                        and (now - lost_since) >= SEARCH_GRACE_S):
+                    searcher.start(STEER_SIGN * last_angle_deg)
+
+                if searcher.active:
+                    cmd = searcher.update(d_l, d_r)
+                    if cmd is None:          # swept its limit with no target — give up
+                        l_rpm = r_rpm = 0.0
+                        search_gave_up = True
+                        mode_str = "LOST"
+                    else:
+                        l_rpm, r_rpm = cmd
+                        mode_str = "SEARCH"
+                else:
+                    l_rpm = r_rpm = 0.0      # grace period, or gave up → hold still
+                    mode_str = "LOST"
+                cmd_l_rpm, cmd_r_rpm = l_rpm, r_rpm
+                motors.send_rpm(l_rpm, r_rpm)
             else:
                 x = target_row[3]          # calibrated distance (m)
                 angle_deg = target_row[4]  # calibrated angle (deg, +right)
+                last_angle_deg = angle_deg # remember which way it is, in case it leaves
+                lost_since = None          # reacquired → reset search state
+                search_gave_up = False
+                searcher.cancel()
                 d_l, d_r = motors.read_deltas()
                 actual_l_rpm = _ticks_to_rpm(d_l, dt)
                 actual_r_rpm = _ticks_to_rpm(d_r, dt)
@@ -523,7 +612,9 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
             if t - last_log >= 0.5:
                 last_log = t
                 if target_row is None:
-                    print(f"t={t:5.1f}s  no target")
+                    print(f"t={t:5.1f}s  {mode_str:6s}  cmd L{cmd_l_rpm:+5.1f} R{cmd_r_rpm:+5.1f}rpm "
+                          f"(searching toward last-seen {'+L' if STEER_SIGN*last_angle_deg >= 0 else '-R'})"
+                          if mode_str == "SEARCH" else f"t={t:5.1f}s  no target")
                 else:
                     print(f"t={t:5.1f}s  dist={x:.2f}m  angle={angle_deg:+5.1f}°  "
                           f"dx={ctrl.dx:+.2f}m/s  {mode_str:6s}  "
