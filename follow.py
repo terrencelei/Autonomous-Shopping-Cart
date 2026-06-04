@@ -72,7 +72,8 @@ TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop 
 TURN_RPM          = 6.0    # steady wheel RPM during the turn after the kick
 ANGULAR_INERTIA   = 0.0    # s — yaw coast factor; drift = (w0-w1)*inertia   [calibrate]
 THETA_THRESH_DEG  = 8.0    # follow loop: re-centre with spin() once |angle| exceeds this
-SPIN_DEADBAND_DEG = 0.5    # spin(): ignore turn requests smaller than this (no-op)
+SPIN_DEADBAND_DEG = 0.5    # spin: ignore turn requests smaller than this (no-op)
+SPIN_TURN_TIMEOUT_S = 2.0  # max extra time for the steady-turn phase (exit a stuck/loaded turn)
 
 # Distance (displacement) controller
 THRESH_M       = HOLD_DIST   # standoff distance to hold (m)
@@ -215,78 +216,81 @@ class MotorIO:
 # SPIN  — point-turn through theta_rad (+CCW / left)
 # =============================================================================
 
-def _turn_wheels(motors, wheel_rpm, direction):
-    """Command a point turn at wheel_rpm * direction (+1 = CCW/left)."""
-    motors.send_rpm(-direction * wheel_rpm, +direction * wheel_rpm)
+class Spinner:
+    """Non-blocking drift-compensated point turn.
 
+    ``start(theta)`` captures the turn; ``update(d_l, d_r)`` is called once per
+    control tick with that tick's encoder deltas and returns the wheel commands
+    ``(l_rpm, r_rpm)`` for this tick, or ``None`` when the turn is complete.
 
-def spin(theta_rad, motors):
-    """Re-square on the target by turning through ``theta_rad`` (+CCW/left).
+    Unlike the old blocking spin(), this advances ONE tick per call, so the
+    camera/control loop keeps running at full rate during a re-centre — no more
+    multi-second freeze while loaded wheels grind through a turn.
 
-    Profile (from the pseudocode): a breakaway kick at KICK_RPM, then a steady
-    turn at TURN_RPM for the remaining angle.  The kick's swept angle (phi) and
-    the inertial coast on each speed change (kick->turn, turn->0) are subtracted
-    so the *total* swept angle lands on theta.
-
-        phi        = angle swept during the kick
-        kick_drift = drift(kick, turn, inertia)
-        stop_drift = drift(turn, 0,    inertia)
-        theta_2    = |theta| - phi - kick_drift - stop_drift   # steady-turn part
-
-    With encoders present each phase is closed-loop on the measured swept angle
-    (robust); without them it falls back to open-loop timing.
+    Profile (from the pseudocode): breakaway kick at KICK_RPM until KICK_TICKS
+    of encoder movement (or KICK_TIMEOUT_S), then a steady turn at TURN_RPM for
+    the remaining angle (kick angle phi + inertial coast subtracted), bounded by
+    SPIN_TURN_TIMEOUT_S so a stuck/loaded turn always exits.
     """
-    if abs(theta_rad) < math.radians(SPIN_DEADBAND_DEG):
-        return
-    direction  = 1.0 if theta_rad > 0 else -1.0
-    target     = abs(theta_rad)
-    omega_kick = _rpm_to_yaw(KICK_RPM)
-    omega_turn = _rpm_to_yaw(TURN_RPM)
-    closed_loop = motors is not None and motors.has_serial
-    _trace(f"spin({math.degrees(theta_rad):+.1f}°, "
-           f"{'closed-loop' if closed_loop else 'open-loop'})  kick…")
 
-    # --- breakaway kick: hold until KICK_TICKS ticks; measure swept angle ----
-    if closed_loop:
-        motors.flush()
-        _turn_wheels(motors, KICK_RPM, direction)
-        acc_ticks = 0
-        phi = 0.0
-        t_timeout = time.monotonic() + 1.5
-        while acc_ticks < KICK_TICKS and time.monotonic() < t_timeout:
-            time.sleep(DT)
-            dl, dr = motors.read_deltas()
-            acc_ticks += abs(dl) + abs(dr)
-            phi += abs(_ticks_to_yaw(dl, dr))
-    else:
-        kick_time = KICK_TICKS / TICKS_PER_SEC
-        if motors is not None:
-            _turn_wheels(motors, KICK_RPM, direction)
-            time.sleep(kick_time)
-        phi = omega_kick * kick_time
+    def __init__(self):
+        self._active = False
 
-    kick_drift = drift(omega_kick, omega_turn, ANGULAR_INERTIA)
-    stop_drift = drift(omega_turn, 0.0, ANGULAR_INERTIA)
-    theta_2 = target - phi - kick_drift - stop_drift
-    _trace(f"  spin: phi={math.degrees(phi):.1f}° → turn {math.degrees(max(theta_2,0)):.1f}° @ {TURN_RPM}rpm")
+    @property
+    def active(self):
+        return self._active
 
-    # --- steady turn for the remaining angle ---------------------------------
-    if theta_2 > 0.0 and omega_turn > 0.0:
-        if closed_loop:
-            _turn_wheels(motors, TURN_RPM, direction)
-            swept = 0.0
-            t_timeout = time.monotonic() + theta_2 / omega_turn + 1.5
-            while swept < theta_2 and time.monotonic() < t_timeout:
-                time.sleep(DT)
-                dl, dr = motors.read_deltas()
-                swept += abs(_ticks_to_yaw(dl, dr))
-        else:
-            if motors is not None:
-                _turn_wheels(motors, TURN_RPM, direction)
-            time.sleep(theta_2 / omega_turn)
+    def cancel(self):
+        self._active = False
 
-    if motors is not None:
-        motors.stop()
+    def start(self, theta_rad):
+        if abs(theta_rad) < math.radians(SPIN_DEADBAND_DEG):
+            self._active = False
+            return
+        self._active = True
+        self._dir    = 1.0 if theta_rad > 0 else -1.0   # +CCW / left
+        self._target = abs(theta_rad)
+        self._phase  = "kick"
+        self._kick_ticks = 0
+        self._phi    = 0.0     # angle swept during the kick
+        self._swept  = 0.0     # angle swept during the steady turn
+        self._theta2 = 0.0     # remaining angle for the steady turn
+        self._t0     = time.monotonic()
+        _trace(f"spin start {math.degrees(theta_rad):+.1f}°  kick…")
+
+    def update(self, d_l, d_r):
+        """Advance one tick; return (l_rpm, r_rpm) or None when the turn ends."""
+        if not self._active:
+            return None
+        now = time.monotonic()
+        swept_inc = abs(_ticks_to_yaw(d_l, d_r))
+
+        if self._phase == "kick":
+            self._kick_ticks += abs(d_l) + abs(d_r)
+            self._phi += swept_inc
+            cmd_rpm = KICK_RPM
+            if self._kick_ticks >= KICK_TICKS or (now - self._t0) >= KICK_TIMEOUT_S:
+                omega_turn = _rpm_to_yaw(TURN_RPM)
+                kick_drift = drift(_rpm_to_yaw(KICK_RPM), omega_turn, ANGULAR_INERTIA)
+                stop_drift = drift(omega_turn, 0.0, ANGULAR_INERTIA)
+                self._theta2 = self._target - self._phi - kick_drift - stop_drift
+                self._phase = "turn"
+                self._t0 = now
+                _trace(f"  spin: phi={math.degrees(self._phi):.1f}° → "
+                       f"turn {math.degrees(max(self._theta2, 0.0)):.1f}° @ {TURN_RPM}rpm")
+                if self._theta2 <= 0.0:
+                    self._active = False
+                    return None
+        else:  # steady-turn phase
+            self._swept += swept_inc
+            cmd_rpm = TURN_RPM
+            omega_turn = _rpm_to_yaw(TURN_RPM)
+            timeout = (self._theta2 / omega_turn if omega_turn > 0 else 0.0) + SPIN_TURN_TIMEOUT_S
+            if self._swept >= self._theta2 or (now - self._t0) >= timeout:
+                self._active = False
+                return None
+
+        return (-self._dir * cmd_rpm, +self._dir * cmd_rpm)
 
 
 # =============================================================================
@@ -345,9 +349,14 @@ class FollowController:
     def __init__(self):
         self.S = 0.0           # current forward wheel RPM
         self.dx = 0.0          # smoothed d(distance)/dt  (m/s)
-        self.spun = False
         self._prev_x = None
         self._prev_theta = 0.0
+
+    def after_spin(self):
+        """Reset forward state after a re-centre spin: re-kick from rest and
+        discard the stale distance derivative (the cart turned in place)."""
+        self.S = 0.0
+        self._prev_x = None
 
     def _derivatives(self, x, theta, dt):
         raw_dx = 0.0 if self._prev_x is None else (x - self._prev_x) / dt
@@ -364,20 +373,12 @@ class FollowController:
         if motors is not None:
             motors.send_rpm(0.0, 0.0)
 
-    def step(self, x, angle_deg, dt, motors=None):
-        self.spun = False
+    def step(self, x, angle_deg, dt):
+        """Distance + in-band steering. Returns (S, rpm_diff). Big re-centre
+        turns are handled by the non-blocking Spinner in the run loop, so this
+        only does small steering corrections while following."""
         theta = math.radians(-angle_deg)   # +CCW/left: positive gains steer toward target
         dtheta = self._derivatives(x, theta, dt)
-
-        # Centering — always parallel, independent of distance
-        if abs(theta) > math.radians(THETA_THRESH_DEG):
-            _trace(f"step: |angle|={abs(angle_deg):.1f}° > {THETA_THRESH_DEG}° → spin()")
-            spin(theta, motors)
-            self.S = 0.0
-            self._prev_x = None            # distance derivative invalid after the turn
-            self.spun = True
-            return None                    # skip distance control this tick
-
         rpm_diff = KP_ANGLE * theta + KD_ANGLE * dtheta
 
         # Distance control (PI). Breakaway kick is applied by the caller's Kick.
@@ -437,6 +438,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
 
     motors.flush()
     kick = Kick()
+    spinner = Spinner()
     prev_S = 0.0
     start = time.monotonic()
     prev_t = start
@@ -466,6 +468,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                 _trace("follow: target lost → stop")
                 ctrl.target_lost(motors)
                 kick.cancel()
+                spinner.cancel()
                 prev_S = 0.0
                 cmd_l_rpm = cmd_r_rpm = 0.0
                 actual_l_rpm = actual_r_rpm = 0.0
@@ -474,16 +477,27 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
             else:
                 x = target_row[3]          # calibrated distance (m)
                 angle_deg = target_row[4]  # calibrated angle (deg, +right)
-                res = ctrl.step(x, angle_deg, dt, motors=motors)
-                if res is None:            # a blocking re-centre spin ran this tick
+                d_l, d_r = motors.read_deltas()
+                actual_l_rpm = _ticks_to_rpm(d_l, dt)
+                actual_r_rpm = _ticks_to_rpm(d_r, dt)
+
+                # Engage a non-blocking re-centre spin when too far off-centre.
+                if not spinner.active and abs(angle_deg) > THETA_THRESH_DEG:
+                    spinner.start(math.radians(-angle_deg))
                     kick.cancel()
+                    ctrl.after_spin()
                     prev_S = 0.0
+
+                if spinner.active:
+                    cmd = spinner.update(d_l, d_r)   # one turn tick — never blocks
+                    if cmd is None:                  # turn finished this tick
+                        l_rpm = r_rpm = 0.0
+                        ctrl.after_spin()
+                    else:
+                        l_rpm, r_rpm = cmd
                     mode_str = "SPIN"
                 else:
-                    S, rpm_diff = res
-                    d_l, d_r = motors.read_deltas()
-                    actual_l_rpm = _ticks_to_rpm(d_l, dt)
-                    actual_r_rpm = _ticks_to_rpm(d_r, dt)
+                    S, rpm_diff = ctrl.step(x, angle_deg, dt)
                     if S == 0.0:           # holding station (too close) — no kick
                         kick.cancel()
                         mode_str = "STOP"
@@ -497,8 +511,9 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                         mode_str = "KICK" if kick.active else "FOLLOW"
                     prev_S = S
                     l_rpm, r_rpm = mix_wheels(S, rpm_diff)
-                    cmd_l_rpm, cmd_r_rpm = l_rpm, r_rpm
-                    motors.send_rpm(l_rpm, r_rpm)
+
+                cmd_l_rpm, cmd_r_rpm = l_rpm, r_rpm
+                motors.send_rpm(l_rpm, r_rpm)
 
             Y.P.S.mode = mode_str
 
@@ -507,18 +522,14 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                 if target_row is None:
                     print(f"t={t:5.1f}s  no target")
                 else:
-                    if ctrl.spun:
-                        tag = "SPIN"
-                    else:
-                        tag = ("KICK " if kick.active else "") + f"S={ctrl.S:+6.1f}rpm"
                     print(f"t={t:5.1f}s  dist={x:.2f}m  angle={angle_deg:+5.1f}°  "
-                          f"dx={ctrl.dx:+.2f}m/s  {tag}  "
+                          f"dx={ctrl.dx:+.2f}m/s  {mode_str:6s}  "
                           f"cmd L{cmd_l_rpm:+5.1f} R{cmd_r_rpm:+5.1f}rpm  "
                           f"actual L{actual_l_rpm:+5.1f} R{actual_r_rpm:+5.1f}rpm")
 
             if not no_display:
                 dist_str = f"dist={x:.2f}m ang={angle_deg:+.0f}°" if target_row else "no target"
-                Y.cv2.putText(out, f"FOLLOW  {dist_str}", (10, 25),
+                Y.cv2.putText(out, f"{mode_str}  {dist_str}", (10, 25),
                               Y.cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
                 Y.cv2.imshow("Cart View", out)
                 if Y.cv2.waitKey(1) & 0xFF == ord("q"):
