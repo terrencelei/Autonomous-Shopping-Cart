@@ -13,12 +13,12 @@ import Pathfinding_algorithm as P
 
 
 TARGET_DISTANCE_M = 1.0
-DEFAULT_RPM = 0.4
-DEFAULT_KICK_RPM = 15.0
-DEFAULT_KICK_MAX_RPM = 30.0
-DEFAULT_KICK_RAMP_STEP_RPM = 2.0
-DEFAULT_KICK_RAMP_HOLD_S = 0.5
-DEFAULT_KICK_RELEASE_TICKS = 100
+DEFAULT_RPM = 0.5
+DEFAULT_KICK_RPM = 8.0
+DEFAULT_KICK_MAX_RPM = 15.0
+DEFAULT_KICK_RAMP_STEP_RPM = 1.0
+DEFAULT_KICK_RAMP_HOLD_S = 0.1
+DEFAULT_KICK_RELEASE_TICKS = 30
 DEFAULT_TIMEOUT_S = 20.0
 
 
@@ -33,7 +33,7 @@ def wheel_rpm_to_speed(rpm):
 
 def forward_wheel_commands(speed_m_s):
     # The cart's right side needs the opposite command sign for straight motion.
-    return speed_m_s, -speed_m_s
+    return speed_m_s, speed_m_s
 
 
 def flush_motors(motors):
