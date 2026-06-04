@@ -49,7 +49,7 @@ MOTOR_PORT = "/dev/ttyUSB0"       # CP2102 USB-UART bridge
 MOTOR_BAUD = 115200
 
 # Motion limits / loop rate
-MAX_SPEED = 0.5                   # m/s forward
+MAX_RPM   = 31.0                  # open-loop cap; roughly duty 80/255 in cart_motor.ino
 DT        = 0.02                  # control loop period (s)
 HOLD_DIST = 2.0                   # target hold distance (m)
 
@@ -71,10 +71,6 @@ THRESH_M       = HOLD_DIST   # standoff distance to hold (m)
 KP_DIST        = 30.0   # RPM speed change per (m/s) of approach rate dx        [calibrate]
 KI_DIST        = 15.0   # RPM speed change per metre of standoff error (x-thresh) [calibrate]
 DX_ALPHA       = 0.3    # EMA factor for the smoothed dx/dt
-
-# Limits
-MAX_RPM = MAX_SPEED / WHEEL_CIRC * 60.0   # wheel RPM cap (= MAX_SPEED)
-
 
 # =============================================================================
 # HELPERS
