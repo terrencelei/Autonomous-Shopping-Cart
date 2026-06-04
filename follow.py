@@ -269,17 +269,13 @@ class FollowController:
     def __init__(self):
         self.S = 0.0           # current forward wheel RPM
         self.dx = 0.0          # smoothed d(distance)/dt  (m/s)
-        self.dx2 = 0.0         # finite difference of dx   (m/s^2)
         self.spun = False
         self._prev_x = None
-        self._prev_dx = 0.0
         self._prev_theta = 0.0
 
     def _derivatives(self, x, theta, dt):
         raw_dx = 0.0 if self._prev_x is None else (x - self._prev_x) / dt
         self.dx = (1.0 - DX_ALPHA) * self.dx + DX_ALPHA * raw_dx
-        self.dx2 = (self.dx - self._prev_dx) / dt
-        self._prev_dx = self.dx
         dtheta = (theta - self._prev_theta) / dt
         self._prev_x = x
         self._prev_theta = theta
