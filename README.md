@@ -271,7 +271,11 @@ Each frame it reads the locked shopper's `(distance, angle)` and then:
 
    Either one stops the instant a target reappears (then normal follow resumes); both are non-blocking. After giving up it holds still (`Mode: LOST`).
 
-The gains and `ANGULAR_INERTIA` / `LINEAR_INERTIA` at the top of `follow.py` are placeholders marked `[calibrate]`; inertia defaults to `0`, so drift compensation is skipped until tuned.
+### Startup calibration
+
+On launch, `follow.py` runs `calibrate_angular_inertia()`: it spins the cart at `SPIN_KICK_RPM`, hard-stops, and measures how far the encoders coast to set `ANGULAR_INERTIA` automatically (logged to `calibration_angular_inertia.csv` / `.png`). **Keep the cart clear at launch.** It is skipped — leaving `ANGULAR_INERTIA = 0` (so `drift()` is a no-op and there is no spin overshoot compensation) — if there's no ESP32 serial (`--no-drive`, or the port didn't open) or the spin can't reach the tick threshold within its timeout. The console prints which case occurred.
+
+The other gains and `LINEAR_INERTIA` at the top of `follow.py` are placeholders marked `[calibrate]`.
 
 The Cart View overlay and terminal monitor show `follow.py`'s own state each tick — `FOLLOW`, `SPIN`, `KICK`, `STOP`, `SEARCH`, `PURSUE`, or `LOST` — not the A\* planner's state machine.
 
@@ -279,7 +283,7 @@ The Cart View overlay and terminal monitor show `follow.py`'s own state each tic
 
 ## Straight Follower (`follow_straight.py`)
 
-`follow_straight.py` is the distance-only follower. It ignores steering angle for control and drives both wheels forward to hold `HOLD_DIST` from the locked shopper.
+`follow_straight.py` is the distance-only follower. It never steers on the camera angle (that input is dropped from its controller entirely) — it only drives forward to hold `HOLD_DIST` from the locked shopper. It is **forward-only**: when the shopper is at or closer than the hold distance it stops, never reverses. A damped proportional speed (`KP_DIST·error + KD_DIST·dx`, slew-limited by `RPM_SLEW_PER_S`) avoids the overshoot/stop cycles of an integrating controller.
 
 ```bash
 python3 follow_straight.py                 # live camera + drive
@@ -288,14 +292,18 @@ python3 follow_straight.py --no-drive      # vision only, no serial output
 python3 follow_straight.py --duration 30   # stop after 30 s
 ```
 
-Current key limits:
+**Straight-line heading hold.** Because the open-loop ESP32 firmware turns equal RPM commands into equal *PWM* — not equal *speed* — the cart drifts on uneven friction. To counter that without steering on the target, `follow_straight` adds a small **encoder-driven** trim: it accumulates the left-vs-right encoder imbalance and nudges the lagging wheel up (`STRAIGHT_KP`, `STRAIGHT_KD`, capped at `STRAIGHT_TRIM_MAX`) to keep the two wheels' travel equal. It resets at each stop/new segment and never reverses a wheel. This holds the heading it set off with — it is *not* camera/angle steering.
+
+Current key constants:
 
 | Constant | Value | Meaning |
 |----------|-------|---------|
 | `MAX_RPM` | `75.0` | Maximum open-loop command sent to each wheel |
-| `KICK_RPM` | `18.0` | Breakaway floor when starting from rest |
-| `KICK_TICKS` | `45` | Encoder ticks before releasing the breakaway kick |
-| `DIST_DEADBAND_M` | `0.20` | No-drive band around the 2 m hold distance |
+| `KICK_RPM` / `KICK_TICKS` | `18.0` / `45` | Breakaway floor when starting from rest, released after this many ticks |
+| `DIST_DEADBAND_M` | `0.20` | No-drive band beyond the 2 m hold distance |
+| `KP_DIST` / `KD_DIST` | `30.0` / `8.0` | Forward speed per metre of standoff error / per (m/s) closing rate |
+| `RPM_SLEW_PER_S` | `35.0` | Max command change per second (smooths the approach) |
+| `STRAIGHT_KP` / `STRAIGHT_KD` / `STRAIGHT_TRIM_MAX` | `0.20` / `2.0` / `15.0` | Encoder heading-hold trim gains and cap |
 
 The terminal monitor prints distance, angle, smoothed distance rate, commanded RPM, and encoder-derived actual RPM, for example:
 
