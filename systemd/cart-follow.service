@@ -1,0 +1,31 @@
+# Autostart for the Autonomous Shopping Cart follower (follow.py).
+#
+# Install:
+#   sudo cp systemd/cart-follow.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cart-follow      # start now + on every boot
+#
+# Manage:
+#   sudo systemctl status cart-follow
+#   sudo systemctl stop cart-follow              # halt the cart
+#   sudo systemctl disable cart-follow           # don't start on boot
+#   journalctl -fu cart-follow                   # live log
+#
+# SAFETY: the cart spins to calibrate and then starts following the moment this
+# unit starts (every boot). Keep it clear of people/obstacles, or leave the
+# unit disabled until you're ready.
+
+[Unit]
+Description=Autonomous Shopping Cart follower (follow.py)
+After=multi-user.target
+
+[Service]
+Type=simple
+User=terrencelei
+WorkingDirectory=/home/terrencelei/Autonomous-Shopping-Cart
+ExecStart=/usr/bin/python3 -u follow.py --no-display
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

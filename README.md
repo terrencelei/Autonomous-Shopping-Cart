@@ -36,6 +36,18 @@ Stop with **Ctrl-C** (or **Q** in the Cart View window). Headless mode is auto-e
 
 > **Safety:** at launch `follow.py` runs a brief angular-inertia calibration (it spins the cart in place) and then starts following — keep the cart clear of people and obstacles when you start it.
 
+### Autostart on boot (optional)
+
+Install the systemd unit to launch `follow.py` headless on every boot:
+
+```bash
+sudo cp systemd/cart-follow.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cart-follow     # start now + on every boot
+```
+
+Manage it with `sudo systemctl {status,stop,disable} cart-follow` and `journalctl -fu cart-follow`. **Safety:** with the unit enabled the cart calibrates (spins) and starts following the moment the Pi boots — keep it clear, or leave the unit disabled until you're ready.
+
 ---
 
 ## Vision System
@@ -237,13 +249,14 @@ autonomous-shopping-cart/
 ├── sniff_encoder.py                # Serial encoder sniffer (debug)
 ├── vision/                         # Camera tracking, imported by follow.py
 │   ├── yolo_detect.py              # IMX500 + ByteTrack target/obstacle tracking (vision-only)
-│   ├── throttle_watch.sh           # CPU/thermal throttle monitor
 │   └── requirements.txt
 ├── firmware/
 │   ├── cart_motor/
 │   │   └── cart_motor.ino          # ESP32 open-loop motor controller
 │   └── constant_motor_speed/
 │       └── constant_motor_speed.ino # Standalone constant-speed motor test
+├── systemd/
+│   └── cart-follow.service         # Optional boot autostart for follow.py
 └── README.md
 ```
 
