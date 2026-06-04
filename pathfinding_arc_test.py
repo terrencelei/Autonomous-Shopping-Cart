@@ -9,6 +9,8 @@ Usage:
     python3 pathfinding_arc_test.py --mode slow-spin    # slow in-place spin
     python3 pathfinding_arc_test.py --no-drive --sim-angle 15
     python3 pathfinding_arc_test.py --port /dev/ttyUSB0
+    python3 pathfinding_arc_test.py --mode follow --sim-dist 3.5   # forward/backward only
+    python3 pathfinding_arc_test.py --mode follow --no-drive --sim-dist 3.5
 """
 
 import argparse
@@ -41,6 +43,12 @@ CENTER_SEARCH_FAR_MAX_RPM = 0.3
 CENTER_SEARCH_RAMP_STEP_RPM = 0.1
 CENTER_SEARCH_RAMP_HOLD_S = 1
 CENTER_SEARCH_STALL_TICKS = 5
+
+# Follow (distance-only) stall-combat parameters — same values as center kick
+FOLLOW_KICK_RPM           = CENTER_KICK_RPM
+FOLLOW_KICK_RELEASE_TICKS = CENTER_KICK_RELEASE_TICKS
+FOLLOW_MIN_RUN_RPM        = CENTER_MIN_RUN_RPM
+FOLLOW_DIST_DEADBAND_M    = 0.05   # stop commanding when within this of HOLD_DIST
 
 # Slow-spin / stall-test parameters.  The test commands wheel RPMs, not raw
 # PWM, because the ESP32 firmware exposes an RPM serial protocol.
@@ -312,6 +320,60 @@ def center_turn_request(angle_deg):
     if angle_deg is None or abs(angle_deg) <= CENTER_DEADBAND_DEG:
         return 0.0, 0.0
     return CENTER_START_RPM, -angle_deg
+
+
+class FollowRpmCommand:
+    """Kick-on-start / kick-on-direction-change stall combat for linear motion.
+
+    Mirrors CenterRpmCommand but drives forward/backward instead of rotating.
+    Returns v_forward in m/s (positive = forward, negative = reverse).
+    """
+
+    def __init__(self):
+        self._moving = False
+        self._last_sign = 0.0
+        self._kick_active = False
+        self._kick_l_ticks = 0
+        self._kick_r_ticks = 0
+
+    def reset(self):
+        self._moving = False
+        self._last_sign = 0.0
+        self._kick_active = False
+        self._kick_l_ticks = 0
+        self._kick_r_ticks = 0
+
+    @property
+    def kick_active(self):
+        return self._kick_active
+
+    def command(self, rpm, direction, encoder_delta=(0, 0),
+                kick_rpm=FOLLOW_KICK_RPM,
+                kick_release_ticks=FOLLOW_KICK_RELEASE_TICKS):
+        """rpm: desired wheel RPM (>= 0); direction: +1 forward, -1 reverse.
+        Returns v_forward in m/s with the correct sign."""
+        if rpm <= 0.0:
+            self.reset()
+            return 0.0
+
+        sign = math.copysign(1.0, direction)
+        if not self._moving or sign != self._last_sign:
+            self._kick_active = True
+            self._kick_l_ticks = 0
+            self._kick_r_ticks = 0
+        self._moving = True
+        self._last_sign = sign
+
+        d_l, d_r = encoder_delta
+        self._kick_l_ticks += abs(d_l)
+        self._kick_r_ticks += abs(d_r)
+        if (self._kick_l_ticks >= kick_release_ticks or
+                self._kick_r_ticks >= kick_release_ticks):
+            self._kick_active = False
+
+        actual_rpm = kick_rpm if self._kick_active else rpm
+        v = actual_rpm * P.WHEEL_CIRC / 60.0
+        return math.copysign(v, sign)
 
 
 def run_slow_spin(drive=True, port=None, countdown=3, duration=30.0, direction=1.0):
@@ -803,6 +865,166 @@ def run_center(drive=True, port=None, countdown=3, duration=30.0, sim_angle=None
     )
 
 
+def run_follow(drive=True, port=None, countdown=3, duration=30.0, sim_dist=None):
+    """Distance-only follow test: PD forward/backward, omega forced to zero.
+
+    Uses the same kick-on-start stall combat as the center spin tests
+    (FOLLOW_KICK_RPM / FOLLOW_KICK_RELEASE_TICKS).  Reads distance from UDP
+    unless --sim-dist is given.
+    """
+    motors  = open_motors(drive=drive, port=port, countdown=countdown, action="following")
+    receiver = None if sim_dist is not None else P.TargetReceiver()
+
+    print("Follow mode: distance PD control only, omega=0, no angle correction.")
+    print(f"Hold distance: {P.HOLD_DIST:.2f} m  "
+          f"Kp={P.DIST_KP}  Kd={P.DIST_KD}  "
+          f"kick={FOLLOW_KICK_RPM} RPM / {FOLLOW_KICK_RELEASE_TICKS} ticks")
+    if sim_dist is not None:
+        print(f"Simulated target distance: {sim_dist:.2f} m")
+    else:
+        print(f"Listening for UDP target readings on port {P.UDP_PORT}.")
+
+    times, v_fwds, v_lefts, v_rights = [], [], [], []
+    target_dists, dist_errors = [], []
+    enc_right_cum, enc_left_cum = [], []
+    enc_right_delta, enc_left_delta = [], []
+    cum_l, cum_r = 0, 0
+    prev_dist = None
+    start = time.monotonic()
+    rpm_command = FollowRpmCommand()
+    i = 0
+
+    flush_motors(motors)
+    try:
+        while True:
+            t_loop0 = time.monotonic()
+            t = t_loop0 - start
+            if duration > 0 and t >= duration:
+                break
+
+            reading = (sim_dist, 0.0) if sim_dist is not None else receiver.get()
+            dist_m = reading[0] if reading is not None else None
+
+            if dist_m is not None:
+                e = dist_m - P.HOLD_DIST
+                de_dt = (dist_m - prev_dist) / P.DT if prev_dist is not None else 0.0
+                v_pd = P.DIST_KP * e + P.DIST_KD * de_dt
+                prev_dist = dist_m
+                if abs(e) > FOLLOW_DIST_DEADBAND_M:
+                    desired_rpm = max(abs(v_pd) / P.WHEEL_CIRC * 60.0, FOLLOW_MIN_RUN_RPM)
+                    desired_dir = math.copysign(1.0, v_pd)
+                else:
+                    desired_rpm = 0.0
+                    desired_dir = 0.0
+            else:
+                desired_rpm = 0.0
+                desired_dir = 0.0
+                prev_dist = None
+
+            if motors is not None:
+                d_l, d_r = motors.read_encoder_deltas()
+            else:
+                d_l, d_r = 0, 0
+
+            v_forward = rpm_command.command(
+                desired_rpm, desired_dir, encoder_delta=(d_l, d_r))
+            v_left, v_right = P._wheel_commands(v_forward, 0.0)
+
+            if motors is not None:
+                motors.send(v_left, v_right)
+
+            cum_l += d_l; cum_r += d_r
+            enc_right_delta.append(d_l); enc_left_delta.append(d_r)
+            enc_right_cum.append(cum_l); enc_left_cum.append(cum_r)
+
+            times.append(t)
+            v_fwds.append(v_forward)
+            v_lefts.append(v_left); v_rights.append(v_right)
+            target_dists.append(float("nan") if dist_m is None else dist_m)
+            dist_errors.append(float("nan") if dist_m is None else e)
+
+            if i % max(1, int(0.5 / P.DT)) == 0:
+                if dist_m is None:
+                    label = "no target          "
+                else:
+                    label = f"dist={dist_m:.2f}m e={e:+.2f}m"
+                fwd_rpm = v_forward / P.WHEEL_CIRC * 60.0
+                kick_str = " KICK" if rpm_command.kick_active else "     "
+                print(f"t={t:5.1f}s  {label:<22}  cmd={fwd_rpm:+6.2f}rpm{kick_str}")
+            i += 1
+
+            elapsed = time.monotonic() - t_loop0
+            if elapsed < P.DT:
+                time.sleep(P.DT - elapsed)
+    except KeyboardInterrupt:
+        print("\nFollow stopped by user.")
+    finally:
+        if motors is not None:
+            print("\nStopping motors.")
+            motors.stop()
+
+    return dict(
+        mode="follow",
+        t=times,
+        v_fwd=v_fwds,
+        v_left=v_lefts, v_right=v_rights,
+        target_dist=target_dists,
+        dist_error=dist_errors,
+        enc_l_cum=enc_right_cum, enc_r_cum=enc_left_cum,
+        enc_l_delta=enc_right_delta, enc_r_delta=enc_left_delta,
+        drove=(motors is not None),
+    )
+
+
+def _plot_follow(data, out_path):
+    try:
+        import numpy as np
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError as e:
+        print(f"Skipping plots: {e}")
+        return
+
+    t          = data['t']
+    dist       = data['target_dist']
+    dist_err   = data['dist_error']
+    rpm_cmd_l  = [v / P.WHEEL_CIRC * 60 for v in data['v_left']]
+    rpm_cmd_r  = [v / P.WHEEL_CIRC * 60 for v in data['v_right']]
+    rpm_enc_l  = [encoder_delta_to_wheel_rpm(d) for d in data['enc_l_delta']]
+    rpm_enc_r  = [encoder_delta_to_wheel_rpm(d) for d in data['enc_r_delta']]
+
+    fig, (ax_dist, ax_rpm) = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
+
+    # ── Distance over time ─────────────────────────────────
+    ax_dist.plot(t, dist, 'b-', label='measured distance', lw=1.5)
+    ax_dist.axhline(P.HOLD_DIST, color='green', ls='--', lw=1.2,
+                    label=f'hold dist {P.HOLD_DIST:.2f} m')
+    ax_dist.axhspan(P.HOLD_DIST - FOLLOW_DIST_DEADBAND_M,
+                    P.HOLD_DIST + FOLLOW_DIST_DEADBAND_M,
+                    color='green', alpha=0.10, label='deadband')
+    ax_dist.set_ylabel('distance (m)')
+    ax_dist.set_title('Target distance vs hold distance')
+    ax_dist.legend(fontsize=8)
+    ax_dist.grid(True, alpha=0.3)
+
+    # ── Per-wheel commanded vs encoder RPM ────────────────
+    ax_rpm.plot(t, rpm_cmd_l, 'b-',  label='left cmd',  lw=1.5)
+    ax_rpm.plot(t, rpm_cmd_r, 'r-',  label='right cmd', lw=1.5)
+    ax_rpm.plot(t, rpm_enc_l, 'b--', label='left enc',  lw=1.2, alpha=0.8)
+    ax_rpm.plot(t, rpm_enc_r, 'r--', label='right enc', lw=1.2, alpha=0.8)
+    ax_rpm.axhline(0, color='gray', ls=':', alpha=0.5)
+    ax_rpm.set_xlabel('time (s)')
+    ax_rpm.set_ylabel('RPM')
+    ax_rpm.set_title('Per-wheel commanded vs encoder RPM')
+    ax_rpm.legend(fontsize=8)
+    ax_rpm.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=110, bbox_inches='tight')
+    print(f"Saved: {out_path}")
+
+
 def _plot_slow_spin(data, out_path):
     try:
         import numpy as np
@@ -881,6 +1103,10 @@ def plot(data, out_path="pathfinding_arc_test.png"):
 
     if mode == "slow-spin":
         _plot_slow_spin(data, out_path)
+        return
+
+    if mode == "follow":
+        _plot_follow(data, out_path)
         return
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 5))
@@ -976,8 +1202,8 @@ def plot(data, out_path="pathfinding_arc_test.png"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--mode", choices=("center", "spin", "slow-spin"), default="center",
-                        help="center keeps shopper centred; spin runs 360°; slow-spin turns in place slowly")
+    parser.add_argument("--mode", choices=("center", "spin", "slow-spin", "follow"), default="center",
+                        help="center keeps shopper centred; spin runs 360°; slow-spin turns in place slowly; follow drives forward/backward only")
     parser.add_argument("--source", choices=("camera", "udp"), default="camera",
                         help="target angle source for center mode (default: camera)")
     parser.add_argument("--no-drive", action="store_true",
@@ -994,9 +1220,15 @@ if __name__ == "__main__":
                         help="slow-spin direction (default: left)")
     parser.add_argument("--sim-angle", type=float, default=None,
                         help="simulate a fixed target angle instead of listening for UDP")
+    parser.add_argument("--sim-dist", type=float, default=None,
+                        help="simulate a fixed target distance (m) for follow mode instead of UDP")
     args = parser.parse_args()
 
-    if args.mode == "spin":
+    if args.mode == "follow":
+        data = run_follow(drive=not args.no_drive, port=args.port,
+                          countdown=args.countdown, duration=args.duration,
+                          sim_dist=args.sim_dist)
+    elif args.mode == "spin":
         data = run_spin(drive=not args.no_drive, port=args.port, countdown=args.countdown)
     elif args.mode == "slow-spin":
         spin_dir = 1.0 if args.direction == "left" else -1.0

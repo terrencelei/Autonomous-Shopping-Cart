@@ -239,6 +239,70 @@ python3 pathfinding_sim.py
 
 ---
 
+## Hardware Tests (`pathfinding_arc_test.py`)
+
+Standalone test script for verifying motor control and pathfinder logic without running the full cart stack. Each mode exercises a different part of the drive system in isolation.
+
+All modes share these flags:
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--no-drive` | off | Skip serial — simulate only, writes PNGs |
+| `--port PORT` | `/dev/ttyUSB0` | Override ESP32 serial port |
+| `--countdown N` | `3` | Seconds before motors start |
+| `--duration S` | `0` | Run time in seconds; `0` = run until Ctrl-C |
+
+### Modes
+
+#### `--mode spin` — full 360° spin
+
+Commands the cart to rotate one complete revolution at `MAX_TURN` and stops when the encoder tick count matches the expected 360° arc. Use it to verify encoder wiring, signs, and the PPR calibration.
+
+```bash
+python3 pathfinding_arc_test.py --mode spin
+python3 pathfinding_arc_test.py --mode spin --no-drive   # simulated
+```
+
+#### `--mode slow-spin` — stall characterisation
+
+Ramps wheel RPM up from `STALL_RAMP_UP_START_RPM` until encoders report movement, then ramps back down until the motors stall again. Reports the minimum RPM needed to overcome static friction. Run this once after assembly or after changing motors/gearboxes.
+
+```bash
+python3 pathfinding_arc_test.py --mode slow-spin
+python3 pathfinding_arc_test.py --mode slow-spin --direction right --duration 60
+```
+
+#### `--mode center` — angle-only centering
+
+Rotates the cart to keep the shopper centred in the FOV; no forward motion. Reads from the live IMX500 camera by default, or from UDP with `--source udp`, or from a fixed simulated angle with `--sim-angle`.
+
+```bash
+python3 pathfinding_arc_test.py --mode center                  # live camera
+python3 pathfinding_arc_test.py --mode center --source udp     # UDP feed
+python3 pathfinding_arc_test.py --mode center --sim-angle 15   # fixed +15° target
+python3 pathfinding_arc_test.py --mode center --no-drive --sim-angle 15
+```
+
+#### `--mode follow` — distance-only following
+
+Drives the cart forward and backward to maintain `HOLD_DIST` (2.0 m) from the target. **Omega is forced to zero** — no angle correction at all. Use this to isolate and tune the distance PD controller (`DIST_KP`, `DIST_KD`) independently of the steering loop.
+
+Anti-stall kick (same parameters as center mode: `FOLLOW_KICK_RPM = 8`, `FOLLOW_KICK_RELEASE_TICKS = 30`) fires on startup and on every forward↔reverse direction change, releasing once either encoder accumulates 30 ticks.
+
+```bash
+python3 pathfinding_arc_test.py --mode follow                       # live UDP
+python3 pathfinding_arc_test.py --mode follow --sim-dist 3.5        # fixed 3.5 m target
+python3 pathfinding_arc_test.py --mode follow --no-drive --sim-dist 3.5 --duration 10
+```
+
+`--sim-dist` sets a constant target distance. The cart will drive toward `HOLD_DIST` and hold; pass a value above or below 2.0 m to test approach or reverse respectively. Values within `FOLLOW_DIST_DEADBAND_M` (0.05 m) of `HOLD_DIST` produce no output.
+
+### Output
+
+Each run saves one or two PNG plots to the working directory (`pathfinding_arc_test.png`, `pathfinding_arc_test_encoders.png`). When run via the `--test` systemd unit the PNGs land in `/home/terrencelei/Autonomous-Shopping-Cart/`.
+
+---
+
 ## UWB System (Backup / Redundancy)
 
 Two iPhones use Apple's Ultra-Wideband chip to maintain a precise distance and angle measurement between the shopper and the cart, independent of the camera.
@@ -289,6 +353,7 @@ autonomous-shopping-cart/
 │   ├── throttle_watch.sh           # CPU/thermal throttle monitor
 │   └── requirements.txt
 ├── Pathfinding_algorithm.py        # A* pathfinder + state machine
+├── pathfinding_arc_test.py         # Hardware test: spin / slow-spin / center / follow modes
 ├── pathfinding_sim.py              # 2D simulator used to design the planner
 ├── start_cart.sh / stop_cart.sh    # Launch / stop the full stack detached from SSH
 ├── firmware/
