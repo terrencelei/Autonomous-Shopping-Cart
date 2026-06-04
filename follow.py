@@ -51,7 +51,7 @@ MOTOR_PORT = "/dev/ttyUSB0"       # CP2102 USB-UART bridge
 MOTOR_BAUD = 115200
 
 # Motion limits / loop rate
-MAX_SPEED = 0.5                   # m/s forward
+MAX_SPEED = 1                   # m/s forward
 DT        = 0.02                  # control loop period (s)
 HOLD_DIST = 2.0                   # target hold distance (m)
 
@@ -86,7 +86,7 @@ SEARCH_GRACE_S   = 0.3    # wait this long after losing the target before search
 # Distance (displacement) controller
 THRESH_M       = HOLD_DIST   # standoff distance to hold (m)
 LINEAR_INERTIA = 0.0    # s — forward coast factor, reserved for linear drift  [calibrate]
-KP_DIST        = 15.0   # RPM speed change per (m/s) of approach rate dx        [calibrate]
+KP_DIST        = 20.0   # RPM speed change per (m/s) of approach rate dx        [calibrate]
 KI_DIST        = 0.0    # RPM speed change per metre of standoff error (x-thresh) [calibrate]
 DX_ALPHA       = 0.3    # EMA factor for the smoothed dx/dt
 
