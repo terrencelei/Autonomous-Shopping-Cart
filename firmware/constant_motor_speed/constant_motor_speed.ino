@@ -28,7 +28,7 @@ const int MOTOR_DUTY = 80;
 
 // Change either one to -1 if that motor needs to spin the opposite direction.
 const int M1_DIRECTION = 1;
-const int M2_DIRECTION = 1;
+const int M2_DIRECTION = -1;
 
 volatile long m1EncoderCount = 0;
 volatile long m2EncoderCount = 0;

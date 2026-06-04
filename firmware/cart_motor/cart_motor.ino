@@ -23,14 +23,13 @@
 //
 // ── Calibration ────────────────────────────────────────────────
 //   MAX_RPM below is the wheel-shaft RPM that corresponds to a full-
-//   scale setOutput(1.0).  Measure it by running the cart at 100 % for
+//   scale motor output of 1.0.  Measure it by running the cart at 100 % for
 //   a few seconds, counting encoder ticks, and converting:
 //       rpm = (ticks_per_sec / ENCODER_PPR) * 60
 //   Update the constant once measured.
 
 struct WheelPid;
 
-#include <TB9051FTGMotorCarrier.h>
 #include <math.h>
 
 // ── Pin definitions ───────────────────────────────────────────
@@ -44,9 +43,16 @@ struct WheelPid;
 #define LEFT_ENC_A 25
 #define LEFT_ENC_B 26
 
-// ── Drivers & encoder state ───────────────────────────────────
-TB9051FTGMotorCarrier rightMotor(RIGHT_PWM1, RIGHT_PWM2);
-TB9051FTGMotorCarrier leftMotor(LEFT_PWM1, LEFT_PWM2);
+// ── Direct ESP32 PWM output & encoder state ───────────────────
+const int PWM_FREQ = 1000;
+const int PWM_RES = 8;
+const int PWM_MAX_DUTY = 255;
+
+// The motors are mounted as mirror images. The constant-speed test showed
+// identical electrical polarity spins the two wheels in opposite directions,
+// so invert the left electrical drive for matching positive wheel RPM.
+const int RIGHT_MOTOR_DIR = 1;
+const int LEFT_MOTOR_DIR = -1;
 
 volatile long rightCount  = 0;
 volatile long leftCount = 0;
@@ -223,6 +229,31 @@ void setRightRPM(float rpm)  {
 void setLeftRPM(float rpm) {
   leftPid.targetRPM = clampf(rpm, -MAX_RPM, MAX_RPM);
 }
+
+void setMotorOutput(int pwm1, int pwm2, float output, int motorDir) {
+  output = clampf(output, -1.0f, 1.0f) * motorDir;
+  int duty = (int)(fabs(output) * PWM_MAX_DUTY);
+
+  if (output > 0.0f) {
+    ledcWrite(pwm1, duty);
+    ledcWrite(pwm2, 0);
+  } else if (output < 0.0f) {
+    ledcWrite(pwm1, 0);
+    ledcWrite(pwm2, duty);
+  } else {
+    ledcWrite(pwm1, 0);
+    ledcWrite(pwm2, 0);
+  }
+}
+
+void setRightOutput(float output) {
+  setMotorOutput(RIGHT_PWM1, RIGHT_PWM2, output, RIGHT_MOTOR_DIR);
+}
+
+void setLeftOutput(float output) {
+  setMotorOutput(LEFT_PWM1, LEFT_PWM2, output, LEFT_MOTOR_DIR);
+}
+
 void stopMotors() {
   rightPid.targetRPM = 0.0f;
   leftPid.targetRPM = 0.0f;
@@ -232,8 +263,8 @@ void stopMotors() {
   leftPid.output = 0.0f;
   rightPid.faultTimer = leftPid.faultTimer = 0.0f;
   rightPid.faulted = leftPid.faulted = false;
-  rightMotor.setOutput(0.0f);
-  leftMotor.setOutput(0.0f);
+  setRightOutput(0.0f);
+  setLeftOutput(0.0f);
 }
 
 void updateMotorPid(unsigned long nowMs) {
@@ -254,8 +285,8 @@ void updateMotorPid(unsigned long nowMs) {
   float rightMeasured = RIGHT_RPM_SIGN * (rightDelta / ENCODER_PPR) * (60.0f / dt);
   float leftMeasured = LEFT_RPM_SIGN * (leftDelta / ENCODER_PPR) * (60.0f / dt);
 
-  rightMotor.setOutput(updatePid(rightPid, rightMeasured, dt, "R"));
-  leftMotor.setOutput(updatePid(leftPid, leftMeasured, dt, "L"));
+  setRightOutput(updatePid(rightPid, rightMeasured, dt, "R"));
+  setLeftOutput(updatePid(leftPid, leftMeasured, dt, "L"));
 }
 
 // Parse "L<rpm> R<rpm>" — tolerates extra whitespace.
@@ -277,8 +308,10 @@ void handleLine(const String &line) {
 void setup() {
   Serial.begin(115200);
 
-  rightMotor.enable();
-  leftMotor.enable();
+  ledcAttach(RIGHT_PWM1, PWM_FREQ, PWM_RES);
+  ledcAttach(RIGHT_PWM2, PWM_FREQ, PWM_RES);
+  ledcAttach(LEFT_PWM1, PWM_FREQ, PWM_RES);
+  ledcAttach(LEFT_PWM2, PWM_FREQ, PWM_RES);
 
   // INPUT_PULLUP — not plain INPUT — so a disconnected or open-drain
   // encoder doesn't pick up PWM noise from neighbouring motor pins as
@@ -301,7 +334,7 @@ void setup() {
   readEncoderCounts(rightPid.lastCount, leftPid.lastCount);
   lastControlMs = millis();
   stopMotors();
-  Serial.println("cart_motor ready v3  RPM_SIGN L=-1 R=+1  guard=windup+overspeed");
+  Serial.println("cart_motor ready v4  direct-ledc  MOTOR_DIR L=-1 R=+1  RPM_SIGN L=-1 R=+1");
 }
 
 void loop() {
