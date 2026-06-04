@@ -95,6 +95,10 @@ TARGET_COLOR_SWITCH_MIN_SCORE = 0.70
 SIM_SMOOTH_WINDOW = 10
 TARGET_COLOR_SWITCH_PENALTY   = 1.5
 
+# Maximum time to spend accumulating the initial reference profile (seconds).
+# The reference is committed at whichever comes first: bbox break or this timeout.
+ACCUM_MAX_DURATION_S = 10.0
+
 # --------------------------------------------------------------------------- #
 # Color profile tuning
 # --------------------------------------------------------------------------- #
@@ -420,6 +424,7 @@ class TargetLock:
         # are no longer used.
         self._accum_id       = None    # track ID being accumulated
         self._accum_profiles = []      # list of (N_PROFILE_CHUNKS, 3) arrays
+        self._accum_start    = None    # monotonic time accumulation began
 
     def choose(self, measurements, now):
         if not measurements:
@@ -441,7 +446,8 @@ class TargetLock:
 
             if self._accum_id is None:
                 # Very first detection — start accumulating
-                self._accum_id = tid
+                self._accum_id    = tid
+                self._accum_start = now
                 if best["color_profile"] is not None:
                     self._accum_profiles.append(best["color_profile"].copy())
                 self.locked_id  = tid
@@ -452,10 +458,14 @@ class TargetLock:
                       f"(frame 1)  dist={best['dist']:.1f}m")
                 return best["index"]
 
+            # Check timeout first
+            elapsed = now - self._accum_start
+            timed_out = elapsed >= ACCUM_MAX_DURATION_S
+
             # Check whether the accumulated person is still in frame
             accum_present = any(m["track_id"] == self._accum_id for m in measurements)
 
-            if accum_present:
+            if accum_present and not timed_out:
                 m_accum = next(m for m in measurements if m["track_id"] == self._accum_id)
                 if m_accum["color_profile"] is not None:
                     self._accum_profiles.append(m_accum["color_profile"].copy())
@@ -463,15 +473,18 @@ class TargetLock:
                 self.last_dist  = m_accum["dist"]
                 self.last_angle = m_accum["angle"]
                 print(f"[LOCK] Accumulating ID{self._accum_id} — "
-                      f"{len(self._accum_profiles)} frames so far  "
+                      f"{len(self._accum_profiles)} frames  "
+                      f"{elapsed:.1f}/{ACCUM_MAX_DURATION_S}s  "
                       f"dist={m_accum['dist']:.1f}m")
                 return next(i for i, m in enumerate(measurements)
                             if m["track_id"] == self._accum_id)
             else:
-                # Bbox broke — commit the averaged reference now
+                # Bbox broke or timeout reached — commit the averaged reference now
+                reason = f"timeout ({elapsed:.1f}s)" if timed_out else "bbox broke"
                 self._commit_reference()
-                print(f"[LOCK] *** REFERENCE COMMITTED from {len(self._accum_profiles)} "
-                      f"frames for ID{self._accum_id} ***  "
+                print(f"[LOCK] *** REFERENCE COMMITTED — {reason} — "
+                      f"{len(self._accum_profiles)} frames averaged "
+                      f"for ID{self._accum_id} ***  "
                       f"profile={'OK' if self.reference_profile is not None else 'NONE'}")
                 # Fall through to normal tracking logic below
 
