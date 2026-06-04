@@ -370,24 +370,53 @@ def clothing_color_profile(hsv_frame, xyxy):
 
 def profile_similarity(a, b):
     """
-    Weighted cosine-like similarity between two (N_PROFILE_CHUNKS, 3) profiles.
+    Weighted similarity between two (N_PROFILE_CHUNKS, 3) profiles.
 
-    The torso region (middle ~60 % of chunks) is weighted 2x relative to the
-    head/feet regions.  Only the H and S channels contribute to matching; V is
-    normalised out and not compared directly.
+    Weights are calibrated from measured bounding boxes at 1.5–3.9 m.
+    Landmark fractions (mean ± std across all distances):
+      chin        0.142 ± 0.014
+      shoulder    0.222 ± 0.023
+      chest       0.319 ± 0.027
+      waist       0.512 ± 0.019
+      hip         0.614 ± 0.017
+      knee        0.817 ± 0.012
+      ankle       0.953 ± 0.008
 
+    The detector box proportions are highly stable across this range, so a
+    fixed weight vector (no distance adjustment) is appropriate.
+
+    Chunk mapping for N_PROFILE_CHUNKS=12 (each chunk = 1/12 ≈ 8.3% of box):
+      0  [0.000-0.083]  head          0.15
+      1  [0.083-0.167]  head          0.15
+      2  [0.167-0.250]  neck/shoulder 0.40
+      3  [0.250-0.333]  upper torso   2.00  ← hoodie chest
+      4  [0.333-0.417]  mid torso     2.00  ← hoodie body
+      5  [0.417-0.500]  mid torso     2.00
+      6  [0.500-0.583]  waist/hip     1.60
+      7  [0.583-0.667]  upper legs    1.80  ← jeans
+      8  [0.667-0.750]  upper legs    1.80
+      9  [0.750-0.833]  upper legs    1.80
+     10  [0.833-0.917]  lower legs    1.00
+     11  [0.917-1.000]  feet          0.05
+
+    Only H and S channels are compared; V is normalised out.
     Returns a float in [0, 1], or None if either profile is None.
     """
     if a is None or b is None:
         return None
 
-    # Build a weight vector: higher in the middle (torso), lower at extremes.
-    weights = np.ones(N_PROFILE_CHUNKS, dtype=np.float32)
-    mid_lo = int(N_PROFILE_CHUNKS * 0.20)
-    mid_hi = int(N_PROFILE_CHUNKS * 0.80)
-    weights[mid_lo:mid_hi] = 2.0
-    weights[0]  = 0.3   # head top
-    weights[-1] = 0.3   # feet
+    # Empirically calibrated from 5 screenshots at 1.5, 2.0, 2.4, 2.9, 3.9 m
+    weights = np.array(
+        [0.15, 0.15, 0.40, 2.00, 2.00, 2.00, 1.60, 1.80, 1.80, 1.80, 1.00, 0.05],
+        dtype=np.float32,
+    )
+    # Pad or trim if N_PROFILE_CHUNKS was changed from 12
+    if len(weights) != N_PROFILE_CHUNKS:
+        weights = np.interp(
+            np.linspace(0, 1, N_PROFILE_CHUNKS),
+            np.linspace(0, 1, 12),
+            weights,
+        ).astype(np.float32)
 
     # Compare only H and S (columns 0 and 1)
     diff_h = np.abs(a[:, 0] - b[:, 0])
