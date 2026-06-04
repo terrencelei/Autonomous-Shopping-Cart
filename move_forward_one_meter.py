@@ -32,8 +32,7 @@ def wheel_rpm_to_speed(rpm):
 
 
 def forward_wheel_commands(speed_m_s):
-    # LEFT_MOTOR_SIGN=-1 so negate vl to get a positive L command for forward.
-    return -speed_m_s, speed_m_s
+    return P._wheel_commands(speed_m_s, 0.0)
 
 
 def flush_motors(motors):
@@ -144,20 +143,20 @@ if __name__ == "__main__":
     parser.add_argument("--distance", type=float, default=TARGET_DISTANCE_M,
                         help="target distance in metres (default: 1.0)")
     parser.add_argument("--rpm", type=float, default=DEFAULT_RPM,
-                        help="commanded wheel RPM (default: 0.4)")
+                        help=f"commanded wheel RPM (default: {DEFAULT_RPM})")
     parser.add_argument("--kick-rpm", type=float, default=DEFAULT_KICK_RPM,
-                        help="startup kick wheel RPM (default: 15.0)")
+                        help=f"startup kick wheel RPM (default: {DEFAULT_KICK_RPM})")
     parser.add_argument("--kick-max-rpm", type=float, default=DEFAULT_KICK_MAX_RPM,
-                        help="max kick wheel RPM if encoders do not move (default: 30.0)")
+                        help=f"max kick wheel RPM if encoders do not move (default: {DEFAULT_KICK_MAX_RPM})")
     parser.add_argument("--kick-ramp-step-rpm", type=float,
                         default=DEFAULT_KICK_RAMP_STEP_RPM,
                         help="kick RPM increase after each no-tick hold (default: 2.0)")
     parser.add_argument("--kick-ramp-hold", type=float,
                         default=DEFAULT_KICK_RAMP_HOLD_S,
-                        help="seconds to wait before increasing kick RPM (default: 0.5)")
+                        help=f"seconds to wait before increasing kick RPM (default: {DEFAULT_KICK_RAMP_HOLD_S})")
     parser.add_argument("--kick-release-ticks", type=int,
                         default=DEFAULT_KICK_RELEASE_TICKS,
-                        help="encoder ticks before dropping to normal RPM (default: 100)")
+                        help=f"encoder ticks before dropping to normal RPM (default: {DEFAULT_KICK_RELEASE_TICKS})")
     parser.add_argument("--port", default=None,
                         help=f"serial port override (default: {P.MOTOR_PORT})")
     parser.add_argument("--countdown", type=int, default=3,

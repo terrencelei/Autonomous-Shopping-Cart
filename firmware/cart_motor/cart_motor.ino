@@ -100,8 +100,8 @@ void IRAM_ATTR leftISR() {
 // ── Tunables ──────────────────────────────────────────────────
 const float MAX_RPM = 100.0f;                 // calibrate to your hardware
 const float ENCODER_PPR = 298.0f;             // must match Pathfinding_algorithm.py
-const float RIGHT_RPM_SIGN = 1.0f;            // flip if measured RPM sign is reversed
-const float LEFT_RPM_SIGN = 1.0f;
+const float RIGHT_RPM_SIGN = -1.0f;           // flip if measured RPM sign is reversed
+const float LEFT_RPM_SIGN = -1.0f;
 
 const unsigned long CONTROL_INTERVAL_MS = 20; // 50 Hz wheel-speed PID
 const unsigned long WATCHDOG_MS        = 500;
