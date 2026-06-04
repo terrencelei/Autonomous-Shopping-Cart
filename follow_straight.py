@@ -7,7 +7,7 @@ built from the displacement pseudocode.
     angle estimates, IMX500 detector, and ByteTrack target lock.
   * Drive: speaks the ESP32 RPM protocol directly ("L<rpm> R<rpm>\\n") and
     reads "E,<l>,<r>\\n" encoder feedback.  The proven breakaway kick
-    (KICK_RPM = 8 released after KICK_TICKS = 30 encoder ticks) is reused.
+    (KICK_RPM = 12 released after KICK_TICKS = 45 encoder ticks) is reused.
   * Control: implemented fresh from the pseudocode (distance follow only).
     Fully independent of Pathfinding_algorithm.py — the hardware/dimensional
     specs it needs are cloned below (keep in sync if the cart is re-measured).
@@ -61,8 +61,8 @@ HOLD_DIST = 2.0                   # target hold distance (m)
 CAM_W, CAM_H, CAM_FPS = 640, 480, 30
 
 # Proven breakaway kick (see memory: cart-drive-calibration)
-KICK_RPM      = 8.0   # wheel RPM burst to overcome static friction
-KICK_TICKS    = 30    # release the kick once this many encoder ticks accumulate
+KICK_RPM      = 12.0  # wheel RPM burst to overcome static friction
+KICK_TICKS    = 45    # release the kick once this many encoder ticks accumulate
 KICK_TIMEOUT_S = 1.0  # give up holding the kick after this long if no movement is seen
 TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop fallback
 
