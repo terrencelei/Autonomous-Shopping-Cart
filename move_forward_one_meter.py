@@ -1,0 +1,115 @@
+"""
+Drive the cart straight forward for one metre, then stop.
+
+Usage:
+    python3 move_forward_one_meter.py
+    python3 move_forward_one_meter.py --rpm 0.5 --port /dev/ttyUSB0
+"""
+
+import argparse
+import time
+
+import Pathfinding_algorithm as P
+
+
+TARGET_DISTANCE_M = 1.0
+DEFAULT_RPM = 0.4
+DEFAULT_TIMEOUT_S = 20.0
+
+
+def encoder_delta_to_wheel_distance(delta_ticks):
+    ticks_per_wheel_rev = P.ENCODER_PPR * getattr(P, "GEAR_RATIO", 1)
+    return delta_ticks / ticks_per_wheel_rev * P.WHEEL_CIRC
+
+
+def wheel_rpm_to_speed(rpm):
+    return rpm * P.WHEEL_CIRC / 60.0
+
+
+def forward_wheel_commands(speed_m_s):
+    # The cart's right side needs the opposite command sign for straight motion.
+    return speed_m_s, -speed_m_s
+
+
+def flush_motors(motors):
+    if motors._ser and motors._ser.is_open:
+        motors._ser.reset_input_buffer()
+        motors._last_l = motors._last_r = None
+        motors._dl = motors._dr = 0
+
+
+def run(distance_m=TARGET_DISTANCE_M, rpm=DEFAULT_RPM, port=None,
+        countdown=3, timeout_s=DEFAULT_TIMEOUT_S):
+    if port:
+        P.MOTOR_PORT = port
+
+    motors = P.MotorDriver()
+    speed = wheel_rpm_to_speed(abs(rpm))
+    v_left, v_right = forward_wheel_commands(speed)
+
+    print(f"\nDrive forward target: {distance_m:.2f} m")
+    print(f"Command: {rpm:.2f} wheel RPM  |  timeout: {timeout_s:.1f}s")
+    if countdown > 0:
+        print(f"Starting in {countdown}s...")
+        for remaining in range(countdown, 0, -1):
+            print(f"  {remaining}...")
+            time.sleep(1)
+
+    flush_motors(motors)
+
+    travelled_m = 0.0
+    cum_l = 0
+    cum_r = 0
+    start = time.monotonic()
+    last_print = start
+
+    try:
+        while travelled_m < distance_m:
+            loop_start = time.monotonic()
+            elapsed = loop_start - start
+            if timeout_s > 0 and elapsed >= timeout_s:
+                print(f"Timeout at {elapsed:.1f}s before reaching target.")
+                break
+
+            motors.send(v_left, v_right)
+            d_l, d_r = motors.read_encoder_deltas()
+            cum_l += d_l
+            cum_r += d_r
+
+            d_left_m = abs(encoder_delta_to_wheel_distance(d_l))
+            d_right_m = abs(encoder_delta_to_wheel_distance(d_r))
+            if d_l or d_r:
+                travelled_m += (d_left_m + d_right_m) / 2.0
+
+            now = time.monotonic()
+            if now - last_print >= 0.5:
+                print(f"distance={travelled_m:.3f} m  ticks=({cum_l:+d},{cum_r:+d})")
+                last_print = now
+
+            sleep_s = P.DT - (time.monotonic() - loop_start)
+            if sleep_s > 0:
+                time.sleep(sleep_s)
+    finally:
+        print("\nStopping motors.")
+        motors.stop()
+
+    print(f"Final distance: {travelled_m:.3f} m  ticks=({cum_l:+d},{cum_r:+d})")
+    return travelled_m
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Drive forward one metre.")
+    parser.add_argument("--distance", type=float, default=TARGET_DISTANCE_M,
+                        help="target distance in metres (default: 1.0)")
+    parser.add_argument("--rpm", type=float, default=DEFAULT_RPM,
+                        help="commanded wheel RPM (default: 0.4)")
+    parser.add_argument("--port", default=None,
+                        help=f"serial port override (default: {P.MOTOR_PORT})")
+    parser.add_argument("--countdown", type=int, default=3,
+                        help="seconds before motors start (default: 3)")
+    parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S,
+                        help="max run time in seconds; 0 disables timeout (default: 20)")
+    args = parser.parse_args()
+
+    run(distance_m=args.distance, rpm=args.rpm, port=args.port,
+        countdown=args.countdown, timeout_s=args.timeout)
