@@ -38,8 +38,8 @@ TRACK_M    = 0.333         # inside-to-inside wheel spacing (meters)
 GEAR_RATIO        = 5            # motor gearbox ratio (check sticker)
 RIGHT_ENC_SIGN     = -1           # flip to +1 if right wheel counts backwards
 LEFT_ENC_SIGN    = +1
-RIGHT_MOTOR_SIGN   = +1           # +1 = forward; both motors drove backward at -1 for a forward cmd
-LEFT_MOTOR_SIGN    = +1           # +1 = forward; flipped together with RIGHT to reverse drive dir
+RIGHT_MOTOR_SIGN   = -1           # -1 = forward (rpm_log: with the fixed loop, +1 drives backward)
+LEFT_MOTOR_SIGN    = -1           # -1 = forward
 
 MOTOR_PORT  = "/dev/ttyUSB0"     # CP2102 USB-UART bridge
 MOTOR_BAUD  = 115200

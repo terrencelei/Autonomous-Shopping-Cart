@@ -100,12 +100,11 @@ void IRAM_ATTR leftISR() {
 // ── Tunables ──────────────────────────────────────────────────
 const float MAX_RPM = 100.0f;                 // calibrate to your hardware
 const float ENCODER_PPR = 298.0f;             // must match Pathfinding_algorithm.py
-const float RIGHT_RPM_SIGN = -1.0f;           // flip if measured RPM sign is reversed
-const float LEFT_RPM_SIGN  = +1.0f;           // left encoder counts the opposite way to the
-                                              // right for forward motion (confirmed by the
-                                              // hand-push sniff test); must DIFFER from
-                                              // RIGHT_RPM_SIGN or the left speed loop has
-                                              // positive feedback and runs away to full output.
+// Speed-loop feedback signs, set from the rpm_log runaway capture: with
+// L=+1/R=-1 BOTH loops were positive-feedback and accelerated to ~1000 rpm on a
+// 0.5 rpm command. The runaway direction gives the stable signs directly.
+const float RIGHT_RPM_SIGN = +1.0f;           // was -1.0f (that made the right loop unstable)
+const float LEFT_RPM_SIGN  = -1.0f;           // was +1.0f (an earlier guess; also unstable)
 
 const unsigned long CONTROL_INTERVAL_MS = 20; // 50 Hz wheel-speed PID
 const unsigned long WATCHDOG_MS        = 500;
@@ -142,6 +141,8 @@ const float STOP_RPM_EPS = 0.5f;
 // runaway, latch that motor off until it is next commanded to stop.
 const float FAULT_INTEGRAL_FRAC = 0.95f;  // integrator this close to the limit = not converging
 const float FAULT_TIME_S        = 0.50f;  // ...held this long before the motor is latched off
+const float OVERSPEED_RPM       = 2.0f * MAX_RPM;  // |measured| past this = loop lost control;
+                                                   // latch off in one tick (fast runaway cutoff)
 
 float clampf(float v, float lo, float hi) {
   if (v < lo) return lo;
@@ -171,6 +172,18 @@ float updatePid(WheelPid &pid, float measuredRPM, float dt, const char *name) {
   if (pid.faulted) {
     pid.integral = 0.0f;
     pid.output = 0.0f;
+    return 0.0f;
+  }
+
+  // Fast runaway cutoff: a stable loop can never spin the wheel far past MAX_RPM.
+  // If measured blows past OVERSPEED_RPM the feedback is wrong or lost — latch off
+  // in a single tick instead of waiting out the integrator timer.
+  if (fabs(measuredRPM) > OVERSPEED_RPM) {
+    pid.faulted = true;
+    pid.integral = 0.0f;
+    pid.output = 0.0f;
+    Serial.print("FAULT overspeed ");
+    Serial.println(name);
     return 0.0f;
   }
 
@@ -288,7 +301,7 @@ void setup() {
   readEncoderCounts(rightPid.lastCount, leftPid.lastCount);
   lastControlMs = millis();
   stopMotors();
-  Serial.println("cart_motor ready");
+  Serial.println("cart_motor ready v3  RPM_SIGN L=-1 R=+1  guard=windup+overspeed");
 }
 
 void loop() {
