@@ -4,7 +4,7 @@ A self-following shopping cart that tracks a designated shopper and treats all o
 
 | Component | Role | Technology |
 |-----------|------|------------|
-| **Vision** | Sensing | SSD-MobileNetV2 on IMX500 NPU + ByteTrack (`vision/yolo_detect.py`) |
+| **Vision** | Sensing | YOLO11n on IMX500 NPU + ByteTrack (`vision/yolo_detect.py`) |
 | **Follower** | Control | `follow.py` — reactive spin-to-centre + PI distance follow |
 | **ESP32** | Motor control | Dual TB9051FTG drivers with quadrature encoders |
 
@@ -52,7 +52,15 @@ Manage it with `sudo systemctl {status,stop,disable} cart-follow` and `journalct
 
 ## Vision System
 
-A detection pipeline that runs entirely on the Raspberry Pi AI Camera (IMX500). The SSD-MobileNetV2 object detector executes on the IMX500's on-chip neural processor — no inference on the Pi CPU — and the result is streamed back over CSI alongside each frame. The host uses OpenCV (`cv2`) for image conversion, overlays, and display windows, then runs ByteTrack to assign stable track IDs, locks onto the closest centred shopper, and maps everyone else as an obstacle.
+A detection pipeline that runs entirely on the Raspberry Pi AI Camera (IMX500). The YOLO11n object detector executes on the IMX500's on-chip neural processor — no inference on the Pi CPU — and the result is streamed back over CSI alongside each frame. The host uses OpenCV (`cv2`) for image conversion, overlays, and display windows, then runs ByteTrack to assign stable track IDs, locks onto the closest centred shopper, and maps everyone else as an obstacle.
+
+The default model is Raspberry Pi's shipped YOLO11n post-processed RPK:
+
+```text
+/usr/share/imx500-models/imx500_network_yolo11n_pp.rpk
+```
+
+`yolo_detect.py` applies the matching Picamera2 demo settings: bounding-box normalization enabled and `bbox_order = xy`. YOLO11n is a COCO detector, so `PERSON_CLASS_ID = 0` still selects people. The Raspberry Pi model zoo lists the YOLO11n RPK under AGPL-3.0.
 
 ### Setup (Raspberry Pi)
 
@@ -87,10 +95,10 @@ reported_dist = (raw_depth - DISTANCE_OFFSET_M) * DISTANCE_SCALE
 
 | Constant | File | Calibrated value |
 |----------|------|-----------------|
-| `DISTANCE_OFFSET_M` | `vision/yolo_detect.py` | `0.89` |
-| `DISTANCE_SCALE` | `vision/yolo_detect.py` | `0.95` |
+| `DISTANCE_OFFSET_M` | `vision/yolo_detect.py` | `0` |
+| `DISTANCE_SCALE` | `vision/yolo_detect.py` | `0.7` |
 
-To recalibrate: stand at known distances (e.g. 1 m, 2 m, 3 m), record the reported values, and fit new constants so `(raw - DISTANCE_OFFSET_M) * DISTANCE_SCALE` equals the true distance at each point.
+To recalibrate: stand at known distances (e.g. 1 m, 2 m, 3 m), record the reported values, and fit new constants so `(raw - DISTANCE_OFFSET_M) * DISTANCE_SCALE` equals the true distance at each point. Recheck this after changing detector models because YOLO11n bounding boxes may be tighter or taller than SSD-MobileNetV2 boxes.
 
 ### Output Windows
 

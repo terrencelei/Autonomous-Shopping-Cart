@@ -1,5 +1,5 @@
 """
-Detect and track people with SSD-MobileNetV2 on the IMX500 NPU + ByteTrack.
+Detect and track people with YOLO11n on the IMX500 NPU + ByteTrack.
 Provides the target/obstacle tracking that follow.py (the main program) drives
 on. Run directly for a vision-only preview — no motor control lives here.
 
@@ -51,11 +51,16 @@ from picamera2.devices.imx500 import IMX500, NetworkIntrinsics
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 RPK_MODEL_PATH = Path(
-    "/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk"
+    "/usr/share/imx500-models/imx500_network_yolo11n_pp.rpk"
 )
 
 PERSON_CONFIDENCE = 0.5
 PERSON_CLASS_ID   = 0
+
+# YOLO11n post-processed model settings from raspberrypi/imx500-models:
+# imx500_object_detection_demo.py --bbox-normalization --bbox-order xy
+MODEL_BBOX_NORMALIZATION = True
+MODEL_BBOX_ORDER = "xy"
 
 PERSON_HEIGHT_M   = 1.8
 H_FOV_DEG         = 66.0
@@ -110,6 +115,10 @@ class IMX500Capture:
         self._imx500 = IMX500(str(model_path))
         intrinsics = self._imx500.network_intrinsics or NetworkIntrinsics()
         intrinsics.task = "object detection"
+        intrinsics.bbox_normalization = MODEL_BBOX_NORMALIZATION
+        intrinsics.bbox_order = MODEL_BBOX_ORDER
+        intrinsics.update_with_defaults()
+        self._intrinsics = intrinsics
 
         self._picam2 = Picamera2(self._imx500.camera_num)
         self._cfg = self._picam2.create_preview_configuration(
@@ -143,15 +152,22 @@ class IMX500Capture:
         boxes_raw = np_outputs[0][0]
         scores    = np_outputs[1][0]
         classes   = np_outputs[2][0].astype(int)
+        _, input_h = self._imx500.get_input_size()
+
+        boxes = boxes_raw.astype(float)
+        if self._intrinsics.bbox_normalization:
+            boxes = boxes / input_h
+        if self._intrinsics.bbox_order == "xy":
+            boxes = boxes[:, [1, 0, 3, 2]]
 
         keep = (scores >= PERSON_CONFIDENCE) & (classes == PERSON_CLASS_ID)
         if not keep.any():
             self._last_dets = sv.Detections.empty()
             return self._last_dets
-        boxes_raw, scores, classes = boxes_raw[keep], scores[keep], classes[keep]
+        boxes, scores, classes = boxes[keep], scores[keep], classes[keep]
 
         xyxy = []
-        for box in boxes_raw:
+        for box in boxes:
             x, y, w, h = self._imx500.convert_inference_coords(box, self._meta, self._picam2)
             xyxy.append([x, y, x + w, y + h])
 
