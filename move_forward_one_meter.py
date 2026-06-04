@@ -14,6 +14,8 @@ import Pathfinding_algorithm as P
 
 TARGET_DISTANCE_M = 1.0
 DEFAULT_RPM = 0.4
+DEFAULT_KICK_RPM = 8.0
+DEFAULT_KICK_RELEASE_TICKS = 30
 DEFAULT_TIMEOUT_S = 20.0
 
 
@@ -38,17 +40,21 @@ def flush_motors(motors):
         motors._dl = motors._dr = 0
 
 
-def run(distance_m=TARGET_DISTANCE_M, rpm=DEFAULT_RPM, port=None,
-        countdown=3, timeout_s=DEFAULT_TIMEOUT_S):
+def run(distance_m=TARGET_DISTANCE_M, rpm=DEFAULT_RPM,
+        kick_rpm=DEFAULT_KICK_RPM,
+        kick_release_ticks=DEFAULT_KICK_RELEASE_TICKS,
+        port=None, countdown=3, timeout_s=DEFAULT_TIMEOUT_S):
     if port:
         P.MOTOR_PORT = port
 
     motors = P.MotorDriver()
-    speed = wheel_rpm_to_speed(abs(rpm))
-    v_left, v_right = forward_wheel_commands(speed)
+    normal_speed = wheel_rpm_to_speed(abs(rpm))
+    kick_speed = wheel_rpm_to_speed(abs(kick_rpm))
+    v_left, v_right = forward_wheel_commands(kick_speed)
 
     print(f"\nDrive forward target: {distance_m:.2f} m")
     print(f"Command: {rpm:.2f} wheel RPM  |  timeout: {timeout_s:.1f}s")
+    print(f"Kick: {kick_rpm:.2f} wheel RPM until {kick_release_ticks} encoder ticks")
     if countdown > 0:
         print(f"Starting in {countdown}s...")
         for remaining in range(countdown, 0, -1):
@@ -60,6 +66,9 @@ def run(distance_m=TARGET_DISTANCE_M, rpm=DEFAULT_RPM, port=None,
     travelled_m = 0.0
     cum_l = 0
     cum_r = 0
+    kick_active = kick_rpm > rpm and kick_release_ticks > 0
+    kick_l_ticks = 0
+    kick_r_ticks = 0
     start = time.monotonic()
     last_print = start
 
@@ -75,6 +84,13 @@ def run(distance_m=TARGET_DISTANCE_M, rpm=DEFAULT_RPM, port=None,
             d_l, d_r = motors.read_encoder_deltas()
             cum_l += d_l
             cum_r += d_r
+            if kick_active:
+                kick_l_ticks += abs(d_l)
+                kick_r_ticks += abs(d_r)
+                if kick_l_ticks >= kick_release_ticks or kick_r_ticks >= kick_release_ticks:
+                    kick_active = False
+                    v_left, v_right = forward_wheel_commands(normal_speed)
+                    print(f"Kick released at ticks=({kick_l_ticks},{kick_r_ticks})")
 
             d_left_m = abs(encoder_delta_to_wheel_distance(d_l))
             d_right_m = abs(encoder_delta_to_wheel_distance(d_r))
@@ -83,7 +99,8 @@ def run(distance_m=TARGET_DISTANCE_M, rpm=DEFAULT_RPM, port=None,
 
             now = time.monotonic()
             if now - last_print >= 0.5:
-                print(f"distance={travelled_m:.3f} m  ticks=({cum_l:+d},{cum_r:+d})")
+                phase = "kick" if kick_active else "run"
+                print(f"distance={travelled_m:.3f} m  {phase}  ticks=({cum_l:+d},{cum_r:+d})")
                 last_print = now
 
             sleep_s = P.DT - (time.monotonic() - loop_start)
@@ -103,6 +120,11 @@ if __name__ == "__main__":
                         help="target distance in metres (default: 1.0)")
     parser.add_argument("--rpm", type=float, default=DEFAULT_RPM,
                         help="commanded wheel RPM (default: 0.4)")
+    parser.add_argument("--kick-rpm", type=float, default=DEFAULT_KICK_RPM,
+                        help="startup kick wheel RPM (default: 8.0)")
+    parser.add_argument("--kick-release-ticks", type=int,
+                        default=DEFAULT_KICK_RELEASE_TICKS,
+                        help="encoder ticks before dropping to normal RPM (default: 30)")
     parser.add_argument("--port", default=None,
                         help=f"serial port override (default: {P.MOTOR_PORT})")
     parser.add_argument("--countdown", type=int, default=3,
@@ -111,5 +133,8 @@ if __name__ == "__main__":
                         help="max run time in seconds; 0 disables timeout (default: 20)")
     args = parser.parse_args()
 
-    run(distance_m=args.distance, rpm=args.rpm, port=args.port,
+    run(distance_m=args.distance, rpm=args.rpm,
+        kick_rpm=args.kick_rpm,
+        kick_release_ticks=args.kick_release_ticks,
+        port=args.port,
         countdown=args.countdown, timeout_s=args.timeout)
