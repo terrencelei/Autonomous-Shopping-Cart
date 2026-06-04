@@ -430,72 +430,6 @@ def profile_similarity(a, b):
 
 
 # =========================================================================== #
-# Clothing color name (kept for display label — uses the same HSV frame)
-# =========================================================================== #
-
-def clothing_crop(frame, xyxy):
-    h, w = frame.shape[:2]
-    x1, y1, x2, y2 = xyxy
-    x1 = max(0, min(w - 1, int(x1)))
-    x2 = max(0, min(w,     int(x2)))
-    y1 = max(0, min(h - 1, int(y1)))
-    y2 = max(0, min(h,     int(y2)))
-    if x2 <= x1 or y2 <= y1:
-        return None
-    box_w = x2 - x1
-    box_h = y2 - y1
-    tx1 = x1 + int(0.20 * box_w)
-    tx2 = x2 - int(0.20 * box_w)
-    ty1 = y1 + int(0.25 * box_h)
-    ty2 = y1 + int(0.70 * box_h)
-    if tx2 <= tx1 or ty2 <= ty1:
-        return None
-    crop = frame[ty1:ty2, tx1:tx2]
-    return crop if crop.size > 0 else None
-
-
-def clothing_color_name(frame, xyxy):
-    crop = clothing_crop(frame, xyxy)
-    if crop is None:
-        return "unknown"
-
-    hsv  = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, (0, 20, 30), (179, 255, 255))
-    if cv2.countNonZero(mask) >= 20:
-        mean_bgr = cv2.mean(crop, mask=mask)[:3]
-        mean_hsv = cv2.mean(hsv,  mask=mask)[:3]
-    else:
-        mean_bgr = cv2.mean(crop)[:3]
-        mean_hsv = cv2.mean(hsv)[:3]
-
-    b, g, r   = mean_bgr
-    hue, sat, val = mean_hsv
-    if val < 55:
-        return "black"
-    if sat < 35:
-        return "white" if val > 190 else "gray"
-    if r > 185 and g > 185 and b < 120:
-        return "yellow"
-    if r > 160 and g > 110 and b < 100:
-        return "orange"
-    if hue < 10 or hue >= 170:
-        return "red"
-    if hue < 25:
-        return "orange"
-    if hue < 40:
-        return "yellow"
-    if hue < 85:
-        return "green"
-    if hue < 105:
-        return "cyan"
-    if hue < 135:
-        return "blue"
-    if hue < 160:
-        return "purple"
-    return "pink"
-
-
-# =========================================================================== #
 # Target lock
 # =========================================================================== #
 
@@ -658,9 +592,7 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
             "dist":          dist,
             "angle":         angle,
             "score":         detection_score(dist, angle),
-            # New 1-D HSV profile replaces the 2-D histogram
             "color_profile": clothing_color_profile(hsv_frame, (x1, y1, x2, y2)),
-            "color_name":    clothing_color_name(frame, (x1, y1, x2, y2)),
         })
 
     for tid, state in list(smooth_state.items()):
