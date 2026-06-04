@@ -242,6 +242,8 @@ Each frame it reads the locked shopper's `(distance, angle)` and then:
 
 The gains and `ANGULAR_INERTIA` / `LINEAR_INERTIA` at the top of `follow.py` are placeholders marked `[calibrate]`; inertia defaults to `0`, so drift compensation is skipped until tuned.
 
+The reused Cart View / World Map windows show `follow.py`'s own state in the **Mode** label each tick — `FOLLOW`, `SPIN`, `KICK`, `STOP`, or `LOST` — not the A\* planner's state machine. (The cart pose and dots on the World Map are still driven by the planner's odometry, which `follow.py` doesn't update, so treat those as decorative here.)
+
 ---
 
 ## Hardware Tests (`pathfinding_arc_test.py`)

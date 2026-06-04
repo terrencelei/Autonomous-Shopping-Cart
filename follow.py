@@ -459,6 +459,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                 kick.cancel()
                 prev_S = 0.0
                 x = angle_deg = None
+                mode_str = "LOST"
             else:
                 x = target_row[3]          # calibrated distance (m)
                 angle_deg = target_row[4]  # calibrated angle (deg, +right)
@@ -466,11 +467,13 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                 if res is None:            # a blocking re-centre spin ran this tick
                     kick.cancel()
                     prev_S = 0.0
+                    mode_str = "SPIN"
                 else:
                     S, rpm_diff = res
                     d_l, d_r = motors.read_deltas()
                     if S == 0.0:           # holding station (too close) — no kick
                         kick.cancel()
+                        mode_str = "STOP"
                     else:
                         if prev_S == 0.0:  # departing from rest
                             kick.arm()
@@ -478,9 +481,14 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                         if kick.active:    # floor the speed until breakaway is confirmed
                             S = math.copysign(max(abs(S), KICK_RPM), S)
                             ctrl.S = S      # keep the PI integrator consistent
+                        mode_str = "KICK" if kick.active else "FOLLOW"
                     prev_S = S
                     l_rpm, r_rpm = mix_wheels(S, rpm_diff)
                     motors.send_rpm(l_rpm, r_rpm)
+
+            # Surface follow.py's own state in the map's "Mode:" label
+            # (yolo_detect's draw_world_map / overlay print Y.P.S.mode)
+            Y.P.S.mode = mode_str
 
             if t - last_log >= 0.5:
                 last_log = t
