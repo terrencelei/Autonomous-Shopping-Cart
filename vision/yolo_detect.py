@@ -439,8 +439,8 @@ class TargetLock:
         self.last_seen               = 0.0
         self.last_dist               = None
         self.last_angle              = None
-        self.reference_profile       = None   # FIXED on first detection, never updated
-        self.color_profile           = None   # EMA-smoothed, used for display/debug
+        self.reference_profile       = None
+        self.color_profile           = None
         self.switch_candidate_id     = None
         self.switch_candidate_frames = 0
 
@@ -449,17 +449,31 @@ class TargetLock:
             self.switch_candidate_id     = None
             self.switch_candidate_frames = 0
             if self.locked_id is not None and now - self.last_seen > TARGET_LOST_TIMEOUT_S:
+                print(f"[LOCK] Target lost — no detections for >{TARGET_LOST_TIMEOUT_S}s")
                 self.locked_id = None
             return None
 
         # ------------------------------------------------------------------ #
-        # First ever detection: lock onto whoever we see and save their
-        # color profile as the permanent reference.  Never overwrite it.
+        # First ever detection
         # ------------------------------------------------------------------ #
         if self.reference_profile is None:
-            # Pick the closest person (lowest score = closest + most centred)
             best = min(measurements, key=lambda m: m["score"])
+            tid  = best["track_id"]
+            prof = best["color_profile"]
+
+            if prof is None:
+                print(f"[LOCK] First detection (ID{tid}) — box too small for color profile, "
+                      f"waiting for better view  dist={best['dist']:.1f}m")
+                # Still lock positionally even without a color profile
+                self._lock_first(best, now)
+                print(f"[LOCK] Locked on ID{tid} at {best['dist']:.1f}m "
+                      f"{best['angle']:+.1f}deg  (no color profile yet)")
+                return best["index"]
+
             self._lock_first(best, now)
+            print(f"[LOCK] *** INITIAL LOCK on ID{tid} ***  "
+                  f"dist={best['dist']:.1f}m  angle={best['angle']:+.1f}deg  "
+                  f"color_profile={'OK' if prof is not None else 'NONE'}")
             return best["index"]
 
         # ------------------------------------------------------------------ #
@@ -468,49 +482,57 @@ class TargetLock:
         for m in measurements:
             m["ref_similarity"] = profile_similarity(self.reference_profile,
                                                       m["color_profile"])
+            print(f"[SCORE] ID{m['track_id']}  dist={m['dist']:.1f}m  "
+                  f"angle={m['angle']:+.1f}deg  "
+                  f"ref_sim={m['ref_similarity']:.2f if m['ref_similarity'] is not None else 'N/A'}")
 
-        # The TARGET candidate is whichever tracked person best matches the
-        # reference.  Untracked detections (tid=None) are ignored for locking
-        # but still returned as OBSTACLE.
         tracked = [m for m in measurements if m["track_id"] is not None]
 
         if not tracked:
-            # No tracker IDs yet — fall back to closest match by color
-            best_color = max(measurements,
-                             key=lambda m: m["ref_similarity"] or 0.0)
-            if (best_color["ref_similarity"] is not None and
-                    best_color["ref_similarity"] >= TARGET_COLOR_REID_MIN_SCORE):
+            best_color = max(measurements, key=lambda m: m["ref_similarity"] or 0.0)
+            sim = best_color["ref_similarity"]
+            print(f"[LOCK] No tracked IDs — best color match sim={sim:.2f if sim else 'N/A'} "
+                  f"(need >={TARGET_COLOR_REID_MIN_SCORE})")
+            if sim is not None and sim >= TARGET_COLOR_REID_MIN_SCORE:
                 self._remember(best_color, now)
                 return best_color["index"]
             if now - self.last_seen > TARGET_LOST_TIMEOUT_S:
                 self.locked_id = None
             return None
 
-        # Among tracked detections, find whoever currently holds the locked ID
         current = next((m for m in tracked if m["track_id"] == self.locked_id), None)
 
-        # Re-ID: if we lost the locked ID, search by color + geometry
         if current is None:
             if now - self.last_seen <= TARGET_LOST_TIMEOUT_S:
+                print(f"[LOCK] ID{self.locked_id} not in frame — attempting re-ID "
+                      f"({now - self.last_seen:.2f}s since last seen)")
                 reid = self._reidentify(tracked)
                 if reid is not None:
+                    print(f"[LOCK] Re-identified as ID{reid['track_id']}  "
+                          f"sim={reid.get('ref_similarity', '?')}")
                     self._lock(reid["track_id"], now, reid)
                     return reid["index"]
+                print(f"[LOCK] Re-ID failed — no candidate passed thresholds")
                 return None
-            # Timeout expired — pick the best color match above threshold
             best_match = max(tracked, key=lambda m: m["ref_similarity"] or 0.0)
-            if (best_match["ref_similarity"] is not None and
-                    best_match["ref_similarity"] >= TARGET_COLOR_REID_MIN_SCORE):
+            sim = best_match["ref_similarity"]
+            print(f"[LOCK] Timeout expired — best color match ID{best_match['track_id']} "
+                  f"sim={sim:.2f if sim else 'N/A'} (need >={TARGET_COLOR_REID_MIN_SCORE})")
+            if sim is not None and sim >= TARGET_COLOR_REID_MIN_SCORE:
                 self._lock(best_match["track_id"], now, best_match)
+                print(f"[LOCK] Re-locked on ID{best_match['track_id']} after timeout")
                 return best_match["index"]
             self.locked_id = None
+            print(f"[LOCK] Lock dropped — no match above threshold")
             return None
 
-        # Happy path: current target still visible
+        # Happy path
         self._remember(current, now)
+        sim = current.get("ref_similarity")
+        print(f"[LOCK] Tracking ID{self.locked_id}  dist={current['dist']:.1f}m  "
+              f"angle={current['angle']:+.1f}deg  "
+              f"ref_sim={sim:.2f if sim is not None else 'N/A'}")
 
-        # Consider switching only if another tracked person is a *better*
-        # color match AND significantly closer/more central
         for candidate in tracked:
             if candidate["track_id"] == self.locked_id:
                 continue
@@ -526,8 +548,12 @@ class TargetLock:
                 else:
                     self.switch_candidate_id     = candidate["track_id"]
                     self.switch_candidate_frames = 1
+                print(f"[LOCK] Switch candidate ID{candidate['track_id']}  "
+                      f"color_improvement={color_improvement:.2f}  "
+                      f"frames={self.switch_candidate_frames}/{TARGET_SWITCH_FRAMES}")
 
                 if self.switch_candidate_frames >= TARGET_SWITCH_FRAMES:
+                    print(f"[LOCK] *** SWITCHING to ID{candidate['track_id']} ***")
                     self._lock(candidate["track_id"], now, candidate)
                     return candidate["index"]
                 break
@@ -537,17 +563,11 @@ class TargetLock:
 
         return current["index"]
 
-    # ---------------------------------------------------------------------- #
-    # Internal helpers
-    # ---------------------------------------------------------------------- #
-
     def _lock_first(self, measurement, now):
-        """Called exactly once — saves the permanent reference profile."""
-        self.locked_id         = measurement["track_id"]
-        self.last_seen         = now
-        self.last_dist         = measurement["dist"]
-        self.last_angle        = measurement["angle"]
-        # Store as both the fixed reference AND the live EMA profile
+        self.locked_id = measurement["track_id"]
+        self.last_seen = now
+        self.last_dist  = measurement["dist"]
+        self.last_angle = measurement["angle"]
         if measurement["color_profile"] is not None:
             self.reference_profile = measurement["color_profile"].copy()
             self.color_profile     = measurement["color_profile"].copy()
@@ -567,9 +587,7 @@ class TargetLock:
         for m in measurements:
             dist_delta  = abs(m["dist"]  - self.last_dist)
             angle_delta = abs(m["angle"] - self.last_angle)
-            # Use reference_profile (not the EMA) for re-ID — more stable
-            color_score = profile_similarity(self.reference_profile,
-                                             m["color_profile"])
+            color_score = profile_similarity(self.reference_profile, m["color_profile"])
             color_ok = (
                 self.reference_profile is None or
                 color_score is None or
@@ -592,7 +610,6 @@ class TargetLock:
         self.switch_candidate_frames = 0
 
     def _update_profile(self, measurement):
-        """EMA update of the live color profile — reference_profile is never touched."""
         new_prof = measurement.get("color_profile")
         if new_prof is None:
             return
@@ -606,8 +623,7 @@ class TargetLock:
 
     def _target_score(self, measurement):
         score       = measurement["score"]
-        color_score = profile_similarity(self.reference_profile,
-                                         measurement["color_profile"])
+        color_score = profile_similarity(self.reference_profile, measurement["color_profile"])
         if self.reference_profile is not None and color_score is not None:
             score += TARGET_COLOR_SWITCH_PENALTY * (1.0 - color_score)
         return score
