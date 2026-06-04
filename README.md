@@ -79,7 +79,7 @@ In `--live` mode, **don't also run `./start_cart.sh`** — both copies would fig
 
 ## Vision System
 
-A detection pipeline that runs entirely on the Raspberry Pi AI Camera (IMX500). The SSD-MobileNetV2 object detector executes on the IMX500's on-chip neural processor — no inference on the Pi CPU — and the result is streamed back over CSI alongside each frame. The host then runs ByteTrack to assign stable track IDs, locks onto the closest centred shopper, and maps everyone else as an obstacle.
+A detection pipeline that runs entirely on the Raspberry Pi AI Camera (IMX500). The SSD-MobileNetV2 object detector executes on the IMX500's on-chip neural processor — no inference on the Pi CPU — and the result is streamed back over CSI alongside each frame. The host uses OpenCV (`cv2`) for image conversion, overlays, and display windows, then runs ByteTrack to assign stable track IDs, locks onto the closest centred shopper, and maps everyone else as an obstacle.
 
 ### Setup (Raspberry Pi)
 
@@ -88,6 +88,8 @@ sudo apt install imx500-models python3-picamera2
 cd vision
 pip install -r requirements.txt
 ```
+
+`vision/requirements.txt` includes `opencv-python`, `supervision`, and `pyserial`. If OpenCV import fails, reinstall the Python dependencies from the `vision/` directory.
 
 ### Usage
 
@@ -122,7 +124,7 @@ To recalibrate: stand at known distances (e.g. 1 m, 2 m, 3 m), record the report
 
 | Window | Contents |
 |--------|----------|
-| **Cart View** | Annotated camera feed — bounding boxes, per-object distance/angle, FPS/latency overlay |
+| **Cart View** | OpenCV window with annotated camera feed — bounding boxes, per-object distance/angle, FPS/latency overlay |
 
 ---
 
