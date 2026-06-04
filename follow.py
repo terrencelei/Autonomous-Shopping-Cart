@@ -78,7 +78,7 @@ SPIN_DEADBAND_DEG = 0.5    # spin(): ignore turn requests smaller than this (no-
 THRESH_M       = HOLD_DIST   # standoff distance to hold (m)
 LINEAR_INERTIA = 0.0    # s — forward coast factor, reserved for linear drift  [calibrate]
 KP_DIST        = 30.0   # RPM speed change per (m/s) of approach rate dx        [calibrate]
-KI_DIST        = 30.0   # RPM speed change per metre of standoff error (x-thresh) [calibrate]
+KI_DIST        = 15.0   # RPM speed change per metre of standoff error (x-thresh) [calibrate]
 DX_ALPHA       = 0.3    # EMA factor for the smoothed dx/dt
 
 # Steering (angle) controller
