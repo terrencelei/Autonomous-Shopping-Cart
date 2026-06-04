@@ -9,8 +9,8 @@ built from the displacement pseudocode.
     reads "E,<l>,<r>\\n" encoder feedback.  The proven breakaway kick
     (KICK_RPM = 18 released after KICK_TICKS = 45 encoder ticks) is reused.
   * Control: implemented fresh from the pseudocode (distance follow only).
-    Fully independent of Pathfinding_algorithm.py — the hardware/dimensional
-    specs it needs are cloned below (keep in sync if the cart is re-measured).
+    Self-contained — the hardware/dimensional specs it needs are defined
+    below (keep in sync if the cart is re-measured).
 
 Usage:
     python3 follow.py                 # live camera + drive
@@ -28,8 +28,8 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # =============================================================================
-# HARDWARE / DIMENSIONAL SPECS  (cloned from Pathfinding_algorithm.py so this
-# follower stands alone — keep in sync if the cart is re-measured)
+# HARDWARE / DIMENSIONAL SPECS  (measured cart geometry —
+# keep in sync if the cart is re-measured)
 # =============================================================================
 
 WHEEL_DIAMETER_M = 0.06778        # outer drive-wheel diameter (m)

@@ -8,13 +8,12 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Runtime logs from start_cart.sh
+# Runtime logs
 logs/
 
-# Generated test artefacts
-pathfinding_arc_test.png
-pathfinding_arc_test_trajectory.png
-pathfinding_arc_test_motors.png
+# follow.py calibration output
+calibration_angular_inertia.csv
+calibration_angular_inertia.png
 
 # vision — exclude dataset, training runs, output videos/images, and large weights
 vision/Shopping-Cart-1/

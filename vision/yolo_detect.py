@@ -1,11 +1,11 @@
 """
-Detect and track people with SSD-MobileNetV2 on the IMX500 NPU + ByteTrack,
-then drive the cart directly via Pathfinding_algorithm.tick().
+Detect and track people with SSD-MobileNetV2 on the IMX500 NPU + ByteTrack.
+Provides the target/obstacle tracking that follow.py (the main program) drives
+on. Run directly for a vision-only preview — no motor control lives here.
 
 Usage:
-  python3 yolo_detect.py                # live camera + motors
+  python3 yolo_detect.py                # vision preview
   python3 yolo_detect.py --no-display   # headless (SSH)
-  python3 yolo_detect.py --no-drive     # camera only, no motors
 
 Color signature pipeline (clothing_color_profile):
   1. Convert full frame BGR -> LAB once per frame
@@ -47,9 +47,6 @@ import supervision as sv
 
 from picamera2 import Picamera2
 from picamera2.devices.imx500 import IMX500, NetworkIntrinsics
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-import Pathfinding_algorithm as P
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -649,7 +646,9 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
 # Main loop
 # =========================================================================== #
 
-def run(no_display=False, no_drive=False):
+def run(no_display=False):
+    """Vision-only preview: run the IMX500 tracker and show the annotated frame
+    plus a per-detection table. No motor control — follow.py is the driver."""
     if not RPK_MODEL_PATH.exists():
         raise SystemExit(
             f"ERROR: {RPK_MODEL_PATH} not found. "
@@ -664,17 +663,12 @@ def run(no_display=False, no_drive=False):
         minimum_matching_threshold=0.8,
         frame_rate=30,
     )
-    smooth_state  = {}
-    target_lock   = TargetLock()
-    motors        = None if no_drive else P.MotorDriver()
-    odometry      = P.Odometry(motors.read_encoder_deltas if motors else lambda: (0, 0))
-    frame_idx     = 0
-    frame_times   = []
-    t_last_tick   = time.monotonic()
-    latest_target = None
+    smooth_state = {}
+    target_lock  = TargetLock()
+    frame_idx    = 0
+    frame_times  = []
 
-    drive_msg = " (motors disabled)" if no_drive else ""
-    print(f"\nTracking — press Q to quit{drive_msg}\n")
+    print("\nTracking — press Q to quit (vision only, no drive)\n")
     print(f"{'Role':<10} {'ID':<8} {'Conf':>6}  {'Dist':>8}  {'Angle':>8}  {'Sim':>6}")
     print("-" * 58)
 
@@ -690,19 +684,6 @@ def run(no_display=False, no_drive=False):
             out, rows = annotate_frame(frame, tracked, smooth_state,
                                        target_lock, time.monotonic())
 
-            target_row = next((r for r in rows if r[0] == "TARGET"), None)
-            latest_target = (target_row[3], target_row[4]) if target_row else None
-            obstacle_rows = [r for r in rows if r[0] == "OBSTACLE"]
-
-            now = time.monotonic()
-            if now - t_last_tick >= P.DT:
-                pos, heading = odometry.update()
-                obs = [(r[3], r[4]) for r in obstacle_rows]
-                v_left, v_right = P.tick(latest_target, pos, heading, obstacles=obs)
-                if motors is not None:
-                    motors.send(v_left, v_right)
-                t_last_tick = now
-
             t1 = time.time()
             frame_times.append(t1)
             if len(frame_times) > 30:
@@ -712,7 +693,7 @@ def run(no_display=False, no_drive=False):
                 if len(frame_times) > 1 else 0.0
             )
             cv2.putText(out,
-                        f"NPU  FPS:{fps_live:.1f}  {(t1-t0)*1000:.0f}ms  [{P.S.mode}]",
+                        f"NPU  FPS:{fps_live:.1f}  {(t1-t0)*1000:.0f}ms",
                         (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
 
             for role, label_id, conf, dist, angle, ref_sim in rows:
@@ -727,8 +708,6 @@ def run(no_display=False, no_drive=False):
 
             frame_idx += 1
     finally:
-        if motors is not None:
-            motors.stop()
         cap.release()
         if not no_display:
             cv2.destroyAllWindows()
@@ -736,10 +715,9 @@ def run(no_display=False, no_drive=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="SSD person tracker on IMX500 NPU + ByteTrack → Pathfinding_algorithm"
+        description="IMX500 person tracker (vision-only preview; follow.py is the driver)"
     )
     parser.add_argument("--no-display", dest="no_display", action="store_true")
-    parser.add_argument("--no-drive",   dest="no_drive",   action="store_true")
     args = parser.parse_args()
 
     if not args.no_display and not (os.environ.get("DISPLAY") or
@@ -747,4 +725,4 @@ if __name__ == "__main__":
         args.no_display = True
         print("No display detected — running headless.")
 
-    run(no_display=args.no_display, no_drive=args.no_drive)
+    run(no_display=args.no_display)

@@ -2,8 +2,7 @@
 //
 // Drives two TB9051FTG-controlled brushed DC motors open-loop and reports
 // wheel encoder counts back over USB serial.  The matching host code is
-// Pathfinding_algorithm.py / MotorDriver.send_velocities() running on
-// the Raspberry Pi.
+// follow.py / MotorIO on the Raspberry Pi.
 //
 // ── Serial protocol (115200 baud) ──────────────────────────────
 //   Host  → ESP32 :  "L<rpm> R<rpm>\n"   e.g.  "L42.5 R-30.0\n"
