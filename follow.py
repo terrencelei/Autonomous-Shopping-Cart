@@ -63,8 +63,9 @@ HOLD_DIST = 2.0                   # target hold distance (m)
 CAM_W, CAM_H, CAM_FPS = 640, 480, 30
 
 # Proven breakaway kick (see memory: cart-drive-calibration)
-KICK_RPM   = 8.0     # wheel RPM burst to overcome static friction
-KICK_TICKS = 30      # release the kick once this many encoder ticks accumulate
+KICK_RPM      = 8.0   # wheel RPM burst to overcome static friction
+KICK_TICKS    = 30    # release the kick once this many encoder ticks accumulate
+KICK_TIMEOUT_S = 1.0  # give up holding the kick after this long if no movement is seen
 TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop fallback
 
 # Spin (point-turn) controller
@@ -114,6 +115,15 @@ def drift(initial_rpm, final_rpm, inertia):
     final, modelled as proportional to the change: ``(initial-final)*inertia``.
     Unit-agnostic; with inertia=0 it is a no-op."""
     return (initial_rpm - final_rpm) * inertia
+
+
+def mix_wheels(S, rpm_diff):
+    """Differential mix of forward speed S and steering rpm_diff into
+    (left, right) wheel RPM, peak-scaled so neither wheel exceeds MAX_RPM."""
+    if max(abs(S + rpm_diff), abs(S - rpm_diff)) > MAX_RPM:
+        rpm_diff = math.copysign(
+            min(abs(MAX_RPM - abs(S)), abs(MAX_RPM + abs(S))), rpm_diff)
+    return S - rpm_diff, S + rpm_diff   # (left, right)
 
 
 # =============================================================================
@@ -262,9 +272,49 @@ def spin(theta_rad, motors):
 # FOLLOW CONTROLLER  (per-tick distance + steering, from the pseudocode)
 # =============================================================================
 
+class Kick:
+    """Encoder-confirmed forward breakaway.
+
+    Armed when the cart departs from rest; stays active until KICK_TICKS of
+    encoder movement accumulate (proving it broke free) or KICK_TIMEOUT_S
+    elapses.  While active the caller floors the forward-speed magnitude at
+    KICK_RPM.  Kept separate from the control law so FollowController stays a
+    pure PI + steering controller.
+    """
+
+    def __init__(self):
+        self._active = False
+        self._ticks = 0
+        self._t0 = 0.0
+
+    @property
+    def active(self):
+        return self._active
+
+    def arm(self):
+        self._active = True
+        self._ticks = 0
+        self._t0 = time.monotonic()
+
+    def cancel(self):
+        self._active = False
+        self._ticks = 0
+
+    def update(self, d_l, d_r):
+        """Feed this tick's encoder deltas; release once movement is confirmed
+        (KICK_TICKS) or the timeout expires."""
+        if not self._active:
+            return
+        self._ticks += abs(d_l) + abs(d_r)
+        if self._ticks >= KICK_TICKS or (time.monotonic() - self._t0) >= KICK_TIMEOUT_S:
+            self._active = False
+
+
 class FollowController:
-    """Live state for the follow loop.  ``step`` returns (L_rpm, R_rpm), or
-    None on a tick that ran a blocking re-centre spin (caller skips its send)."""
+    """Live state for the follow loop.  ``step`` returns (S, rpm_diff) — forward
+    wheel RPM and steering RPM-difference — or None on a tick that ran a
+    blocking re-centre spin (caller skips its send).  The breakaway kick lives
+    outside, in the ``Kick`` helper."""
 
     def __init__(self):
         self.S = 0.0           # current forward wheel RPM
@@ -303,23 +353,13 @@ class FollowController:
 
         rpm_diff = KP_ANGLE * theta + KD_ANGLE * dtheta
 
-        # Distance control
+        # Distance control (PI). Breakaway kick is applied by the caller's Kick.
         if x - THRESH_M < 0.0:
             self.S = 0.0
         else:
-            if self.S == 0.0:
-                self.S = KICK_RPM          # breakaway kick on departure from rest
             delta_S = KP_DIST * self.dx + KI_DIST * (x - THRESH_M)
             self.S = _clip(self.S + delta_S, -MAX_RPM, MAX_RPM)
-        S = self.S
-
-        # Wheel mixing with peak scaling
-        if max(abs(S + rpm_diff), abs(S - rpm_diff)) > MAX_RPM:
-            rpm_diff = math.copysign(
-                min(abs(MAX_RPM - abs(S)), abs(MAX_RPM + abs(S))), rpm_diff)
-        r_motor = S + rpm_diff
-        l_motor = S - rpm_diff
-        return l_motor, r_motor
+        return self.S, rpm_diff
 
 
 # =============================================================================
@@ -364,6 +404,8 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
         print("  GO!\n")
 
     motors.flush()
+    kick = Kick()
+    prev_S = 0.0
     start = time.monotonic()
     prev_t = start
     last_log = 0.0
@@ -388,13 +430,30 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
 
             if target_row is None:
                 ctrl.target_lost(motors)
+                kick.cancel()
+                prev_S = 0.0
                 x = angle_deg = None
             else:
                 x = target_row[3]          # calibrated distance (m)
                 angle_deg = target_row[4]  # calibrated angle (deg, +right)
-                cmd = ctrl.step(x, angle_deg, dt, motors=motors)
-                if cmd is not None:
-                    l_rpm, r_rpm = cmd
+                res = ctrl.step(x, angle_deg, dt, motors=motors)
+                if res is None:            # a blocking re-centre spin ran this tick
+                    kick.cancel()
+                    prev_S = 0.0
+                else:
+                    S, rpm_diff = res
+                    d_l, d_r = motors.read_deltas()
+                    if S == 0.0:           # holding station (too close) — no kick
+                        kick.cancel()
+                    else:
+                        if prev_S == 0.0:  # departing from rest
+                            kick.arm()
+                        kick.update(d_l, d_r)
+                        if kick.active:    # floor the speed until breakaway is confirmed
+                            S = math.copysign(max(abs(S), KICK_RPM), S)
+                            ctrl.S = S      # keep the PI integrator consistent
+                    prev_S = S
+                    l_rpm, r_rpm = mix_wheels(S, rpm_diff)
                     motors.send_rpm(l_rpm, r_rpm)
 
             if t - last_log >= 0.5:
@@ -402,7 +461,10 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
                 if target_row is None:
                     print(f"t={t:5.1f}s  no target")
                 else:
-                    tag = "SPIN" if ctrl.spun else f"S={ctrl.S:+6.1f}rpm"
+                    if ctrl.spun:
+                        tag = "SPIN"
+                    else:
+                        tag = ("KICK " if kick.active else "") + f"S={ctrl.S:+6.1f}rpm"
                     print(f"t={t:5.1f}s  dist={x:.2f}m  angle={angle_deg:+5.1f}°  "
                           f"dx={ctrl.dx:+.2f}m/s  {tag}")
 
