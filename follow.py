@@ -118,6 +118,12 @@ def _ticks_to_yaw(d_left, d_right):
     return (right_m - left_m) / TRACK_M
 
 
+def _ticks_to_rpm(ticks, dt):
+    if dt <= 0.0:
+        return 0.0
+    return (ticks / ENCODER_PPR) * (60.0 / dt)
+
+
 def drift(initial_rpm, final_rpm, inertia):
     """Extra travel coasted through on a commanded-rate step from initial to
     final, modelled as proportional to the change: ``(initial-final)*inertia``.
@@ -434,6 +440,8 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     start = time.monotonic()
     prev_t = start
     last_log = 0.0
+    cmd_l_rpm = cmd_r_rpm = 0.0
+    actual_l_rpm = actual_r_rpm = 0.0
     try:
         while True:
             ret, frame = cap.read()
@@ -458,6 +466,8 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                 ctrl.target_lost(motors)
                 kick.cancel()
                 prev_S = 0.0
+                cmd_l_rpm = cmd_r_rpm = 0.0
+                actual_l_rpm = actual_r_rpm = 0.0
                 x = angle_deg = None
                 mode_str = "LOST"
             else:
@@ -471,6 +481,8 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                 else:
                     S, rpm_diff = res
                     d_l, d_r = motors.read_deltas()
+                    actual_l_rpm = _ticks_to_rpm(d_l, dt)
+                    actual_r_rpm = _ticks_to_rpm(d_r, dt)
                     if S == 0.0:           # holding station (too close) — no kick
                         kick.cancel()
                         mode_str = "STOP"
@@ -484,6 +496,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                         mode_str = "KICK" if kick.active else "FOLLOW"
                     prev_S = S
                     l_rpm, r_rpm = mix_wheels(S, rpm_diff)
+                    cmd_l_rpm, cmd_r_rpm = l_rpm, r_rpm
                     motors.send_rpm(l_rpm, r_rpm)
 
             Y.P.S.mode = mode_str
@@ -498,7 +511,9 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                     else:
                         tag = ("KICK " if kick.active else "") + f"S={ctrl.S:+6.1f}rpm"
                     print(f"t={t:5.1f}s  dist={x:.2f}m  angle={angle_deg:+5.1f}°  "
-                          f"dx={ctrl.dx:+.2f}m/s  {tag}")
+                          f"dx={ctrl.dx:+.2f}m/s  {tag}  "
+                          f"cmd L{cmd_l_rpm:+5.1f} R{cmd_r_rpm:+5.1f}rpm  "
+                          f"actual L{actual_l_rpm:+5.1f} R{actual_r_rpm:+5.1f}rpm")
 
             if not no_display:
                 dist_str = f"dist={x:.2f}m ang={angle_deg:+.0f}°" if target_row else "no target"

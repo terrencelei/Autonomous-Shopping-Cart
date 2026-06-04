@@ -49,7 +49,7 @@ MOTOR_PORT = "/dev/ttyUSB0"       # CP2102 USB-UART bridge
 MOTOR_BAUD = 115200
 
 # Motion limits / loop rate
-MAX_RPM   = 31.0                  # open-loop cap; roughly duty 80/255 in cart_motor.ino
+MAX_RPM   = 50.0                  # open-loop cap; cart_motor.ino maps 100 RPM to full PWM
 DT        = 0.02                  # control loop period (s)
 HOLD_DIST = 2.0                   # target hold distance (m)
 
@@ -81,6 +81,12 @@ RPM_SLEW_PER_S = 35.0        # max command change per second
 
 def _clip(v, lo, hi):
     return max(lo, min(hi, v))
+
+
+def _ticks_to_rpm(ticks, dt):
+    if dt <= 0.0:
+        return 0.0
+    return (ticks / ENCODER_PPR) * (60.0 / dt)
 
 
 # =============================================================================
@@ -275,6 +281,8 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
     start = time.monotonic()
     prev_t = start
     last_log = 0.0
+    cmd_l_rpm = cmd_r_rpm = 0.0
+    actual_l_rpm = actual_r_rpm = 0.0
     try:
         while True:
             ret, frame = cap.read()
@@ -298,6 +306,8 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
                 ctrl.target_lost(motors)
                 kick.cancel()
                 prev_S = 0.0
+                cmd_l_rpm = cmd_r_rpm = 0.0
+                actual_l_rpm = actual_r_rpm = 0.0
                 x = angle_deg = None
             else:
                 x = target_row[3]          # calibrated distance (m)
@@ -305,6 +315,8 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
                 res = ctrl.step(x, angle_deg, dt, motors=motors)
                 S = res
                 d_l, d_r = motors.read_deltas()
+                actual_l_rpm = _ticks_to_rpm(d_l, dt)
+                actual_r_rpm = _ticks_to_rpm(d_r, dt)
                 if S == 0.0:               # holding station (too close) — no kick
                     kick.cancel()
                 else:
@@ -316,6 +328,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
                         ctrl.S = S         # keep the PI integrator consistent
                 prev_S = S
                 l_rpm = r_rpm = S
+                cmd_l_rpm, cmd_r_rpm = l_rpm, r_rpm
                 motors.send_rpm(l_rpm, r_rpm)
 
             if t - last_log >= 0.5:
@@ -325,7 +338,9 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0):
                 else:
                     tag = ("KICK " if kick.active else "") + f"S={ctrl.S:+6.1f}rpm"
                     print(f"t={t:5.1f}s  dist={x:.2f}m  angle={angle_deg:+5.1f}°  "
-                          f"dx={ctrl.dx:+.2f}m/s  {tag}")
+                          f"dx={ctrl.dx:+.2f}m/s  {tag}  "
+                          f"cmd L{cmd_l_rpm:+5.1f} R{cmd_r_rpm:+5.1f}rpm  "
+                          f"actual L{actual_l_rpm:+5.1f} R{actual_r_rpm:+5.1f}rpm")
 
             if not no_display:
                 dist_str = f"dist={x:.2f}m ang={angle_deg:+.0f}°" if target_row else "no target"
