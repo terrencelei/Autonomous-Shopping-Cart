@@ -801,9 +801,7 @@ def run(no_display=False, no_drive=False):
                 print(f"{role:<10} {label_id:<8} {conf:>6.0%}  {dist:>8.1f}m  {angle:>+7.1f}°  [f{frame_idx}]")
 
             if not no_display:
-                overlay_map(out, rows)
                 cv2.imshow("Cart View", out)
-                cv2.imshow("World Map", draw_world_map(rows))
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 
