@@ -862,6 +862,20 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     smooth_state = {}
     target_lock = Y.TargetLock()
     ctrl = FollowController()
+    odom = Odometry()
+    returnhome = ReturnHome()
+    searcher = Searcher()
+    pursuer = Pursuer()
+    spinner = Spinner()
+    kick = Kick()
+
+    prev_S = 0.0
+    lost_since = None
+    last_angle_deg = 0.0
+    unexpected_yaw = 0.0
+    obstacle_blocked_until = 0.0
+    measure_residual = False
+    spin_start_angle = 0.0
 
     print("follow.py — spin-to-centre + PI distance follow")
     print(f"Hold {THRESH_M:.2f} m  centre band ±{THETA_THRESH_DEG:.0f}°  "
