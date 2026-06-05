@@ -72,8 +72,9 @@ TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop 
 # Spin (point-turn) controller
 SPIN_KICK_RPM     = 35.0    # breakaway burst for a point turn (half the forward KICK_RPM)
 TURN_RPM          = 2.0    # steady wheel RPM during the turn after the kick
-ANGULAR_INERTIA   = 0.0    # s — yaw coast factor; drift = (w0-w1)*inertia   [calibrate]
-THETA_THRESH_DEG  = 8.0    # follow loop: re-centre with spin() once |angle| exceeds this
+ANGULAR_INERTIA   = 0.0    # s — yaw coast factor; drift = (w0-w1)*inertia (seeded by 360° calib)
+INERTIA_LEARN_K   = 0.05   # online ANGULAR_INERTIA learn rate from each spin's leftover angle [calibrate]
+THETA_THRESH_DEG  = 8.0    # follow loop: re-centre with a spin once |angle| exceeds this
 SPIN_DEADBAND_DEG = 0.5    # spin: ignore turn requests smaller than this (no-op)
 SPIN_TURN_TIMEOUT_S = 0.5  # max extra time for the steady-turn phase (exit a stuck/loaded turn)
 
@@ -873,6 +874,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     ANGULAR_INERTIA = calibrate_angular_inertia(motors)
     motors.flush()
     kick = Kick()
+    spinner = Spinner()
     searcher = Searcher()
     pursuer = Pursuer()
     odom = Odometry()          # dead-reckoned pose; origin = the start pose ('home')
@@ -881,6 +883,8 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     prev_S = 0.0
     last_angle_deg = 0.0       # last angle the target was seen at (which way it left)
     lost_since = None          # when the target was first lost (for the search grace period)
+    spin_start_angle = 0.0     # target angle when the current centring spin began
+    measure_residual = False   # True for one frame after a spin, to refine ANGULAR_INERTIA
     start = time.monotonic()
     prev_t = start
     last_log = 0.0
@@ -986,28 +990,56 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                     for obs in rows if obs[0] == "OBSTACLE"
                 )
 
-                # Follow AND steer at the same time: the cart drives forward while
-                # turning toward the target (no in-place spin — spinning would let
-                # the shopper get further away). Steering is the mix_wheels rpm_diff.
+                # Online inertia refine: the frame after a centring spin, the target's
+                # leftover angle is its over/undershoot — nudge ANGULAR_INERTIA so the
+                # next spin lands closer (overshoot → more inertia, undershoot → less).
+                if measure_residual:
+                    s = 1.0 if spin_start_angle >= 0 else -1.0
+                    ANGULAR_INERTIA = max(0.0, ANGULAR_INERTIA
+                                          + INERTIA_LEARN_K * (-s) * math.radians(angle_deg))
+                    _trace(f"inertia refine: residual {angle_deg:+.1f}° → ANGULAR_INERTIA {ANGULAR_INERTIA:.4f}s")
+                    measure_residual = False
+
                 S, rpm_diff = ctrl.step(x, angle_deg, dt)
-                if blocked:                # obstacle in the way — hold, don't advance
-                    S = 0.0
-                    ctrl.S = 0.0           # stay put (steering still keeps us aimed)
-                    kick.cancel()
-                    mode_str = "BLOCKED"
-                elif S == 0.0:             # holding station (too close) — no kick
-                    kick.cancel()
-                    mode_str = "STOP"
+
+                # Engage a drift-compensated centring spin when too far off-centre —
+                # but keep driving forward during it so the shopper can't get away.
+                if not spinner.active and abs(angle_deg) > THETA_THRESH_DEG:
+                    spinner.start(math.radians(STEER_SIGN * angle_deg))
+                    spin_start_angle = angle_deg
+
+                if spinner.active:
+                    cmd = spinner.update(d_l, d_r)
+                    fwd = 0.0 if (blocked or S <= 0.0) else S    # forward during the spin
+                    if cmd is None:            # spin finished → refine inertia next frame
+                        measure_residual = True
+                        l_rpm = r_rpm = fwd
+                    else:                      # forward + the spin's point-turn, peak-clamped
+                        turn_l, turn_r = cmd
+                        l_rpm = _clip(fwd + turn_l, -MAX_RPM, MAX_RPM)
+                        r_rpm = _clip(fwd + turn_r, -MAX_RPM, MAX_RPM)
+                    prev_S = fwd
+                    mode_str = "SPIN"
                 else:
-                    if prev_S == 0.0:      # departing from rest
-                        kick.arm()
-                    kick.update(d_l, d_r)
-                    if kick.active:        # floor the speed at the (ramping) kick level
-                        S = math.copysign(max(abs(S), kick.rpm), S)
-                        ctrl.S = S          # keep the PI integrator consistent
-                    mode_str = "KICK" if kick.active else "FOLLOW"
-                prev_S = S
-                l_rpm, r_rpm = mix_wheels(S, rpm_diff)
+                    # In the centre band: steer while driving (small correction).
+                    if blocked:                # obstacle in the way — hold, don't advance
+                        S = 0.0
+                        ctrl.S = 0.0
+                        kick.cancel()
+                        mode_str = "BLOCKED"
+                    elif S == 0.0:             # holding station (too close) — no kick
+                        kick.cancel()
+                        mode_str = "STOP"
+                    else:
+                        if prev_S == 0.0:      # departing from rest
+                            kick.arm()
+                        kick.update(d_l, d_r)
+                        if kick.active:        # floor the speed at the (ramping) kick level
+                            S = math.copysign(max(abs(S), kick.rpm), S)
+                            ctrl.S = S
+                        mode_str = "KICK" if kick.active else "FOLLOW"
+                    prev_S = S
+                    l_rpm, r_rpm = mix_wheels(S, rpm_diff)
 
             cmd_l_rpm, cmd_r_rpm = l_rpm, r_rpm
             motors.send_rpm(l_rpm, r_rpm)
