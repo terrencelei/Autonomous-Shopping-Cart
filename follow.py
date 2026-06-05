@@ -1007,9 +1007,15 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
 
                 S, rpm_diff = ctrl.step(x, angle_deg, dt)
 
-                # Engage a drift-compensated centring spin when too far off-centre —
-                # but keep driving forward during it so the shopper can't get away.
-                if not spinner.active and abs(angle_deg) > THETA_THRESH_DEG:
+                # Engage a drift-compensated centring spin only while the shopper
+                # is still beyond the hold distance. If YOLO actively sees them
+                # at/inside 2 m, hold still instead of spinning in place.
+                close_target = x <= THRESH_M
+                if close_target and spinner.active:
+                    spinner.cancel()
+                    measure_residual = False
+                if (not spinner.active and not close_target and
+                        abs(angle_deg) > THETA_THRESH_DEG):
                     spinner.start(math.radians(STEER_SIGN * angle_deg))
                     spin_start_angle = angle_deg
 
