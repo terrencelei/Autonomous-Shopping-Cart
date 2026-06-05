@@ -60,6 +60,7 @@ HOLD_DIST = 2.0                   # target hold distance (m)
 
 # Vision capture
 CAM_W, CAM_H, CAM_FPS = 640, 480, 30
+VISION_WARMUP_S = 10.0   # run vision (no drive) this long at startup so colour tracking settles
 
 # Proven breakaway kick (see memory: cart-drive-calibration)
 KICK_RPM      = 50.0  # wheel RPM burst to overcome static friction
@@ -665,9 +666,10 @@ class FollowController:
             _trace(f"step: PI dist={x:.2f} dx={self.dx:+.2f} → S={self.S:+.1f} diff={rpm_diff:+.1f}")
         return self.S, rpm_diff
 
-def calibrate_angular_inertia(motors, steady_ticks=80, coast_window_s=1.5):
-    """Spin at SPIN_KICK_RPM, hard-stop, measure encoder coast → ANGULAR_INERTIA (s).
-    Saves encoder data to calibration_angular_inertia.csv and .png."""
+def calibrate_angular_inertia(motors, spin_revs=1.0, coast_window_s=1.5):
+    """Spin ``spin_revs`` full revolutions (360° each) at SPIN_KICK_RPM, hard-stop,
+    and measure the encoder coast → ANGULAR_INERTIA (s). Saves encoder data to
+    calibration_angular_inertia.csv and .png."""
     global ANGULAR_INERTIA
 
     print("Calibrating angular inertia — keep the cart clear…")
@@ -697,17 +699,19 @@ def calibrate_angular_inertia(motors, steady_ticks=80, coast_window_s=1.5):
         yaws.append(_ticks_to_yaw(cum_dl, cum_dr))
         phases.append(phase)
 
-    # ── phase 1: spin at SPIN_KICK_RPM until steady_ticks accumulate ──────────
+    # ── phase 1: spin one full revolution (360°) at SPIN_KICK_RPM ──────────────
     motors.send_rpm(-SPIN_KICK_RPM, +SPIN_KICK_RPM)
-    drive_ticks = 0
+    target_yaw = spin_revs * 2.0 * math.pi
+    omega = _rpm_to_yaw(SPIN_KICK_RPM)                 # expected yaw rate (rad/s)
+    timeout_s = (target_yaw / omega * 2.0 + 3.0) if omega > 0 else 30.0
     t0 = time.monotonic()
-    while drive_ticks < steady_ticks:
+    while abs(_ticks_to_yaw(cum_dl, cum_dr)) < target_yaw:
         time.sleep(0.005)
         dl, dr = motors.read_deltas()
         _record(dl, dr, "drive")
-        drive_ticks += abs(dl) + abs(dr)
-        if time.monotonic() - t0 > 5.0:
-            print("  WARNING: cart did not reach steady_ticks — ANGULAR_INERTIA stays 0.0")
+        if time.monotonic() - t0 > timeout_s:
+            print(f"  WARNING: cart did not complete {math.degrees(target_yaw):.0f}° "
+                  "— ANGULAR_INERTIA stays 0.0")
             motors.stop()
             return ANGULAR_INERTIA
 
@@ -799,6 +803,27 @@ def calibrate_angular_inertia(motors, steady_ticks=80, coast_window_s=1.5):
 # RUN  — wire vision + drive together
 # =============================================================================
 
+def _warmup_vision(cap, tracker, smooth_state, target_lock, Y, seconds, no_display):
+    """Run the vision pipeline (no drive) for ``seconds`` so ByteTrack and the
+    TargetLock colour profile settle on the shopper before the cart moves."""
+    print(f"Warming up camera + colour tracking for {seconds:.0f}s — stand in view…")
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < seconds:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        dets = cap.get_detections()
+        tracked = tracker.update_with_detections(dets)
+        out, _rows = Y.annotate_frame(frame, tracked, smooth_state, target_lock, time.monotonic())
+        if not no_display:
+            remaining = seconds - (time.monotonic() - t0)
+            Y.cv2.putText(out, f"CALIBRATING colour… {remaining:.0f}s", (10, 25),
+                          Y.cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
+            Y.cv2.imshow("Cart View", out)
+            if Y.cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+
+
 def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     global TRACE, ANGULAR_INERTIA
     TRACE = trace
@@ -831,13 +856,18 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     print(f"Hold {THRESH_M:.2f} m  centre band ±{THETA_THRESH_DEG:.0f}°  "
           f"turn {TURN_RPM} rpm  kick {KICK_RPM} rpm/{KICK_TICKS} ticks  max {MAX_RPM:.0f} rpm")
 
+    # 10 s camera + colour-tracking warmup before any motion.
+    _warmup_vision(cap, tracker, smooth_state, target_lock, Y,
+                   seconds=VISION_WARMUP_S, no_display=no_display)
+
     if drive and motors.has_serial and countdown > 0:
-        print(f"\n*** Cart will start following in {countdown}s ***")
+        print(f"\n*** Cart will spin to calibrate, then follow — starting in {countdown}s ***")
         for k in range(countdown, 0, -1):
             print(f"  {k}...")
             time.sleep(1)
         print("  GO!\n")
 
+    # Then measure angular inertia with a full 360° spin.
     ANGULAR_INERTIA = calibrate_angular_inertia(motors)
     motors.flush()
     kick = Kick()
