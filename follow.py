@@ -66,6 +66,9 @@ HOLD_DIST = 2.0                   # target hold distance (m)
 # Vision capture
 CAM_W, CAM_H, CAM_FPS = 640, 480, 30
 VISION_WARMUP_S = 15.0   # run vision (no drive) this long at startup so colour tracking settles
+SEARCH_PERSON_CONFIDENCE = 0.15  # lower YOLO person threshold while spin-searching
+SEARCH_TRACK_ACTIVATION = 0.05   # lower ByteTrack activation threshold while spin-searching
+SEARCH_TRACK_MATCHING = 0.5      # looser ByteTrack matching while spin-searching
 
 # Proven breakaway kick (see memory: cart-drive-calibration)
 KICK_RPM      = 50.0  # wheel RPM burst to overcome static friction
@@ -880,6 +883,12 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
         minimum_matching_threshold=0.8,
         frame_rate=CAM_FPS,
     )
+    search_tracker = Y.sv.ByteTrack(
+        track_activation_threshold=SEARCH_TRACK_ACTIVATION,
+        lost_track_buffer=90,
+        minimum_matching_threshold=SEARCH_TRACK_MATCHING,
+        frame_rate=CAM_FPS,
+    )
     smooth_state = {}
     target_lock = Y.TargetLock()
     ctrl = FollowController()
@@ -940,8 +949,14 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
             spun_around = (abs(abs(unexpected_yaw) - math.radians(HOME_ROT_TRIGGER_DEG))
                            <= math.radians(HOME_ROT_RANGE_DEG))
 
-            dets = cap.get_detections()
-            tracked = tracker.update_with_detections(dets)
+            search_vision = searcher.active
+            confidence_threshold = (
+                getattr(Y, "SEARCH_PERSON_CONFIDENCE", SEARCH_PERSON_CONFIDENCE)
+                if search_vision else None
+            )
+            dets = cap.get_detections(confidence_threshold=confidence_threshold)
+            active_tracker = search_tracker if search_vision else tracker
+            tracked = active_tracker.update_with_detections(dets)
             out, rows = Y.annotate_frame(
                 frame, tracked, smooth_state, target_lock, now, draw=not no_display
             )

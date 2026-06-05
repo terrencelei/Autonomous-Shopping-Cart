@@ -49,6 +49,7 @@ RPK_MODEL_PATH = Path(
 )
 
 PERSON_CONFIDENCE = 0.5
+SEARCH_PERSON_CONFIDENCE = 0.15
 PERSON_CLASS_ID   = 0
 
 # YOLO11n post-processed model settings from raspberrypi/imx500-models:
@@ -130,7 +131,7 @@ class IMX500Capture:
         req.release()
         return True, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
-    def get_detections(self):
+    def get_detections(self, confidence_threshold=None):
         if self._meta is None:
             return self._last_dets
         np_outputs = self._imx500.get_outputs(self._meta, add_batch=True)
@@ -148,7 +149,8 @@ class IMX500Capture:
         if self._intrinsics.bbox_order == "xy":
             boxes = boxes[:, [1, 0, 3, 2]]
 
-        keep = (scores >= PERSON_CONFIDENCE) & (classes == PERSON_CLASS_ID)
+        threshold = PERSON_CONFIDENCE if confidence_threshold is None else confidence_threshold
+        keep = (scores >= threshold) & (classes == PERSON_CLASS_ID)
         if not keep.any():
             self._last_dets = sv.Detections.empty()
             return self._last_dets
