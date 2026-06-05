@@ -75,8 +75,8 @@ KICK_RAMP_STEP = 10.0 # wheel RPM added to the kick each KICK_TIMEOUT_S it stays
 TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop fallback
 
 # Spin (point-turn) controller
-SPIN_KICK_RPM     = 35.0    # breakaway burst for a point turn (half the forward KICK_RPM)
-TURN_RPM          = 2.0    # steady wheel RPM during the turn after the kick
+SPIN_KICK_RPM     = 25    # breakaway burst for a point turn (half the forward KICK_RPM)
+TURN_RPM          =  5    # steady wheel RPM during the turn after the kick
 ANGULAR_INERTIA   = 0.0    # s — yaw coast factor; drift = (w0-w1)*inertia (seeded by 360° calib)
 INERTIA_LEARN_K   = 0.05   # online ANGULAR_INERTIA learn rate from each spin's leftover angle [calibrate]
 THETA_THRESH_DEG  = 6.0    # follow loop: re-centre with a spin once |angle| exceeds this
