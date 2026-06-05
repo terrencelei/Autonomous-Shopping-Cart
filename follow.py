@@ -98,8 +98,9 @@ DX_ALPHA       = 0.3    # EMA factor for the smoothed dx/dt
 
 # Basic obstacle avoidance: pause forward motion when an obstacle is closer than
 # the target and roughly in the path; resume normal follow once it clears.
-OBSTACLE_BLOCK_DEG = 15.0   # obstacle within this of straight-ahead counts as "in the way"
+OBSTACLE_BLOCK_DEG = 20.0   # obstacle within this of straight-ahead counts as "in the way"
 OBSTACLE_MARGIN_M  = 0.3    # obstacle must be at least this much closer than the target to block
+OBSTACLE_HOLD_S    = 0.6    # stay blocked this long after the last obstacle-in-path sighting
 
 # Return-home: if the cart is spun ~180° while stopped (i.e. an uncommanded
 # rotation), dead-reckon back to the start pose (0,0,0) along a direct line.
@@ -885,6 +886,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     lost_since = None          # when the target was first lost (for the search grace period)
     spin_start_angle = 0.0     # target angle when the current centring spin began
     measure_residual = False   # True for one frame after a spin, to refine ANGULAR_INERTIA
+    obstacle_blocked_until = 0.0  # hysteresis: hold the obstacle block until this time
     start = time.monotonic()
     prev_t = start
     last_log = 0.0
@@ -911,12 +913,11 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
             # Dead reckoning runs on slip-rejected deltas (cmd_*_rpm = last tick's command).
             od_l, od_r = deslip(d_l, d_r, cmd_l_rpm, cmd_r_rpm, dt)
             meas_yaw = odom.update(od_l, od_r)
-            # While we are commanding a full stop, any rotation the encoders see is
-            # uncommanded (someone turned the cart). Reset whenever we command motion.
-            if abs(cmd_l_rpm) < 0.5 and abs(cmd_r_rpm) < 0.5:
-                unexpected_yaw += meas_yaw
-            else:
-                unexpected_yaw = 0.0
+            # Uncommanded rotation = measured yaw minus the yaw we actually commanded
+            # last tick. A manual spin adds to the measured yaw but not the commanded,
+            # so it accumulates whether the cart is following, stopped, or searching.
+            cmd_yaw = (cmd_r_rpm - cmd_l_rpm) * WHEEL_CIRC / 60.0 / TRACK_M * dt
+            unexpected_yaw += meas_yaw - cmd_yaw
             spun_around = (abs(abs(unexpected_yaw) - math.radians(HOME_ROT_TRIGGER_DEG))
                            <= math.radians(HOME_ROT_RANGE_DEG))
 
@@ -938,6 +939,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                 cmd = returnhome.update(odom, d_l, d_r)
                 if cmd is None:             # back at the start pose
                     returnhome.cancel()
+                    unexpected_yaw = 0.0    # clear so it doesn't immediately re-trigger
                     l_rpm = r_rpm = 0.0
                     mode_str = "HOME"
                 else:
@@ -985,10 +987,13 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
 
                 # Basic obstacle avoidance: an obstacle closer than the target and
                 # roughly in our forward path blocks advancing toward the target.
-                blocked = any(
+                obstacle_in_path = any(
                     obs[3] < x - OBSTACLE_MARGIN_M and abs(obs[4]) <= OBSTACLE_BLOCK_DEG
                     for obs in rows if obs[0] == "OBSTACLE"
                 )
+                if obstacle_in_path:                       # refresh the hold each sighting
+                    obstacle_blocked_until = now + OBSTACLE_HOLD_S
+                blocked = now < obstacle_blocked_until     # hysteresis: ride through dropouts
 
                 # Online inertia refine: the frame after a centring spin, the target's
                 # leftover angle is its over/undershoot — nudge ANGULAR_INERTIA so the
