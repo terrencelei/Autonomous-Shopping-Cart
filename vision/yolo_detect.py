@@ -1,11 +1,10 @@
 """
-Detect and track people with SSD-MobileNetV2 on the IMX500 NPU + ByteTrack,
-then drive the cart directly via Pathfinding_algorithm.tick().
+Detect and track people with SSD-MobileNetV2 on the IMX500 NPU + ByteTrack.
+Provides the target/obstacle tracking that follow.py drives on.
 
 Usage:
-  python3 yolo_detect.py                # live camera + motors
+  python3 yolo_detect.py                # vision-only preview
   python3 yolo_detect.py --no-display   # headless (SSH)
-  python3 yolo_detect.py --no-drive     # camera only, no motors
 
 Color signature pipeline (clothing_color_profile):
   1. Convert full frame BGR -> HSV once per frame
@@ -16,7 +15,6 @@ Color signature pipeline (clothing_color_profile):
 """
 
 import os
-import sys
 import time
 import argparse
 import warnings
@@ -43,9 +41,6 @@ import supervision as sv
 
 from picamera2 import Picamera2
 from picamera2.devices.imx500 import IMX500, NetworkIntrinsics
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-import Pathfinding_algorithm as P
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -508,9 +503,9 @@ class TargetLock:
 # =========================================================================== #
 
 def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
-                   target_lock: TargetLock, now: float):
+                   target_lock: TargetLock, now: float, draw=True):
     img_h, img_w = frame.shape[:2]
-    out = frame.copy()
+    out = frame.copy() if draw else None
 
     # Convert once per frame — passed into clothing_color_profile
     hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -582,35 +577,36 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
         profile         = m["color_profile"]
         ref_sim         = m.get("ref_similarity")
 
-        thickness = 3 if is_target else 2
-        cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
+        if draw:
+            thickness = 3 if is_target else 2
+            cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
 
-        sim_str = f" sim:{ref_sim:.2f}" if ref_sim is not None else ""
-        label   = f"{role} {label_id} {dist:.1f}m {angle:+.1f}deg{sim_str}"
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-        top = max(int(y1) - 10, th + 4)
-        cv2.rectangle(out, (int(x1), top - th - 4), (int(x1) + tw, top), color, -1)
-        cv2.putText(out, label, (int(x1), top - 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
+            sim_str = f" sim:{ref_sim:.2f}" if ref_sim is not None else ""
+            label   = f"{role} {label_id} {dist:.1f}m {angle:+.1f}deg{sim_str}"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+            top = max(int(y1) - 10, th + 4)
+            cv2.rectangle(out, (int(x1), top - th - 4), (int(x1) + tw, top), color, -1)
+            cv2.putText(out, label, (int(x1), top - 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
 
-        # Swatch strip: reconstruct BGR from [H, S] with fixed V=180
-        if profile is not None:
-            swatch_w = max(6, int((x2 - x1) * 0.06))
-            swatch_h = max(2, int((y2 - y1) / N_PROFILE_CHUNKS))
-            strip_x  = int(x1) + thickness + 1
-            for ci in range(N_PROFILE_CHUNKS):
-                sy1    = int(y1) + ci * swatch_h
-                sy2    = sy1 + swatch_h
-                h_val  = float(np.clip(profile[ci, 0], 0, 179))
-                s_val  = float(np.clip(profile[ci, 1], 0, 255))
-                hsv_px = np.uint8([[[h_val, s_val, 180]]])
-                bgr_px = cv2.cvtColor(hsv_px, cv2.COLOR_HSV2BGR)[0, 0].tolist()
-                cv2.rectangle(out, (strip_x, sy1), (strip_x + swatch_w, sy2), bgr_px, -1)
-            cv2.rectangle(out,
-                          (strip_x, int(y1) + thickness + 1),
-                          (strip_x + swatch_w,
-                           int(y1) + thickness + 1 + N_PROFILE_CHUNKS * swatch_h),
-                          (255, 255, 255), 1)
+            # Swatch strip: reconstruct BGR from [H, S] with fixed V=180
+            if profile is not None:
+                swatch_w = max(6, int((x2 - x1) * 0.06))
+                swatch_h = max(2, int((y2 - y1) / N_PROFILE_CHUNKS))
+                strip_x  = int(x1) + thickness + 1
+                for ci in range(N_PROFILE_CHUNKS):
+                    sy1    = int(y1) + ci * swatch_h
+                    sy2    = sy1 + swatch_h
+                    h_val  = float(np.clip(profile[ci, 0], 0, 179))
+                    s_val  = float(np.clip(profile[ci, 1], 0, 255))
+                    hsv_px = np.uint8([[[h_val, s_val, 180]]])
+                    bgr_px = cv2.cvtColor(hsv_px, cv2.COLOR_HSV2BGR)[0, 0].tolist()
+                    cv2.rectangle(out, (strip_x, sy1), (strip_x + swatch_w, sy2), bgr_px, -1)
+                cv2.rectangle(out,
+                              (strip_x, int(y1) + thickness + 1),
+                              (strip_x + swatch_w,
+                               int(y1) + thickness + 1 + N_PROFILE_CHUNKS * swatch_h),
+                              (255, 255, 255), 1)
 
         rows.append((role, label_id, conf, dist, angle, ref_sim))
 
@@ -621,7 +617,8 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
 # Main loop
 # =========================================================================== #
 
-def run(no_display=False, no_drive=False):
+def run(no_display=False):
+    """Vision-only preview. Motor control lives in follow.py."""
     if not RPK_MODEL_PATH.exists():
         raise SystemExit(
             f"ERROR: {RPK_MODEL_PATH} not found. "
@@ -638,15 +635,10 @@ def run(no_display=False, no_drive=False):
     )
     smooth_state  = {}
     target_lock   = TargetLock()
-    motors        = None if no_drive else P.MotorDriver()
-    odometry      = P.Odometry(motors.read_encoder_deltas if motors else lambda: (0, 0))
     frame_idx     = 0
     frame_times   = []
-    t_last_tick   = time.monotonic()
-    latest_target = None
 
-    drive_msg = " (motors disabled)" if no_drive else ""
-    print(f"\nTracking — press Q to quit{drive_msg}\n")
+    print("\nTracking — press Q to quit (vision only, no drive)\n")
     print(f"{'Role':<10} {'ID':<8} {'Conf':>6}  {'Dist':>8}  {'Angle':>8}  {'Sim':>6}")
     print("-" * 58)
 
@@ -660,20 +652,7 @@ def run(no_display=False, no_drive=False):
             dets    = cap.get_detections()
             tracked = tracker.update_with_detections(dets)
             out, rows = annotate_frame(frame, tracked, smooth_state,
-                                       target_lock, time.monotonic())
-
-            target_row = next((r for r in rows if r[0] == "TARGET"), None)
-            latest_target = (target_row[3], target_row[4]) if target_row else None
-            obstacle_rows = [r for r in rows if r[0] == "OBSTACLE"]
-
-            now = time.monotonic()
-            if now - t_last_tick >= P.DT:
-                pos, heading = odometry.update()
-                obs = [(r[3], r[4]) for r in obstacle_rows]
-                v_left, v_right = P.tick(latest_target, pos, heading, obstacles=obs)
-                if motors is not None:
-                    motors.send(v_left, v_right)
-                t_last_tick = now
+                                       target_lock, time.monotonic(), draw=not no_display)
 
             t1 = time.time()
             frame_times.append(t1)
@@ -683,9 +662,10 @@ def run(no_display=False, no_drive=False):
                 (len(frame_times) - 1) / (frame_times[-1] - frame_times[0])
                 if len(frame_times) > 1 else 0.0
             )
-            cv2.putText(out,
-                        f"NPU  FPS:{fps_live:.1f}  {(t1-t0)*1000:.0f}ms  [{P.S.mode}]",
-                        (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
+            if not no_display:
+                cv2.putText(out,
+                            f"NPU  FPS:{fps_live:.1f}  {(t1-t0)*1000:.0f}ms",
+                            (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
 
             for role, label_id, conf, dist, angle, ref_sim in rows:
                 sim_str = f"{ref_sim:.2f}" if ref_sim is not None else " N/A"
@@ -699,8 +679,6 @@ def run(no_display=False, no_drive=False):
 
             frame_idx += 1
     finally:
-        if motors is not None:
-            motors.stop()
         cap.release()
         if not no_display:
             cv2.destroyAllWindows()
@@ -708,10 +686,9 @@ def run(no_display=False, no_drive=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="SSD person tracker on IMX500 NPU + ByteTrack → Pathfinding_algorithm"
+        description="SSD person tracker on IMX500 NPU + ByteTrack (vision-only preview)"
     )
     parser.add_argument("--no-display", dest="no_display", action="store_true")
-    parser.add_argument("--no-drive",   dest="no_drive",   action="store_true")
     args = parser.parse_args()
 
     if not args.no_display and not (os.environ.get("DISPLAY") or
@@ -719,4 +696,4 @@ if __name__ == "__main__":
         args.no_display = True
         print("No display detected — running headless.")
 
-    run(no_display=args.no_display, no_drive=args.no_drive)
+    run(no_display=args.no_display)
