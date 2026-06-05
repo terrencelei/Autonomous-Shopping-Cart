@@ -190,7 +190,7 @@ Each frame it reads the locked shopper's `(distance, angle)` and then:
    - **Out to the side** (`|last angle| > LOST_SIDE_ANGLE_DEG`) — it left the frame sideways → `Searcher` **spins in place toward that side**.
 
    The `Searcher` spins **forever** (never gives up), ramping its spin RPM if stalled, until a target reappears (then normal follow resumes) — `Mode: SEARCH`/`PURSUE`.
-5. **Obstacle hold.** Each tick, if any `OBSTACLE` detection is closer than the target (by at least `OBSTACLE_MARGIN_M`) and within `±OBSTACLE_BLOCK_DEG` of straight ahead, forward motion is paused (`S = 0`, `Mode: BLOCKED`) — the cart holds position (steering still keeps it aimed at the target) rather than driving into the obstacle. It resumes normal follow automatically once the obstacle clears the path. This is intentionally minimal: it only *stops*, it does not route around.
+5. **Obstacle hold.** Each tick, if any `OBSTACLE` detection is closer than the target (by at least `OBSTACLE_MARGIN_M`) and within `±OBSTACLE_BLOCK_DEG` of straight ahead, forward motion is paused (`S = 0`, `Mode: BLOCKED`) — the cart holds (steering still keeps it aimed) rather than driving into the obstacle. To ride through the noisy per-frame detections, the block is held for `OBSTACLE_HOLD_S` after the last in-path sighting (hysteresis), so a one-frame dropout doesn't make it lurch forward. It resumes once the obstacle stays clear. Intentionally minimal: it only *stops*, it does not route around.
 
 ### Return-home (spun-around recovery)
 
@@ -200,7 +200,7 @@ Each frame it reads the locked shopper's `(distance, angle)` and then:
 2. Drive straight to it (steering on the odometry bearing to stay on the line).
 3. Turn to the original heading.
 
-Detection: while the commanded wheels are ~0, any rotation the encoders register is accumulated; crossing `HOME_ROT_TRIGGER_DEG ± HOME_ROT_RANGE_DEG` (180° ± 30°) triggers the return. Tunables: `HOME_TURN_RPM`, `HOME_FWD_RPM`, `HOME_DRIVE_KP`, `HOME_ANGLE_TOL_DEG`, `HOME_DIST_TOL_M`. Because it's dead-reckoning-only, accuracy degrades with how far/long the cart has driven (encoder drift).
+Detection: each tick it accumulates the **measured yaw minus the commanded yaw** (a manual spin adds to the measured rotation but not the commanded, so it registers whether the cart is following, stopped, or searching; a normal commanded spin tracks and doesn't drift). Crossing `HOME_ROT_TRIGGER_DEG ± HOME_ROT_RANGE_DEG` (180° ± 30°) triggers the return. Tunables: `HOME_TURN_RPM`, `HOME_FWD_RPM`, `HOME_DRIVE_KP`, `HOME_ANGLE_TOL_DEG`, `HOME_DIST_TOL_M`. Because it's dead-reckoning-only, accuracy degrades with how far/long the cart has driven (encoder drift).
 
 **Slip rejection.** The odometry runs on slip-corrected encoder deltas (`deslip()`). A free-spinning wheel reads more ticks than the cart actually moved; if the two wheels diverge beyond the *commanded* differential by more than `SLIP_DIFF_TICKS_PER_S`, the faster wheel is slipping, so the odometry trusts the slower (gripping) wheel and rebuilds the faster one from it plus the commanded turn. Real commanded turns are preserved; only the un-commanded excess is dropped. (Encoder-only, so it handles *one* wheel slipping, not both — an IMU would be the robust fix.)
 
