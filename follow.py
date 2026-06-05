@@ -93,6 +93,7 @@ SEARCH_GRACE_S   = 0.3    # wait this long after losing the target before reacqu
 LOST_SIDE_ANGLE_DEG = 20.0  # last-seen |angle| above this → rotate-search; below → drive forward
 PURSUE_RPM       = 30.0   # forward wheel RPM when chasing the last-known position [calibrate]
 PURSUE_MAX_M     = 2.5    # give up after driving this far forward with no target
+PURSUE_ENABLED   = False  # disabled for now: when lost, always spin-search (no forward pursue)
 
 # Distance (displacement) controller
 THRESH_M       = HOLD_DIST   # standoff distance to hold (m)
@@ -967,7 +968,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                 mode_str = "LOST"
                 if (now - lost_since) >= SEARCH_GRACE_S:
                     if not searcher.active and not pursuer.active:
-                        if abs(last_angle_deg) <= LOST_SIDE_ANGLE_DEG:
+                        if PURSUE_ENABLED and abs(last_angle_deg) <= LOST_SIDE_ANGLE_DEG:
                             pursuer.start()                              # centred → chase forward
                         else:
                             searcher.start(STEER_SIGN * last_angle_deg)  # out the side → spin
