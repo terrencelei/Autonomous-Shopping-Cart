@@ -9,9 +9,9 @@ Usage:
 Color signature pipeline (clothing_color_profile):
   1. Convert full frame BGR -> HSV once per frame
   2. Tighten bounding box inward to reduce background bleed
-  3. Average H and S per row across the tightened box
+  3. Average H, S, and V per row across the tightened box
   4. Compress into N_PROFILE_CHUNKS chunks
-  5. Return (N_PROFILE_CHUNKS x 2) float32 array [H, S]
+  5. Return (N_PROFILE_CHUNKS x 3) float32 array [H, S, V]
 """
 
 import os
@@ -216,13 +216,32 @@ def normalize_track_id(tid):
 
 
 # =========================================================================== #
-# Color profile  (HSV — H and S only, V used for normalisation then discarded)
+# Color profile  (HSV)
 # =========================================================================== #
+
+HSV_PROFILE_WEIGHTS = np.array(
+    [
+        [0.0, 0.0, 0.0],
+        [0.03599716847797452, 0.0, 0.0],
+        [0.06550191041337934, 0.0, 0.31300900904113627],
+        [0.0013500984655572708, 0.011802473452389247, 0.0],
+        [0.1053674431199112, 0.0, 0.0],
+        [0.13543942845972307, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
+        [0.0, 0.06242875877799602, 0.0],
+        [0.01066458070574545, 0.1513563216855679, 0.0],
+        [0.0, 0.0009481352350054501, 0.10613467216561438],
+    ],
+    dtype=np.float32,
+)
+
 
 def clothing_color_profile(hsv_frame, xyxy):
     """
     Build a 1-D vertical color profile in HSV space.
-    Returns (N_PROFILE_CHUNKS, 2) float32 [H, S]. No normalisation.
+    Returns (N_PROFILE_CHUNKS, 3) float32 [H, S, V]. No normalisation.
     """
     img_h, img_w = hsv_frame.shape[:2]
     x1, y1, x2, y2 = xyxy
@@ -244,19 +263,19 @@ def clothing_color_profile(hsv_frame, xyxy):
     if ix2 <= ix1 or iy2 <= iy1:
         return None
 
-    # Per-row H and S averages
+    # Per-row H, S, and V averages
     inner  = hsv_frame[iy1:iy2, ix1:ix2].astype(np.float32)
     n_rows = inner.shape[0]
 
-    row_avgs = np.full((n_rows, 2), np.nan, dtype=np.float32)
+    row_avgs = np.full((n_rows, 3), np.nan, dtype=np.float32)
     for r in range(n_rows):
         row = inner[r]
         if len(row) >= MIN_ROW_PX:
-            row_avgs[r] = row[:, :2].mean(axis=0)   # [H, S]
+            row_avgs[r] = row.mean(axis=0)   # [H, S, V]
 
     # Compress into N_PROFILE_CHUNKS
     chunk_size = n_rows / N_PROFILE_CHUNKS
-    profile    = np.full((N_PROFILE_CHUNKS, 2), np.nan, dtype=np.float32)
+    profile    = np.full((N_PROFILE_CHUNKS, 3), np.nan, dtype=np.float32)
     for c in range(N_PROFILE_CHUNKS):
         r_start = int(round(c * chunk_size))
         r_end   = int(round((c + 1) * chunk_size))
@@ -285,44 +304,45 @@ def clothing_color_profile(hsv_frame, xyxy):
 
 def profile_similarity(a, b):
     """
-    Weighted similarity between two (N_PROFILE_CHUNKS, 2) HSV profiles [H, S].
+    Weighted similarity between two (N_PROFILE_CHUNKS, 3) HSV profiles [H, S, V].
 
-    Weights calibrated from bounding box measurements at 1.5-3.9m.
+    Weights are learned per HSV channel and body chunk by vision_weight_trainer.py.
     Returns float in [0, 1], or None if either profile is None.
     """
     if a is None or b is None:
         return None
 
-    # Empirically calibrated weights (see landmark fractions in comments)
-    # chunks 0-1: head, 2: neck/shoulder, 3-5: upper/mid torso,
-    # 6: waist, 7-9: upper legs, 10: lower legs, 11: feet
-    weights = np.array(
-        [0.05, 0.05, 0.30, 3.50, 3.50, 3.50, 2.00, 3.00, 3.00, 3.00, 0.80, 0.02],
-        dtype=np.float32,
-    )
-    if len(weights) != N_PROFILE_CHUNKS:
-        weights = np.interp(
-            np.linspace(0, 1, N_PROFILE_CHUNKS),
-            np.linspace(0, 1, 12),
-            weights,
-        ).astype(np.float32)
+    a = np.asarray(a, dtype=np.float32)
+    b = np.asarray(b, dtype=np.float32)
+    if a.shape[1] < 3 or b.shape[1] < 3:
+        return None
+
+    weights = HSV_PROFILE_WEIGHTS
+    if weights.shape[0] != N_PROFILE_CHUNKS:
+        resized = np.empty((N_PROFILE_CHUNKS, 3), dtype=np.float32)
+        for channel in range(3):
+            resized[:, channel] = np.interp(
+                np.linspace(0, 1, N_PROFILE_CHUNKS),
+                np.linspace(0, 1, weights.shape[0]),
+                weights[:, channel],
+            )
+        weights = resized
 
     diff_h = np.abs(a[:, 0] - b[:, 0])
     diff_h = np.minimum(diff_h, 180.0 - diff_h)   # hue wrap
     diff_s = np.abs(a[:, 1] - b[:, 1])
+    diff_v = np.abs(a[:, 2] - b[:, 2])
 
     err_h = np.clip(diff_h / 45.0, 0.0, 1.0) ** 1.5
     err_s = np.clip(diff_s / 80.0, 0.0, 1.0) ** 1.5
+    err_v = np.clip(diff_v / 80.0, 0.0, 1.0) ** 1.5
 
-    # Per-chunk hue/sat blend: torso (3-5) and legs (7-9) weight hue at 90%,
-    # other chunks use 70% — saturation matters less in discriminating chunks
-    hs_blend = np.full(N_PROFILE_CHUNKS, 0.70, dtype=np.float32)
-    hs_blend[3:6] = 0.90   # upper/mid torso
-    hs_blend[7:10] = 0.90  # upper legs
+    err = np.column_stack((err_h, err_s, err_v))
+    total_weight = float(weights.sum())
+    if total_weight <= 0.0:
+        return None
 
-    err = err_h * hs_blend + err_s * (1.0 - hs_blend)
-
-    weighted_err = np.dot(err, weights) / weights.sum()
+    weighted_err = float(np.sum(err * weights) / total_weight)
     return float(np.clip(1.0 - weighted_err, 0.0, 1.0))
 
 
