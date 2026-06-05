@@ -70,7 +70,7 @@ VISION_WARMUP_S = 10.0   # run vision (no drive) this long at startup so colour 
 # Proven breakaway kick (see memory: cart-drive-calibration)
 KICK_RPM      = 50.0  # wheel RPM burst to overcome static friction
 KICK_TICKS    = 30    # release the kick once this many encoder ticks accumulate
-KICK_TIMEOUT_S = 0.2  # if still stalled after this long, ramp the kick up (don't give up)
+KICK_TIMEOUT_S = 0.5  # if still stalled after this long, ramp the kick up (don't give up)
 KICK_RAMP_STEP = 10.0 # wheel RPM added to the kick each KICK_TIMEOUT_S it stays stalled
 TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop fallback
 
@@ -79,7 +79,7 @@ SPIN_KICK_RPM     = 35.0    # breakaway burst for a point turn (half the forward
 TURN_RPM          = 2.0    # steady wheel RPM during the turn after the kick
 ANGULAR_INERTIA   = 0.0    # s — yaw coast factor; drift = (w0-w1)*inertia (seeded by 360° calib)
 INERTIA_LEARN_K   = 0.05   # online ANGULAR_INERTIA learn rate from each spin's leftover angle [calibrate]
-THETA_THRESH_DEG  = 8.0    # follow loop: re-centre with a spin once |angle| exceeds this
+THETA_THRESH_DEG  = 6.0    # follow loop: re-centre with a spin once |angle| exceeds this
 SPIN_DEADBAND_DEG = 0.5    # spin: ignore turn requests smaller than this (no-op)
 SPIN_TURN_TIMEOUT_S = 0.5  # max extra time for the steady-turn phase (exit a stuck/loaded turn)
 
@@ -131,7 +131,7 @@ STEER_SIGN = +1   # angle→turn polarity for BOTH steering and re-centre spins.
                   # Flip to -1 if the cart corrects the WRONG way.
 
 # Limits
-MAX_RPM = 100.0  # wheel RPM cap (= cart_motor.ino's ~100 RPM full-PWM point)
+MAX_RPM = 800.0  # wheel RPM cap (= cart_motor.ino's ~100 RPM full-PWM point)
 
 
 # =============================================================================
@@ -871,29 +871,6 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     _warmup_vision(cap, tracker, smooth_state, target_lock, Y,
                    seconds=VISION_WARMUP_S, no_display=no_display)
 
-    if drive and motors.has_serial and countdown > 0:
-        print(f"\n*** Cart will spin to calibrate, then follow — starting in {countdown}s ***")
-        for k in range(countdown, 0, -1):
-            print(f"  {k}...")
-            time.sleep(1)
-        print("  GO!\n")
-
-    # Then measure angular inertia with a full 360° spin.
-    ANGULAR_INERTIA = calibrate_angular_inertia(motors)
-    motors.flush()
-    kick = Kick()
-    spinner = Spinner()
-    searcher = Searcher()
-    pursuer = Pursuer()
-    odom = Odometry()          # dead-reckoned pose; origin = the start pose ('home')
-    returnhome = ReturnHome()
-    unexpected_yaw = 0.0       # rotation seen by the encoders while commanding a full stop
-    prev_S = 0.0
-    last_angle_deg = 0.0       # last angle the target was seen at (which way it left)
-    lost_since = None          # when the target was first lost (for the search grace period)
-    spin_start_angle = 0.0     # target angle when the current centring spin began
-    measure_residual = False   # True for one frame after a spin, to refine ANGULAR_INERTIA
-    obstacle_blocked_until = 0.0  # hysteresis: hold the obstacle block until this time
     start = time.monotonic()
     prev_t = start
     last_log = 0.0
