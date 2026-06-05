@@ -24,8 +24,13 @@ import math
 import os
 import sys
 import time
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+DEFAULT_RPK_MODEL_PATH = Path(
+    "/usr/share/imx500-models/imx500_network_yolo11n_pp.rpk"
+)
 
 # =============================================================================
 # HARDWARE / DIMENSIONAL SPECS  (measured cart geometry —
@@ -839,12 +844,13 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     except Exception as e:
         raise SystemExit(f"ERROR: could not import vision/yolo_detect.py: {e}")
 
-    if not Y.RPK_MODEL_PATH.exists():
+    model_path = getattr(Y, "RPK_MODEL_PATH", DEFAULT_RPK_MODEL_PATH)
+    if not model_path.exists():
         raise SystemExit(
-            f"ERROR: {Y.RPK_MODEL_PATH} not found. Install with: sudo apt install imx500-models"
+            f"ERROR: {model_path} not found. Install imx500-models or copy the YOLO11n RPK there"
         )
     try:
-        cap = Y.IMX500Capture(model_path=Y.RPK_MODEL_PATH, width=CAM_W, height=CAM_H, fps=CAM_FPS)
+        cap = Y.IMX500Capture(model_path=model_path, width=CAM_W, height=CAM_H, fps=CAM_FPS)
     except RuntimeError as e:
         raise SystemExit(f"ERROR: could not open IMX500 camera: {e}")
 
