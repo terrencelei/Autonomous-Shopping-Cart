@@ -73,12 +73,14 @@ DIST_EMA_ALPHA  = 0.4
 ANGLE_EMA_ALPHA = 0.4
 
 TARGET_LOST_TIMEOUT_S           = 0.75
+TARGET_SWITCH_MARGIN            = 2.0
+TARGET_SWITCH_FRAMES            = 12
 TARGET_REID_MAX_DIST_DELTA_M    = 1.0
 TARGET_REID_MAX_ANGLE_DELTA_DEG = 12.0
 TARGET_COLOR_EMA_ALPHA          = 0.25
 TARGET_COLOR_REID_MIN_SCORE     = 0.80
 TARGET_COLOR_SWITCH_MIN_SCORE   = 0.80
-TARGET_COLOR_RELOCK_INTERVAL_S  = 1.0
+TARGET_COLOR_SWITCH_PENALTY     = 1.5
 
 SIM_SMOOTH_WINDOW  = 10
 ACCUM_MAX_DURATION_S = 10.0
@@ -355,9 +357,7 @@ class TargetLock:
     fixed reference_profile. All subsequent comparisons use this reference —
     it is never modified after commitment.
 
-    Once per second, the active track is relocked to the detection with the
-    highest similarity to the fixed reference profile. color_profile is an
-    EMA-updated live profile used only for swatch display.
+    color_profile is an EMA-updated live profile used only for swatch display.
     """
 
     def __init__(self):
@@ -367,13 +367,16 @@ class TargetLock:
         self.last_angle              = None
         self.reference_profile       = None
         self.color_profile           = None
+        self.switch_candidate_id     = None
+        self.switch_candidate_frames = 0
         self._accum_id               = None
         self._accum_profiles         = []
         self._accum_start            = None
-        self._last_relock_check      = 0.0
 
     def choose(self, measurements, now):
         if not measurements:
+            self.switch_candidate_id     = None
+            self.switch_candidate_frames = 0
             if self.locked_id is not None and now - self.last_seen > TARGET_LOST_TIMEOUT_S:
                 self.locked_id = None
             return None
@@ -423,10 +426,6 @@ class TargetLock:
                 self.locked_id = None
             return None
 
-        relock = self._periodic_relock(tracked, now)
-        if relock is not None:
-            return relock["index"]
-
         current = next((m for m in tracked if m["track_id"] == self.locked_id), None)
 
         if current is None:
@@ -446,6 +445,28 @@ class TargetLock:
             return None
 
         self._remember(current, now)
+
+        for candidate in tracked:
+            if candidate["track_id"] == self.locked_id:
+                continue
+            c_sim = candidate["ref_similarity"] or 0.0
+            t_sim = current["ref_similarity"]   or 0.0
+            if (c_sim - t_sim > 0.15 and
+                    c_sim >= TARGET_COLOR_SWITCH_MIN_SCORE and
+                    candidate["score"] + TARGET_SWITCH_MARGIN < current["score"]):
+                if candidate["track_id"] == self.switch_candidate_id:
+                    self.switch_candidate_frames += 1
+                else:
+                    self.switch_candidate_id     = candidate["track_id"]
+                    self.switch_candidate_frames = 1
+                if self.switch_candidate_frames >= TARGET_SWITCH_FRAMES:
+                    self._lock(candidate["track_id"], now, candidate)
+                    return candidate["index"]
+                break
+        else:
+            self.switch_candidate_id     = None
+            self.switch_candidate_frames = 0
+
         return current["index"]
 
     def _commit_reference(self):
@@ -455,6 +476,8 @@ class TargetLock:
             self.reference_profile = avg
             self.color_profile     = avg.copy()
         self.locked_id               = self._accum_id
+        self.switch_candidate_id     = None
+        self.switch_candidate_frames = 0
 
     def _remember(self, measurement, now):
         self.last_seen  = now
@@ -488,29 +511,15 @@ class TargetLock:
             self.last_dist  = measurement["dist"]
             self.last_angle = measurement["angle"]
             self._update_profile(measurement)
+        self.switch_candidate_id     = None
+        self.switch_candidate_frames = 0
 
-    def _periodic_relock(self, measurements, now):
-        if self.reference_profile is None:
-            return None
-        if now - self._last_relock_check < TARGET_COLOR_RELOCK_INTERVAL_S:
-            return None
-        self._last_relock_check = now
-
-        candidates = [
-            m for m in measurements
-            if m.get("ref_similarity") is not None and
-            m["ref_similarity"] >= TARGET_COLOR_SWITCH_MIN_SCORE
-        ]
-        if not candidates:
-            return None
-
-        best = max(candidates, key=lambda m: m["ref_similarity"])
-        if best["track_id"] == self.locked_id:
-            self._remember(best, now)
-            return best
-
-        self._lock(best["track_id"], now, best)
-        return best
+    def _target_score(self, measurement):
+        score       = measurement["score"]
+        color_score = measurement.get("ref_similarity")
+        if self.reference_profile is not None and color_score is not None:
+            score += TARGET_COLOR_SWITCH_PENALTY * (1.0 - color_score)
+        return score
 
     def _update_profile(self, measurement):
         new_prof = measurement.get("color_profile")
