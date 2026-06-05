@@ -82,12 +82,12 @@ SPIN_TURN_TIMEOUT_S = 0.5  # max extra time for the steady-turn phase (exit a st
 # side (|angle| > LOST_SIDE_ANGLE_DEG) the cart rotate-SEARCHes toward it;
 # otherwise it was lost straight ahead (too far) so the cart drives forward
 # (PURSUE) to its last-known position. Both kick first to beat stall.
-SEARCH_RPM       = 8.0    # steady wheel RPM of the search sweep              [calibrate]
+SEARCH_RPM       = 4.0    # steady wheel RPM of the search sweep              [calibrate]
 SEARCH_MAX_DEG   = 360.0  # give up after sweeping this much with no target
 SEARCH_GRACE_S   = 0.3    # wait this long after losing the target before reacquiring
 LOST_SIDE_ANGLE_DEG = 20.0  # last-seen |angle| above this → rotate-search; below → drive forward
 PURSUE_RPM       = 30.0   # forward wheel RPM when chasing the last-known position [calibrate]
-PURSUE_MAX_M     = 5.0    # give up after driving this far forward with no target
+PURSUE_MAX_M     = 2.5    # give up after driving this far forward with no target
 
 # Distance (displacement) controller
 THRESH_M       = HOLD_DIST   # standoff distance to hold (m)
