@@ -58,7 +58,6 @@ MOTOR_BAUD = 115200
 # Motion limits / loop rate
 DT        = 0.02                  # control loop period (s)
 HOLD_DIST = 2.0                   # target hold distance (m)
-CAMERA_RETRY_SLEEP_S = 0.25       # wait/retry instead of exiting if boot camera read is late
 
 # =============================================================================
 # CALIBRATION  (speeds are WHEEL RPM unless noted; angles in radians, +CCW/left)
@@ -821,9 +820,7 @@ def _warmup_vision(cap, tracker, smooth_state, target_lock, Y, seconds, no_displ
     while time.monotonic() - t0 < seconds:
         ret, frame = cap.read()
         if not ret:
-            print("Camera frame not ready during warmup; retrying...")
-            time.sleep(CAMERA_RETRY_SLEEP_S)
-            continue
+            break
         dets = cap.get_detections()
         tracked = tracker.update_with_detections(dets)
         out, _rows = Y.annotate_frame(frame, tracked, smooth_state, target_lock, time.monotonic())
@@ -905,9 +902,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
         while True:
             ret, frame = cap.read()
             if not ret:
-                print("Camera frame not ready; retrying...")
-                time.sleep(CAMERA_RETRY_SLEEP_S)
-                continue
+                break
             now = time.monotonic()
             t = now - start
             if duration > 0 and t >= duration:

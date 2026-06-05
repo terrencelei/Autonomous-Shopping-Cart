@@ -23,10 +23,9 @@ After=multi-user.target
 Type=simple
 User=terrencelei
 WorkingDirectory=/home/terrencelei/Autonomous-Shopping-Cart
-ExecStartPre=/bin/sleep 10
 ExecStart=/usr/bin/python3 -u follow.py --no-display
-Restart=always
-RestartSec=5
+Restart=on-failure
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
