@@ -302,7 +302,14 @@ def profile_similarity(a, b):
 
     err_h = np.clip(diff_h / 45.0, 0.0, 1.0) ** 1.5
     err_s = np.clip(diff_s / 80.0, 0.0, 1.0) ** 1.5
-    err   = err_h * 0.70 + err_s * 0.30
+
+    # Per-chunk hue/sat blend: torso (3-5) and legs (7-9) weight hue at 90%,
+    # other chunks use 70% — saturation matters less in discriminating chunks
+    hs_blend = np.full(N_PROFILE_CHUNKS, 0.70, dtype=np.float32)
+    hs_blend[3:6] = 0.90   # upper/mid torso
+    hs_blend[7:10] = 0.90  # upper legs
+
+    err = err_h * hs_blend + err_s * (1.0 - hs_blend)
 
     weighted_err = np.dot(err, weights) / weights.sum()
     return float(np.clip(1.0 - weighted_err, 0.0, 1.0))
