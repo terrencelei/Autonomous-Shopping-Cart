@@ -65,7 +65,7 @@ VISION_WARMUP_S = 10.0   # run vision (no drive) this long at startup so colour 
 # Proven breakaway kick (see memory: cart-drive-calibration)
 KICK_RPM      = 50.0  # wheel RPM burst to overcome static friction
 KICK_TICKS    = 30    # release the kick once this many encoder ticks accumulate
-KICK_TIMEOUT_S = 1.0  # if still stalled after this long, ramp the kick up (don't give up)
+KICK_TIMEOUT_S = 0.2  # if still stalled after this long, ramp the kick up (don't give up)
 KICK_RAMP_STEP = 10.0 # wheel RPM added to the kick each KICK_TIMEOUT_S it stays stalled
 TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop fallback
 
@@ -73,7 +73,7 @@ TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop 
 SPIN_KICK_RPM     = 35.0    # breakaway burst for a point turn (half the forward KICK_RPM)
 TURN_RPM          = 2.0    # steady wheel RPM during the turn after the kick
 ANGULAR_INERTIA   = 0.0    # s — yaw coast factor; drift = (w0-w1)*inertia   [calibrate]
-THETA_THRESH_DEG  = 4.0    # follow loop: re-centre with spin() once |angle| exceeds this
+THETA_THRESH_DEG  = 8.0    # follow loop: re-centre with spin() once |angle| exceeds this
 SPIN_DEADBAND_DEG = 0.5    # spin: ignore turn requests smaller than this (no-op)
 SPIN_TURN_TIMEOUT_S = 0.5  # max extra time for the steady-turn phase (exit a stuck/loaded turn)
 
@@ -335,14 +335,13 @@ class Spinner:
 
 
 class Searcher:
-    """Non-blocking 'look for the lost target' rotation.
+    """Spin in place toward the last-seen side until the target reappears.
 
-    ``start(direction)`` begins a sweep toward the last-seen side; ``update``
-    is called once per camera frame and returns the wheel command, or ``None``
-    once it gives up (swept SEARCH_MAX_DEG with no target). Like
-    the Spinner it begins with a breakaway kick (SPIN_KICK_RPM, released after
-    KICK_TICKS) so it can overcome stall, then sweeps steadily at SEARCH_RPM.
-    The caller cancels it the moment a target reappears.
+    ``start(direction)`` picks the spin direction; ``update`` is called once per
+    camera frame and returns the point-turn wheel command. It spins **forever**
+    (never gives up) — the caller cancels it the instant a target reappears.
+    Starts at SPIN_KICK_RPM and ramps up by KICK_RAMP_STEP each KICK_TIMEOUT_S
+    it's stalled (up to MAX_RPM) so it reliably overcomes stall.
     """
 
     def __init__(self):
@@ -358,32 +357,25 @@ class Searcher:
     def start(self, direction):
         self._active = True
         self._dir = 1.0 if direction >= 0 else -1.0   # +CCW / left
-        self._phase = "kick"
-        self._kick_ticks = 0
-        self._swept = 0.0
-        self._t0 = time.monotonic()
-        _trace(f"search start dir={'+L' if self._dir > 0 else '-R'}  kick…")
+        self._rpm = SPIN_KICK_RPM
+        self._yaw = 0.0
+        self._yaw_at_ramp = 0.0
+        self._t_ramp = time.monotonic()
+        _trace(f"search start dir={'+L' if self._dir > 0 else '-R'} — spinning")
 
     def update(self, d_l, d_r):
-        """Advance one tick; return (l_rpm, r_rpm), or None once it gives up."""
+        """Advance one tick; return (l_rpm, r_rpm) for the in-place spin."""
         if not self._active:
             return None
+        self._yaw += abs(_ticks_to_yaw(d_l, d_r))
         now = time.monotonic()
-        self._swept += abs(_ticks_to_yaw(d_l, d_r))
-
-        if self._phase == "kick":
-            self._kick_ticks += abs(d_l) + abs(d_r)
-            cmd_rpm = SPIN_KICK_RPM
-            if self._kick_ticks >= KICK_TICKS or (now - self._t0) >= KICK_TIMEOUT_S:
-                self._phase = "sweep"
-        else:
-            cmd_rpm = SEARCH_RPM
-
-        if self._swept >= math.radians(SEARCH_MAX_DEG):
-            self._active = False
-            _trace("search gave up (swept SEARCH_MAX_DEG)")
-            return None
-        return (-self._dir * cmd_rpm, +self._dir * cmd_rpm)
+        if now - self._t_ramp >= KICK_TIMEOUT_S:
+            if self._yaw - self._yaw_at_ramp < math.radians(5.0):   # barely turned → stalled
+                self._rpm = min(self._rpm + KICK_RAMP_STEP, MAX_RPM)
+                _trace(f"search stalled — ramping spin to {self._rpm:.0f} rpm")
+            self._yaw_at_ramp = self._yaw
+            self._t_ramp = now
+        return (-self._dir * self._rpm, +self._dir * self._rpm)
 
 
 class Pursuer:
@@ -881,7 +873,6 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     ANGULAR_INERTIA = calibrate_angular_inertia(motors)
     motors.flush()
     kick = Kick()
-    spinner = Spinner()
     searcher = Searcher()
     pursuer = Pursuer()
     odom = Odometry()          # dead-reckoned pose; origin = the start pose ('home')
@@ -889,8 +880,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     unexpected_yaw = 0.0       # rotation seen by the encoders while commanding a full stop
     prev_S = 0.0
     last_angle_deg = 0.0       # last angle the target was seen at (which way it left)
-    lost_since = None          # when the target was first lost (for the reacquire grace period)
-    reacquire_gave_up = False  # True once a search/pursue ran its limit with no target
+    lost_since = None          # when the target was first lost (for the search grace period)
     start = time.monotonic()
     prev_t = start
     last_log = 0.0
@@ -938,7 +928,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                 if not returnhome.active:
                     returnhome.start(odom)
                     unexpected_yaw = 0.0
-                ctrl.target_lost(); kick.cancel(); spinner.cancel()
+                ctrl.target_lost(); kick.cancel()
                 searcher.cancel(); pursuer.cancel(); prev_S = 0.0
                 x = angle_deg = None
                 cmd = returnhome.update(odom, d_l, d_r)
@@ -950,11 +940,12 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                     l_rpm, r_rpm = cmd
                     mode_str = "RETURN"
             elif target_row is None:
-                # Target lost: after a short grace period, rotate toward where it
-                # was last seen (kick first to beat stall) until it reappears.
-                ctrl.target_lost()          # reset forward state (don't send 0 — search drives)
+                # Target lost. After a short grace period reacquire: if it was last
+                # seen near centre it just walked too far → PURSUE forward; if still
+                # not found, spin-SEARCH. If it was last seen out to the side it left
+                # the frame sideways → spin-SEARCH straight away. SEARCH spins forever.
+                ctrl.target_lost()          # reset forward state (don't send 0 — reacquire drives)
                 kick.cancel()
-                spinner.cancel()
                 prev_S = 0.0
                 x = angle_deg = None
                 if lost_since is None:
@@ -962,32 +953,29 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
 
                 l_rpm = r_rpm = 0.0
                 mode_str = "LOST"
-                # After the grace period, run a reacquire maneuver until it
-                # gives up: rotate toward the last-seen side if it left the edge,
-                # else drive forward to its last-known position (lost too far ahead).
-                if not reacquire_gave_up and (now - lost_since) >= SEARCH_GRACE_S:
+                if (now - lost_since) >= SEARCH_GRACE_S:
                     if not searcher.active and not pursuer.active:
-                        if abs(last_angle_deg) > LOST_SIDE_ANGLE_DEG:
-                            searcher.start(STEER_SIGN * last_angle_deg)
+                        if abs(last_angle_deg) <= LOST_SIDE_ANGLE_DEG:
+                            pursuer.start()                              # centred → chase forward
                         else:
-                            pursuer.start()
-                    if searcher.active:
-                        cmd = searcher.update(d_l, d_r)
-                        mode_str = "SEARCH"
-                    else:
+                            searcher.start(STEER_SIGN * last_angle_deg)  # out the side → spin
+                    if pursuer.active:
                         cmd = pursuer.update(d_l, d_r)
-                        mode_str = "PURSUE"
-                    if cmd is None:          # maneuver swept/covered its limit → give up
-                        reacquire_gave_up = True
-                        mode_str = "LOST"
-                    else:
-                        l_rpm, r_rpm = cmd
+                        if cmd is None:                  # chased PURSUE_MAX_M, still lost → spin
+                            searcher.start(STEER_SIGN * last_angle_deg)
+                            l_rpm, r_rpm = searcher.update(d_l, d_r)
+                            mode_str = "SEARCH"
+                        else:
+                            l_rpm, r_rpm = cmd
+                            mode_str = "PURSUE"
+                    else:                                # searcher active — spins forever
+                        l_rpm, r_rpm = searcher.update(d_l, d_r)
+                        mode_str = "SEARCH"
             else:
                 x = target_row[3]          # calibrated distance (m)
                 angle_deg = target_row[4]  # calibrated angle (deg, +right)
                 last_angle_deg = angle_deg # remember which way it is, in case it leaves
                 lost_since = None          # reacquired → reset reacquire state
-                reacquire_gave_up = False
                 searcher.cancel()
                 pursuer.cancel()
 
@@ -998,41 +986,28 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                     for obs in rows if obs[0] == "OBSTACLE"
                 )
 
-                # Engage a non-blocking re-centre spin when too far off-centre.
-                if not spinner.active and abs(angle_deg) > THETA_THRESH_DEG:
-                    spinner.start(math.radians(STEER_SIGN * angle_deg))
+                # Follow AND steer at the same time: the cart drives forward while
+                # turning toward the target (no in-place spin — spinning would let
+                # the shopper get further away). Steering is the mix_wheels rpm_diff.
+                S, rpm_diff = ctrl.step(x, angle_deg, dt)
+                if blocked:                # obstacle in the way — hold, don't advance
+                    S = 0.0
+                    ctrl.S = 0.0           # stay put (steering still keeps us aimed)
                     kick.cancel()
-                    ctrl.after_spin()
-                    prev_S = 0.0
-
-                if spinner.active:
-                    cmd = spinner.update(d_l, d_r)   # one turn tick — never blocks
-                    if cmd is None:                  # turn finished this tick
-                        l_rpm = r_rpm = 0.0
-                        ctrl.after_spin()
-                    else:
-                        l_rpm, r_rpm = cmd
-                    mode_str = "SPIN"
+                    mode_str = "BLOCKED"
+                elif S == 0.0:             # holding station (too close) — no kick
+                    kick.cancel()
+                    mode_str = "STOP"
                 else:
-                    S, rpm_diff = ctrl.step(x, angle_deg, dt)
-                    if blocked:            # obstacle in the way — hold, don't advance
-                        S = 0.0
-                        ctrl.S = 0.0       # stay put (steering still keeps us aimed)
-                        kick.cancel()
-                        mode_str = "BLOCKED"
-                    elif S == 0.0:         # holding station (too close) — no kick
-                        kick.cancel()
-                        mode_str = "STOP"
-                    else:
-                        if prev_S == 0.0:  # departing from rest
-                            kick.arm()
-                        kick.update(d_l, d_r)
-                        if kick.active:    # floor the speed at the (ramping) kick level
-                            S = math.copysign(max(abs(S), kick.rpm), S)
-                            ctrl.S = S      # keep the PI integrator consistent
-                        mode_str = "KICK" if kick.active else "FOLLOW"
-                    prev_S = S
-                    l_rpm, r_rpm = mix_wheels(S, rpm_diff)
+                    if prev_S == 0.0:      # departing from rest
+                        kick.arm()
+                    kick.update(d_l, d_r)
+                    if kick.active:        # floor the speed at the (ramping) kick level
+                        S = math.copysign(max(abs(S), kick.rpm), S)
+                        ctrl.S = S          # keep the PI integrator consistent
+                    mode_str = "KICK" if kick.active else "FOLLOW"
+                prev_S = S
+                l_rpm, r_rpm = mix_wheels(S, rpm_diff)
 
             cmd_l_rpm, cmd_r_rpm = l_rpm, r_rpm
             motors.send_rpm(l_rpm, r_rpm)
