@@ -369,31 +369,35 @@ class Searcher:
         self._yaw = 0.0
         self._yaw_at_ramp = 0.0
         self._t_ramp = time.monotonic()
-        self._completed_first_360 = False
+        self._slowed_once = False
         _trace(f"search start dir={'+L' if self._dir > 0 else '-R'} — spinning")
 
     def update(self, d_l, d_r):
-        """Spin-search. After one full 360 with no target, reverse direction
-        and slow to half speed."""
+        """Spin-search. Every 360° with no target, reverse direction.
+        Only slow down on the first 360° reversal. Stall recovery always runs."""
         if not self._active:
             return None
 
         self._yaw += abs(_ticks_to_yaw(d_l, d_r))
         now = time.monotonic()
 
-        # After one full rotation, reverse direction and slow down by half.
-        if not self._completed_first_360 and self._yaw >= math.radians(360.0):
-            self._completed_first_360 = True
+        # Every 360°, reverse direction.
+        if self._yaw >= math.radians(360.0):
             self._dir *= -1.0
-            self._rpm = max(self._rpm * 0.5, 1.0)
             self._yaw = 0.0
             self._yaw_at_ramp = 0.0
             self._t_ramp = now
-            _trace(f"search completed 360° — reversing and slowing to {self._rpm:.1f} rpm")
 
-        # Stall recovery still works, but only before the 360° reversal.
-        # After reversal, keep the slower search speed instead of ramping back up.
-        if not self._completed_first_360 and now - self._t_ramp >= KICK_TIMEOUT_S:
+            # Only slow down the first time.
+            if not self._slowed_once:
+                self._rpm = max(self._rpm * 0.5, 1.0)
+                self._slowed_once = True
+                _trace(f"search completed 360° — reversing and slowing to {self._rpm:.1f} rpm")
+            else:
+                _trace(f"search completed 360° — reversing at {self._rpm:.1f} rpm")
+
+        # Stall recovery ALWAYS runs.
+        if now - self._t_ramp >= KICK_TIMEOUT_S:
             if self._yaw - self._yaw_at_ramp < math.radians(5.0):
                 self._rpm = min(self._rpm + KICK_RAMP_STEP, MAX_RPM)
                 _trace(f"search stalled — ramping spin to {self._rpm:.0f} rpm")
