@@ -699,21 +699,31 @@ def calibrate_angular_inertia(motors, spin_revs=1.0, coast_window_s=1.5):
         yaws.append(_ticks_to_yaw(cum_dl, cum_dr))
         phases.append(phase)
 
-    # ── phase 1: spin one full revolution (360°) at SPIN_KICK_RPM ──────────────
-    motors.send_rpm(-SPIN_KICK_RPM, +SPIN_KICK_RPM)
+    # ── phase 1: spin one full revolution (360°), ramping the kick if stalled ──
+    # Same ramp-on-stall as the forward Kick: start at SPIN_KICK_RPM and, each
+    # KICK_TIMEOUT_S the cart barely turns, bump the spin command by
+    # KICK_RAMP_STEP (up to MAX_RPM) until it breaks free.
+    spin_rpm = SPIN_KICK_RPM
+    motors.send_rpm(-spin_rpm, +spin_rpm)
     target_yaw = spin_revs * 2.0 * math.pi
-    omega = _rpm_to_yaw(SPIN_KICK_RPM)                 # expected yaw rate (rad/s)
-    timeout_s = (target_yaw / omega * 2.0 + 3.0) if omega > 0 else 30.0
-    t0 = time.monotonic()
+    t_ramp = time.monotonic()
+    yaw_at_ramp = 0.0
     while abs(_ticks_to_yaw(cum_dl, cum_dr)) < target_yaw:
         time.sleep(0.005)
         dl, dr = motors.read_deltas()
         _record(dl, dr, "drive")
-        if time.monotonic() - t0 > timeout_s:
-            print(f"  WARNING: cart did not complete {math.degrees(target_yaw):.0f}° "
-                  "— ANGULAR_INERTIA stays 0.0")
-            motors.stop()
-            return ANGULAR_INERTIA
+        if time.monotonic() - t_ramp >= KICK_TIMEOUT_S:
+            yaw_now = abs(_ticks_to_yaw(cum_dl, cum_dr))
+            if yaw_now - yaw_at_ramp < math.radians(5.0):   # barely turned → stalled
+                if spin_rpm >= MAX_RPM:
+                    print("  WARNING: cart won't spin even at MAX_RPM — ANGULAR_INERTIA stays 0.0")
+                    motors.stop()
+                    return ANGULAR_INERTIA
+                spin_rpm = min(spin_rpm + KICK_RAMP_STEP, MAX_RPM)
+                motors.send_rpm(-spin_rpm, +spin_rpm)
+                print(f"  spin stalled — ramping kick to {spin_rpm:.0f} rpm")
+            yaw_at_ramp = yaw_now
+            t_ramp = time.monotonic()
 
     # ── phase 2: hard stop ─────────────────────────────────────────────────────
     motors.stop()
@@ -729,12 +739,12 @@ def calibrate_angular_inertia(motors, spin_revs=1.0, coast_window_s=1.5):
         coast_dl += dl
         coast_dr += dr
 
-    # ── phase 4: compute ───────────────────────────────────────────────────────
+    # ── phase 4: compute (use the actual final spin RPM, post-ramp) ────────────
     overshoot_rad = abs(_ticks_to_yaw(coast_dl, coast_dr))
-    omega_kick    = _rpm_to_yaw(SPIN_KICK_RPM)
+    omega_kick    = _rpm_to_yaw(spin_rpm)
     result        = overshoot_rad / omega_kick if omega_kick > 0 else 0.0
 
-    print(f"  overshoot {math.degrees(overshoot_rad):.2f}°  "
+    print(f"  spin {spin_rpm:.0f} rpm  overshoot {math.degrees(overshoot_rad):.2f}°  "
           f"omega {omega_kick:.3f} rad/s  → ANGULAR_INERTIA = {result:.5f} s")
 
     ANGULAR_INERTIA = result
