@@ -364,25 +364,42 @@ class Searcher:
 
     def start(self, direction):
         self._active = True
-        self._dir = 1.0 if direction >= 0 else -1.0   # +CCW / left
+        self._dir = 1.0 if direction >= 0 else -1.0
         self._rpm = SPIN_KICK_RPM
         self._yaw = 0.0
         self._yaw_at_ramp = 0.0
         self._t_ramp = time.monotonic()
+        self._completed_first_360 = False
         _trace(f"search start dir={'+L' if self._dir > 0 else '-R'} — spinning")
 
     def update(self, d_l, d_r):
-        """Advance one tick; return (l_rpm, r_rpm) for the in-place spin."""
+        """Spin-search. After one full 360 with no target, reverse direction
+        and slow to half speed."""
         if not self._active:
             return None
+
         self._yaw += abs(_ticks_to_yaw(d_l, d_r))
         now = time.monotonic()
-        if now - self._t_ramp >= KICK_TIMEOUT_S:
-            if self._yaw - self._yaw_at_ramp < math.radians(5.0):   # barely turned → stalled
+
+        # After one full rotation, reverse direction and slow down by half.
+        if not self._completed_first_360 and self._yaw >= math.radians(360.0):
+            self._completed_first_360 = True
+            self._dir *= -1.0
+            self._rpm = max(self._rpm * 0.5, 1.0)
+            self._yaw = 0.0
+            self._yaw_at_ramp = 0.0
+            self._t_ramp = now
+            _trace(f"search completed 360° — reversing and slowing to {self._rpm:.1f} rpm")
+
+        # Stall recovery still works, but only before the 360° reversal.
+        # After reversal, keep the slower search speed instead of ramping back up.
+        if not self._completed_first_360 and now - self._t_ramp >= KICK_TIMEOUT_S:
+            if self._yaw - self._yaw_at_ramp < math.radians(5.0):
                 self._rpm = min(self._rpm + KICK_RAMP_STEP, MAX_RPM)
                 _trace(f"search stalled — ramping spin to {self._rpm:.0f} rpm")
             self._yaw_at_ramp = self._yaw
             self._t_ramp = now
+
         return (-self._dir * self._rpm, +self._dir * self._rpm)
 
 
