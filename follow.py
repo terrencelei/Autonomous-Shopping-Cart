@@ -77,6 +77,7 @@ TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop 
 
 # Spin (point-turn) controller
 SPIN_KICK_RPM     = 35.0    # breakaway burst for a point turn (half the forward KICK_RPM)
+CAL_SPIN_RPM      = 0.75 * SPIN_KICK_RPM  # initial angular-inertia calibration spin speed
 TURN_RPM          = 2.0    # steady wheel RPM during the turn after the kick
 ANGULAR_INERTIA   = 0.0    # s — yaw coast factor; drift = (w0-w1)*inertia (seeded by 360° calib)
 INERTIA_LEARN_K   = 0.05   # online ANGULAR_INERTIA learn rate from each spin's leftover angle [calibrate]
@@ -88,7 +89,7 @@ SPIN_TURN_TIMEOUT_S = 0.5  # max extra time for the steady-turn phase (exit a st
 # side (|angle| > LOST_SIDE_ANGLE_DEG) the cart rotate-SEARCHes toward it;
 # otherwise it was lost straight ahead (too far) so the cart drives forward
 # (PURSUE) to its last-known position. Both kick first to beat stall.
-SEARCH_RPM       = 4.0    # steady wheel RPM of the search sweep              [calibrate]
+SEARCH_RPM       = 2.0    # steady wheel RPM of the search sweep              [calibrate]
 SEARCH_MAX_DEG   = 360.0  # give up after sweeping this much with no target
 SEARCH_GRACE_S   = 0.3    # wait this long after losing the target before reacquiring
 LOST_SIDE_ANGLE_DEG = 20.0  # last-seen |angle| above this → rotate-search; below → drive forward
@@ -667,7 +668,7 @@ class FollowController:
         return self.S, rpm_diff
 
 def calibrate_angular_inertia(motors, spin_revs=1.0, coast_window_s=1.5):
-    """Spin ``spin_revs`` full revolutions (360° each) at SPIN_KICK_RPM, hard-stop,
+    """Spin ``spin_revs`` full revolutions (360° each) at CAL_SPIN_RPM, hard-stop,
     and measure the encoder coast → ANGULAR_INERTIA (s). Saves encoder data to
     calibration_angular_inertia.csv and .png."""
     global ANGULAR_INERTIA
@@ -700,10 +701,10 @@ def calibrate_angular_inertia(motors, spin_revs=1.0, coast_window_s=1.5):
         phases.append(phase)
 
     # ── phase 1: spin one full revolution (360°), ramping the kick if stalled ──
-    # Same ramp-on-stall as the forward Kick: start at SPIN_KICK_RPM and, each
+    # Same ramp-on-stall as the forward Kick: start at CAL_SPIN_RPM and, each
     # KICK_TIMEOUT_S the cart barely turns, bump the spin command by
     # KICK_RAMP_STEP (up to MAX_RPM) until it breaks free.
-    spin_rpm = SPIN_KICK_RPM
+    spin_rpm = CAL_SPIN_RPM
     motors.send_rpm(-spin_rpm, +spin_rpm)
     target_yaw = spin_revs * 2.0 * math.pi
     t_ramp = time.monotonic()
