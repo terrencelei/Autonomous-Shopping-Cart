@@ -1,22 +1,18 @@
 """
-Detect and track people with YOLO11n on the IMX500 NPU + ByteTrack.
-Provides the target/obstacle tracking that follow.py (the main program) drives
-on. Run directly for a vision-only preview — no motor control lives here.
+Detect and track people with SSD-MobileNetV2 on the IMX500 NPU + ByteTrack,
+then drive the cart directly via Pathfinding_algorithm.tick().
 
 Usage:
-  python3 yolo_detect.py                # vision preview
+  python3 yolo_detect.py                # live camera + motors
   python3 yolo_detect.py --no-display   # headless (SSH)
+  python3 yolo_detect.py --no-drive     # camera only, no motors
 
 Color signature pipeline (clothing_color_profile):
-  1. Convert full frame BGR -> LAB once per frame
+  1. Convert full frame BGR -> HSV once per frame
   2. Tighten bounding box inward to reduce background bleed
-  3. Sample a band outside the box; use its average L to normalise lighting
-  4. For each pixel row, reject pixels whose a* and b* are both close to the
-     surrounding band average (background bleed rejection)
-  5. Average the remaining pixels per row
-  6. Compress into N_PROFILE_CHUNKS chunks
-  7. Return (N_PROFILE_CHUNKS x 2) float32 array [a*, b*] — L discarded
-     since lighting is already normalised out and not compared
+  3. Average H and S per row across the tightened box
+  4. Compress into N_PROFILE_CHUNKS chunks
+  5. Return (N_PROFILE_CHUNKS x 2) float32 array [H, S]
 """
 
 import os
@@ -48,19 +44,17 @@ import supervision as sv
 from picamera2 import Picamera2
 from picamera2.devices.imx500 import IMX500, NetworkIntrinsics
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+import Pathfinding_algorithm as P
+
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 RPK_MODEL_PATH = Path(
-    "/usr/share/imx500-models/imx500_network_yolo11n_pp.rpk"
+    "/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk"
 )
 
 PERSON_CONFIDENCE = 0.5
 PERSON_CLASS_ID   = 0
-
-# YOLO11n post-processed model settings from raspberrypi/imx500-models:
-# imx500_object_detection_demo.py --bbox-normalization --bbox-order xy
-MODEL_BBOX_NORMALIZATION = True
-MODEL_BBOX_ORDER = "xy"
 
 PERSON_HEIGHT_M   = 1.8
 H_FOV_DEG         = 66.0
@@ -97,13 +91,7 @@ ACCUM_MAX_DURATION_S = 10.0
 N_PROFILE_CHUNKS = 12
 BOX_TRIM_X       = 0.12
 BOX_TRIM_Y       = 0.08
-SURROUND_PX      = 12
 MIN_ROW_PX       = 4
-
-# Background rejection: pixel excluded if a* and b* are both within these
-# deltas of the surrounding band average (LAB units, 0-255 OpenCV scale).
-BG_A_DELTA = 10
-BG_B_DELTA = 10
 
 
 # =========================================================================== #
@@ -115,10 +103,6 @@ class IMX500Capture:
         self._imx500 = IMX500(str(model_path))
         intrinsics = self._imx500.network_intrinsics or NetworkIntrinsics()
         intrinsics.task = "object detection"
-        intrinsics.bbox_normalization = MODEL_BBOX_NORMALIZATION
-        intrinsics.bbox_order = MODEL_BBOX_ORDER
-        intrinsics.update_with_defaults()
-        self._intrinsics = intrinsics
 
         self._picam2 = Picamera2(self._imx500.camera_num)
         self._cfg = self._picam2.create_preview_configuration(
@@ -152,22 +136,15 @@ class IMX500Capture:
         boxes_raw = np_outputs[0][0]
         scores    = np_outputs[1][0]
         classes   = np_outputs[2][0].astype(int)
-        _, input_h = self._imx500.get_input_size()
-
-        boxes = boxes_raw.astype(float)
-        if self._intrinsics.bbox_normalization:
-            boxes = boxes / input_h
-        if self._intrinsics.bbox_order == "xy":
-            boxes = boxes[:, [1, 0, 3, 2]]
 
         keep = (scores >= PERSON_CONFIDENCE) & (classes == PERSON_CLASS_ID)
         if not keep.any():
             self._last_dets = sv.Detections.empty()
             return self._last_dets
-        boxes, scores, classes = boxes[keep], scores[keep], classes[keep]
+        boxes_raw, scores, classes = boxes_raw[keep], scores[keep], classes[keep]
 
         xyxy = []
-        for box in boxes:
+        for box in boxes_raw:
             x, y, w, h = self._imx500.convert_inference_coords(box, self._meta, self._picam2)
             xyxy.append([x, y, x + w, y + h])
 
@@ -228,19 +205,15 @@ def normalize_track_id(tid):
 
 
 # =========================================================================== #
-# Color profile  (LAB — a* and b* only)
+# Color profile  (HSV — H and S only, V used for normalisation then discarded)
 # =========================================================================== #
 
-def clothing_color_profile(lab_frame, xyxy):
+def clothing_color_profile(hsv_frame, xyxy):
     """
-    Build a 1-D vertical color profile in LAB space.
-
-    Returns (N_PROFILE_CHUNKS, 2) float32 [a*, b*], or None.
-    L is used only for background rejection and is not stored.
-
-    LAB in OpenCV: L in [0,255], a* and b* in [0,255] centred at 128.
+    Build a 1-D vertical color profile in HSV space.
+    Returns (N_PROFILE_CHUNKS, 2) float32 [H, S]. No normalisation.
     """
-    img_h, img_w = lab_frame.shape[:2]
+    img_h, img_w = hsv_frame.shape[:2]
     x1, y1, x2, y2 = xyxy
     x1 = max(0, min(img_w - 1, int(x1)))
     x2 = max(0, min(img_w,     int(x2)))
@@ -260,35 +233,15 @@ def clothing_color_profile(lab_frame, xyxy):
     if ix2 <= ix1 or iy2 <= iy1:
         return None
 
-    # Sample surrounding band for background reference
-    surround_pixels = []
-    for sx1, sx2, sy1, sy2 in [
-        (max(0, ix1 - SURROUND_PX), ix1,                  iy1, iy2),
-        (ix2,                        min(img_w, ix2 + SURROUND_PX), iy1, iy2),
-        (ix1, ix2, max(0, iy1 - SURROUND_PX), iy1),
-        (ix1, ix2, iy2,                        min(img_h, iy2 + SURROUND_PX)),
-    ]:
-        if sx2 > sx1 and sy2 > sy1:
-            surround_pixels.append(lab_frame[sy1:sy2, sx1:sx2].reshape(-1, 3))
-
-    if not surround_pixels:
-        return None
-
-    surround_all = np.concatenate(surround_pixels, axis=0).astype(np.float32)
-    surround_avg = surround_all.mean(axis=0)   # [L, a*, b*]
-
-    # Per-row averages with background rejection on a* and b*
-    inner  = lab_frame[iy1:iy2, ix1:ix2].astype(np.float32)
+    # Per-row H and S averages
+    inner  = hsv_frame[iy1:iy2, ix1:ix2].astype(np.float32)
     n_rows = inner.shape[0]
 
     row_avgs = np.full((n_rows, 2), np.nan, dtype=np.float32)
     for r in range(n_rows):
-        row    = inner[r]                              # (cols, 3)
-        a_diff = np.abs(row[:, 1] - surround_avg[1])
-        b_diff = np.abs(row[:, 2] - surround_avg[2])
-        fg     = ~((a_diff < BG_A_DELTA) & (b_diff < BG_B_DELTA))
-        if fg.sum() >= MIN_ROW_PX:
-            row_avgs[r] = row[fg, 1:3].mean(axis=0)   # keep only a*, b*
+        row = inner[r]
+        if len(row) >= MIN_ROW_PX:
+            row_avgs[r] = row[:, :2].mean(axis=0)   # [H, S]
 
     # Compress into N_PROFILE_CHUNKS
     chunk_size = n_rows / N_PROFILE_CHUNKS
@@ -321,10 +274,9 @@ def clothing_color_profile(lab_frame, xyxy):
 
 def profile_similarity(a, b):
     """
-    Weighted similarity between two (N_PROFILE_CHUNKS, 2) LAB profiles [a*, b*].
+    Weighted similarity between two (N_PROFILE_CHUNKS, 2) HSV profiles [H, S].
 
     Weights calibrated from bounding box measurements at 1.5-3.9m.
-    Max meaningful delta per channel: ~127 (half of 0-255 range).
     Returns float in [0, 1], or None if either profile is None.
     """
     if a is None or b is None:
@@ -344,13 +296,13 @@ def profile_similarity(a, b):
             weights,
         ).astype(np.float32)
 
-    # a* and b* each span ~127 units of meaningful range
-    diff_a = np.abs(a[:, 0] - b[:, 0])
-    diff_b = np.abs(a[:, 1] - b[:, 1])
+    diff_h = np.abs(a[:, 0] - b[:, 0])
+    diff_h = np.minimum(diff_h, 180.0 - diff_h)   # hue wrap
+    diff_s = np.abs(a[:, 1] - b[:, 1])
 
-    err_a = np.clip(diff_a / 127.0, 0.0, 1.0) ** 1.5
-    err_b = np.clip(diff_b / 127.0, 0.0, 1.0) ** 1.5
-    err   = (err_a + err_b) / 2.0
+    err_h = np.clip(diff_h / 45.0, 0.0, 1.0) ** 1.5
+    err_s = np.clip(diff_s / 80.0, 0.0, 1.0) ** 1.5
+    err   = err_h * 0.70 + err_s * 0.30
 
     weighted_err = np.dot(err, weights) / weights.sum()
     return float(np.clip(1.0 - weighted_err, 0.0, 1.0))
@@ -549,12 +501,12 @@ class TargetLock:
 # =========================================================================== #
 
 def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
-                   target_lock: TargetLock, now: float, draw=True):
+                   target_lock: TargetLock, now: float):
     img_h, img_w = frame.shape[:2]
-    out = frame.copy() if draw else None
+    out = frame.copy()
 
     # Convert once per frame — passed into clothing_color_profile
-    lab_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
     ids = detections.tracker_id if detections.tracker_id is not None else [None] * len(detections)
 
@@ -577,7 +529,7 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
             dist  = raw_dist
             angle = raw_angle
 
-        color_profile = clothing_color_profile(lab_frame, (x1, y1, x2, y2))
+        color_profile = clothing_color_profile(hsv_frame, (x1, y1, x2, y2))
 
         raw_sim = profile_similarity(target_lock.reference_profile, color_profile) \
                   if target_lock.reference_profile is not None else None
@@ -623,36 +575,35 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
         profile         = m["color_profile"]
         ref_sim         = m.get("ref_similarity")
 
-        if draw:
-            thickness = 3 if is_target else 2
-            cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
+        thickness = 3 if is_target else 2
+        cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
 
-            sim_str = f" sim:{ref_sim:.2f}" if ref_sim is not None else ""
-            label   = f"{role} {label_id} {dist:.1f}m {angle:+.1f}deg{sim_str}"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-            top = max(int(y1) - 10, th + 4)
-            cv2.rectangle(out, (int(x1), top - th - 4), (int(x1) + tw, top), color, -1)
-            cv2.putText(out, label, (int(x1), top - 2),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
+        sim_str = f" sim:{ref_sim:.2f}" if ref_sim is not None else ""
+        label   = f"{role} {label_id} {dist:.1f}m {angle:+.1f}deg{sim_str}"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+        top = max(int(y1) - 10, th + 4)
+        cv2.rectangle(out, (int(x1), top - th - 4), (int(x1) + tw, top), color, -1)
+        cv2.putText(out, label, (int(x1), top - 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
 
-            # Swatch strip: reconstruct displayable BGR from a*, b* with fixed L=128
-            if profile is not None:
-                swatch_w = max(6, int((x2 - x1) * 0.06))
-                swatch_h = max(2, int((y2 - y1) / N_PROFILE_CHUNKS))
-                strip_x  = int(x1) + thickness + 1
-                for ci in range(N_PROFILE_CHUNKS):
-                    sy1    = int(y1) + ci * swatch_h
-                    sy2    = sy1 + swatch_h
-                    a_val  = float(np.clip(profile[ci, 0], 0, 255))
-                    b_val  = float(np.clip(profile[ci, 1], 0, 255))
-                    lab_px = np.uint8([[[128, a_val, b_val]]])
-                    bgr_px = cv2.cvtColor(lab_px, cv2.COLOR_LAB2BGR)[0, 0].tolist()
-                    cv2.rectangle(out, (strip_x, sy1), (strip_x + swatch_w, sy2), bgr_px, -1)
-                cv2.rectangle(out,
-                              (strip_x, int(y1) + thickness + 1),
-                              (strip_x + swatch_w,
-                               int(y1) + thickness + 1 + N_PROFILE_CHUNKS * swatch_h),
-                              (255, 255, 255), 1)
+        # Swatch strip: reconstruct BGR from [H, S] with fixed V=180
+        if profile is not None:
+            swatch_w = max(6, int((x2 - x1) * 0.06))
+            swatch_h = max(2, int((y2 - y1) / N_PROFILE_CHUNKS))
+            strip_x  = int(x1) + thickness + 1
+            for ci in range(N_PROFILE_CHUNKS):
+                sy1    = int(y1) + ci * swatch_h
+                sy2    = sy1 + swatch_h
+                h_val  = float(np.clip(profile[ci, 0], 0, 179))
+                s_val  = float(np.clip(profile[ci, 1], 0, 255))
+                hsv_px = np.uint8([[[h_val, s_val, 180]]])
+                bgr_px = cv2.cvtColor(hsv_px, cv2.COLOR_HSV2BGR)[0, 0].tolist()
+                cv2.rectangle(out, (strip_x, sy1), (strip_x + swatch_w, sy2), bgr_px, -1)
+            cv2.rectangle(out,
+                          (strip_x, int(y1) + thickness + 1),
+                          (strip_x + swatch_w,
+                           int(y1) + thickness + 1 + N_PROFILE_CHUNKS * swatch_h),
+                          (255, 255, 255), 1)
 
         rows.append((role, label_id, conf, dist, angle, ref_sim))
 
@@ -663,9 +614,7 @@ def annotate_frame(frame, detections: sv.Detections, smooth_state: dict,
 # Main loop
 # =========================================================================== #
 
-def run(no_display=False):
-    """Vision-only preview: run the IMX500 tracker and show the annotated frame
-    plus a per-detection table. No motor control — follow.py is the driver."""
+def run(no_display=False, no_drive=False):
     if not RPK_MODEL_PATH.exists():
         raise SystemExit(
             f"ERROR: {RPK_MODEL_PATH} not found. "
@@ -680,12 +629,17 @@ def run(no_display=False):
         minimum_matching_threshold=0.8,
         frame_rate=30,
     )
-    smooth_state = {}
-    target_lock  = TargetLock()
-    frame_idx    = 0
-    frame_times  = []
+    smooth_state  = {}
+    target_lock   = TargetLock()
+    motors        = None if no_drive else P.MotorDriver()
+    odometry      = P.Odometry(motors.read_encoder_deltas if motors else lambda: (0, 0))
+    frame_idx     = 0
+    frame_times   = []
+    t_last_tick   = time.monotonic()
+    latest_target = None
 
-    print("\nTracking — press Q to quit (vision only, no drive)\n")
+    drive_msg = " (motors disabled)" if no_drive else ""
+    print(f"\nTracking — press Q to quit{drive_msg}\n")
     print(f"{'Role':<10} {'ID':<8} {'Conf':>6}  {'Dist':>8}  {'Angle':>8}  {'Sim':>6}")
     print("-" * 58)
 
@@ -699,7 +653,20 @@ def run(no_display=False):
             dets    = cap.get_detections()
             tracked = tracker.update_with_detections(dets)
             out, rows = annotate_frame(frame, tracked, smooth_state,
-                                       target_lock, time.monotonic(), draw=not no_display)
+                                       target_lock, time.monotonic())
+
+            target_row = next((r for r in rows if r[0] == "TARGET"), None)
+            latest_target = (target_row[3], target_row[4]) if target_row else None
+            obstacle_rows = [r for r in rows if r[0] == "OBSTACLE"]
+
+            now = time.monotonic()
+            if now - t_last_tick >= P.DT:
+                pos, heading = odometry.update()
+                obs = [(r[3], r[4]) for r in obstacle_rows]
+                v_left, v_right = P.tick(latest_target, pos, heading, obstacles=obs)
+                if motors is not None:
+                    motors.send(v_left, v_right)
+                t_last_tick = now
 
             t1 = time.time()
             frame_times.append(t1)
@@ -709,10 +676,9 @@ def run(no_display=False):
                 (len(frame_times) - 1) / (frame_times[-1] - frame_times[0])
                 if len(frame_times) > 1 else 0.0
             )
-            if not no_display:
-                cv2.putText(out,
-                            f"NPU  FPS:{fps_live:.1f}  {(t1-t0)*1000:.0f}ms",
-                            (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
+            cv2.putText(out,
+                        f"NPU  FPS:{fps_live:.1f}  {(t1-t0)*1000:.0f}ms  [{P.S.mode}]",
+                        (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
 
             for role, label_id, conf, dist, angle, ref_sim in rows:
                 sim_str = f"{ref_sim:.2f}" if ref_sim is not None else " N/A"
@@ -726,6 +692,8 @@ def run(no_display=False):
 
             frame_idx += 1
     finally:
+        if motors is not None:
+            motors.stop()
         cap.release()
         if not no_display:
             cv2.destroyAllWindows()
@@ -733,9 +701,10 @@ def run(no_display=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="IMX500 person tracker (vision-only preview; follow.py is the driver)"
+        description="SSD person tracker on IMX500 NPU + ByteTrack → Pathfinding_algorithm"
     )
     parser.add_argument("--no-display", dest="no_display", action="store_true")
+    parser.add_argument("--no-drive",   dest="no_drive",   action="store_true")
     args = parser.parse_args()
 
     if not args.no_display and not (os.environ.get("DISPLAY") or
@@ -743,4 +712,4 @@ if __name__ == "__main__":
         args.no_display = True
         print("No display detected — running headless.")
 
-    run(no_display=args.no_display)
+    run(no_display=args.no_display, no_drive=args.no_drive)
