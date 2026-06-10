@@ -5,7 +5,7 @@ A self-following shopping cart that tracks a designated shopper and treats all o
 | Component | Role | Technology |
 |-----------|------|------------|
 | **Vision** | Sensing | YOLO11n on IMX500 NPU + ByteTrack (`vision/yolo_detect.py`) |
-| **Follower** | Control | `follow.py` — reactive spin-to-centre + damped-P distance follow |
+| **Follower** | Control | `follow.py` — continuous damped-P steering + distance follow |
 | **ESP32** | Motor control | Dual TB9051FTG drivers with quadrature encoders |
 
 ### Runtime pipeline
@@ -166,7 +166,7 @@ A 500 ms watchdog stops the motors if no `L… R…` line arrives — so a host 
 
 ## Standalone Follower (`follow.py`)
 
-A single-process reactive follower built directly from the spin + displacement control sketch — no A\* and no store map. It imports `vision/yolo_detect.py` for the calibrated target distance/angle and drives the ESP32 over the RPM protocol directly. Hardware/calibration constants live in `follow.py`; the control logic is independent of the pathfinder state machine.
+A single-process reactive follower — no A\* and no store map. It imports `vision/yolo_detect.py` for the calibrated target distance/angle and drives the ESP32 over the RPM protocol directly. All hardware/calibration constants live at the top of `follow.py`; both control axes (distance and steering) are continuous damped-P laws with online-learned coast compensation.
 
 ```bash
 python3 follow.py                 # live camera + drive
@@ -249,8 +249,8 @@ cmd L+18.0 R+18.0rpm  actual L+14.2 R+13.9rpm
 
 ```
 autonomous-shopping-cart/
-├── follow.py                       # MAIN PROGRAM — reactive follower (spin-to-centre + damped-P
-│                                   #   distance, obstacle hold, search/pursue, return-home)
+├── follow.py                       # MAIN PROGRAM — reactive follower (continuous damped-P
+│                                   #   steering + distance, obstacle hold, search, return-home)
 ├── follow_straight.py              # Distance-only (no steering) follower variant
 ├── sniff_encoder.py                # Serial encoder sniffer (debug)
 ├── vision/                         # Camera tracking, imported by follow.py
