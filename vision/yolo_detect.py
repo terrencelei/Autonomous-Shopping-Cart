@@ -243,7 +243,7 @@ HSV_PROFILE_WEIGHTS = np.array(
 def clothing_color_profile(hsv_frame, xyxy):
     """
     Build a 1-D vertical color profile in HSV space.
-    Returns (N_PROFILE_CHUNKS, 3) float32 [H, S, V]. No normalisation.
+    Returns (N_PROFILE_CHUNKS, 3) float32 [H, S, V]. No normalization.
     """
     img_h, img_w = hsv_frame.shape[:2]
     x1, y1, x2, y2 = xyxy

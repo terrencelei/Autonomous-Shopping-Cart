@@ -127,7 +127,7 @@ def load_and_featurize(
     that breaks Euclidean distance ("red" would otherwise be far from
     "also red").
 
-    Features are then z-score normalised (zero mean, unit variance) so
+    Features are then z-score normalized (zero mean, unit variance) so
     that gradient descent converges at a consistent scale regardless of
     which channels dominate raw values.
 
@@ -158,7 +158,7 @@ def load_and_featurize(
     df = df.dropna(subset=["person_id", *needed]).reset_index(drop=True)
 
     if len(df) < 4:
-        raise ValueError("Need at least 4 valid labelled rows.")
+        raise ValueError("Need at least 4 valid labeled rows.")
     if df["person_id"].nunique() < 2:
         raise ValueError("Need samples from at least 2 different person_ids.")
 
@@ -421,7 +421,7 @@ class ReIDRegistry:
 
     What match_thresh means
     -----------------------
-    The threshold is in units of weighted squared distance in normalised
+    The threshold is in units of weighted squared distance in normalized
     feature space. Lower = stricter matching (fewer false positive ID
     merges, more track splits). Tune by visualising distances between
     known-same and known-different pairs in your environment.
@@ -514,7 +514,7 @@ class ReIDRegistry:
 
     def _featurize(self, hsv_profile: np.ndarray) -> np.ndarray:
         """
-        Convert raw (N_CHUNKS, 3) HSV profile to a normalised feature vector.
+        Convert raw (N_CHUNKS, 3) HSV profile to a normalized feature vector.
         Mirrors load_and_featurize() so inference matches training exactly.
         """
         parts: list[np.ndarray] = []
@@ -575,7 +575,7 @@ def save_outputs(
         "input_csv": str(csv_path),
         "meaning": (
             "Weighted squared distance metric for person re-identification. "
-            "Use weights in: distance = sum(w_i * (A_i - B_i)^2) on normalised features. "
+            "Use weights in: distance = sum(w_i * (A_i - B_i)^2) on normalized features. "
             "Small distance = likely same person."
         ),
         "constraint": "all weights >= 0, sum(weights) = 1",

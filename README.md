@@ -54,7 +54,7 @@ Manage it with `sudo systemctl {status,stop,disable} cart-follow` and `journalct
 
 ## Vision System
 
-A detection pipeline that runs entirely on the Raspberry Pi AI Camera (IMX500). The YOLO11n object detector executes on the IMX500's on-chip neural processor — no inference on the Pi CPU — and the result is streamed back over CSI alongside each frame. The host uses OpenCV (`cv2`) for image conversion, overlays, and display windows, then runs ByteTrack to assign stable track IDs, locks onto the closest centred shopper, and maps everyone else as an obstacle.
+A detection pipeline that runs entirely on the Raspberry Pi AI Camera (IMX500). The YOLO11n object detector executes on the IMX500's on-chip neural processor — no inference on the Pi CPU — and the result is streamed back over CSI alongside each frame. The host uses OpenCV (`cv2`) for image conversion, overlays, and display windows, then runs ByteTrack to assign stable track IDs, locks onto the closest centered shopper, and maps everyone else as an obstacle.
 
 The default model is Raspberry Pi's shipped YOLO11n post-processed RPK:
 
@@ -85,7 +85,7 @@ Run directly, `yolo_detect.py` is a **vision-only preview** (no motor control) �
 
 ### Target Locking
 
-Each frame, every detected person is scored by `distance_m + 0.3 × |angle_deg|`. The person with the lowest score is locked as **TARGET** (green box) — favouring whoever is closest and most centred. All others are labelled **OBSTACLE** (red box). The lock updates every frame.
+Each frame, every detected person is scored by `distance_m + 0.3 × |angle_deg|`. The person with the lowest score is locked as **TARGET** (green box) — favoring whoever is closest and most centered. All others are labeled **OBSTACLE** (red box). The lock updates every frame.
 
 ### Distance Calibration
 
@@ -184,8 +184,8 @@ python3 follow.py --trace         # echo serial traffic + control-flow calls
 
 Each frame it reads the locked shopper's `(distance, angle)` and then:
 
-1. **Centering — continuous damped-P steering.** Every tick the steering difference is `rpm_diff = KP_ANGLE·(θ − ω·ANGULAR_INERTIA)`: the target angle minus the yaw the cart will still coast through at its measured yaw rate ω, so turns ease off early instead of overshooting. A small `ANGLE_DEADBAND_DEG` ignores vision angle noise and the command is slew-limited (`DIFF_SLEW_PER_S`). There is no spin threshold and no discrete spin manoeuvre — the shopper is steered back to centre continuously while driving (the old `Spinner` pulsed a point turn every time the angle crossed 18°, the angular twin of the forward stop/kick limit cycle). A *standing* re-centre that can't break static friction is kicked free at `SPIN_KICK_RPM` by the stall watch — armed only when at least `TURN_STALL_MIN_RPM` of steering is demanded, so noise inside the deadband can never trigger a pulse.
-2. **Distance — damped P.** Inside the centre band it holds `THRESH_M` (= `HOLD_DIST`, 2 m) with the same law `follow_straight.py` uses: `S = KP_DIST·(error − deadband) + KD_DIST·dx`, slew-limited (`RPM_SLEW_UP_PER_S` / `RPM_SLEW_DOWN_PER_S`) and clipped to `MAX_RPM` (= 100 rpm, the firmware's full-PWM point). The error is **coast-compensated**: `error = (x − thresh) − v·LINEAR_INERTIA`, where `LINEAR_INERTIA` is learned online from every commanded stop (coast distance ÷ speed, by the same `InertiaLearner` that tunes the yaw axis), so the cart brakes early and rolls into the ring instead of through it. A `DIST_DEADBAND_M` no-drive band plus `RESUME_HYST_M` restart hysteresis keeps vision noise at the 2 m boundary from toggling stop/kick/stop. On departure from rest a separate `Kick` floors the forward speed at `KICK_RPM` (= 50 rpm) until `KICK_TICKS` of encoder movement confirm breakaway; if still stalled after `KICK_TIMEOUT_S` the kick ramps up by `KICK_RAMP_STEP` (a stall watch also re-arms it if a low-RPM crawl stalls later). A momentary target dropout no longer brake-slams: during `SEARCH_GRACE_S` the cart coasts down on the slew instead.
+1. **Centering — continuous damped-P steering.** Every tick the steering difference is `rpm_diff = KP_ANGLE·(θ − ω·ANGULAR_INERTIA)`: the target angle minus the yaw the cart will still coast through at its measured yaw rate ω, so turns ease off early instead of overshooting. A small `ANGLE_DEADBAND_DEG` ignores vision angle noise and the command is slew-limited (`DIFF_SLEW_PER_S`). There is no spin threshold and no discrete spin maneuver — the shopper is steered back to center continuously while driving (the old `Spinner` pulsed a point turn every time the angle crossed 18°, the angular twin of the forward stop/kick limit cycle). A *standing* re-center that can't break static friction is kicked free at `SPIN_KICK_RPM` by the stall watch — armed only when at least `TURN_STALL_MIN_RPM` of steering is demanded, so noise inside the deadband can never trigger a pulse.
+2. **Distance — damped P.** Inside the center band it holds `THRESH_M` (= `HOLD_DIST`, 2 m) with the same law `follow_straight.py` uses: `S = KP_DIST·(error − deadband) + KD_DIST·dx`, slew-limited (`RPM_SLEW_UP_PER_S` / `RPM_SLEW_DOWN_PER_S`) and clipped to `MAX_RPM` (= 100 rpm, the firmware's full-PWM point). The error is **coast-compensated**: `error = (x − thresh) − v·LINEAR_INERTIA`, where `LINEAR_INERTIA` is learned online from every commanded stop (coast distance ÷ speed, by the same `InertiaLearner` that tunes the yaw axis), so the cart brakes early and rolls into the ring instead of through it. A `DIST_DEADBAND_M` no-drive band plus `RESUME_HYST_M` restart hysteresis keeps vision noise at the 2 m boundary from toggling stop/kick/stop. On departure from rest a separate `Kick` floors the forward speed at `KICK_RPM` (= 50 rpm) until `KICK_TICKS` of encoder movement confirm breakaway; if still stalled after `KICK_TIMEOUT_S` the kick ramps up by `KICK_RAMP_STEP` (a stall watch also re-arms it if a low-RPM crawl stalls later). A momentary target dropout no longer brake-slams: during `SEARCH_GRACE_S` the cart coasts down on the slew instead.
 3. **Mixing.** The forward speed and steering difference are mixed onto the wheels (`R = S + rpm_diff`, `L = S − rpm_diff`) with peak scaling so neither wheel exceeds `MAX_RPM`, then sent as `L<rpm> R<rpm>`.
 4. **Lost → reacquire.** If the shopper leaves the frame, the cart first coasts down through a `SEARCH_GRACE_S` grace window (a one-frame dropout doesn't jerk it), then the `Searcher` **spins in place toward the side the shopper was last seen**. It spins **forever** (never gives up), reversing direction each full 360° and ramping its RPM if stalled, until a target reappears (then normal follow resumes) — `Mode: SEARCH`.
 5. **Obstacle hold.** Each tick, if any `OBSTACLE` detection is closer than the target (by at least `OBSTACLE_MARGIN_M`) and within `±OBSTACLE_BLOCK_DEG` of straight ahead, forward motion is paused (`S = 0`, `Mode: BLOCKED`) — the cart holds (steering still keeps it aimed) rather than driving into the obstacle. To ride through the noisy per-frame detections, the block is held for `OBSTACLE_HOLD_S` after the last in-path sighting (hysteresis), so a one-frame dropout doesn't make it lurch forward. It resumes once the obstacle stays clear. Intentionally minimal: it only *stops*, it does not route around.
@@ -206,7 +206,7 @@ Detection: each tick it accumulates the **measured yaw minus the commanded yaw**
 
 Both coast constants are learned online by a shared `InertiaLearner` (one instance per axis) — there is no calibration run at launch:
 
-- **`ANGULAR_INERTIA`** (yaw coast, seconds) seeds at 0.15 s and is refined every time a turn is commanded to a stop: the learner integrates how much yaw the encoders coast through and divides by the yaw rate at the stop. Search-spin exits, standing re-centres and return-home turns all feed it, and the steering law uses it immediately (`θ − ω·ANGULAR_INERTIA`).
+- **`ANGULAR_INERTIA`** (yaw coast, seconds) seeds at 0.15 s and is refined every time a turn is commanded to a stop: the learner integrates how much yaw the encoders coast through and divides by the yaw rate at the stop. Search-spin exits, standing re-centers and return-home turns all feed it, and the steering law uses it immediately (`θ − ω·ANGULAR_INERTIA`).
 - **`LINEAR_INERTIA`** (forward coast) starts at 0 and learns the same way from every commanded forward stop, shrinking the standoff error by the predicted coast distance.
 
 Rates are taken from the encoders (the serial link is open-loop PWM, so commanded RPM is not a real speed). Each measurement is EMA-blended (`ALPHA = 0.3`, capped at 1 s); current values are shown in the periodic status line (`AI=… LI=…`). The gains at the top of `follow.py` marked `[calibrate]` are hand-tuned values.
@@ -235,7 +235,7 @@ Current key constants:
 | `MAX_RPM` | `75.0` | Maximum open-loop command sent to each wheel |
 | `KICK_RPM` / `KICK_TICKS` | `18.0` / `45` | Breakaway floor when starting from rest, released after this many ticks |
 | `DIST_DEADBAND_M` | `0.20` | No-drive band beyond the 2 m hold distance |
-| `KP_DIST` / `KD_DIST` | `30.0` / `8.0` | Forward speed per metre of standoff error / per (m/s) closing rate |
+| `KP_DIST` / `KD_DIST` | `30.0` / `8.0` | Forward speed per meter of standoff error / per (m/s) closing rate |
 | `RPM_SLEW_PER_S` | `35.0` | Max command change per second (smooths the approach) |
 | `STRAIGHT_KP` / `STRAIGHT_KD` / `STRAIGHT_TRIM_MAX` | `0.20` / `2.0` / `15.0` | Encoder heading-hold trim gains and cap |
 
@@ -296,7 +296,7 @@ Check the ESP32 is plugged in: `ls /dev/ttyUSB*`. Add the user to the `dialout` 
 **Motors run but speed doesn't match commands:**
 Calibrate `MAX_RPM` in `firmware/cart_motor/cart_motor.ino`. Run the cart at full output for a fixed time, read the final `E,<l>,<r>` line, and compute `rpm = (ticks / ENCODER_PPR) * (60 / seconds)`.
 
-**Cart drifts off-track after a few metres:**
+**Cart drifts off-track after a few meters:**
 Check `RIGHT_ENC_SIGN` / `LEFT_ENC_SIGN` — if either encoder counts the wrong direction the odometry will diverge quickly. Verify with: push the cart forward by hand and check that both encoder counts in the `E,<l>,<r>` stream increase.
 
 **Obstacle avoidance not triggering:**

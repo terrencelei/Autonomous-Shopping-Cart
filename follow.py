@@ -39,11 +39,11 @@ DEFAULT_RPK_MODEL_PATH = Path(
 # =============================================================================
 
 WHEEL_DIAMETER_M = 0.06778        # outer drive-wheel diameter (m)
-TRACK_M          = 0.333          # wheel spacing, centre-to-centre (m)
+TRACK_M          = 0.333          # wheel spacing, center-to-center (m)
 ENCODER_PPR      = 298            # encoder pulses per wheel rev (post-gearbox, 4x quadrature)
 
-WHEEL_CIRC  = math.pi * WHEEL_DIAMETER_M   # metres per wheel revolution
-M_PER_PULSE = WHEEL_CIRC / ENCODER_PPR     # metres of wheel travel per encoder tick
+WHEEL_CIRC  = math.pi * WHEEL_DIAMETER_M   # meters per wheel revolution
+M_PER_PULSE = WHEEL_CIRC / ENCODER_PPR     # meters of wheel travel per encoder tick
 
 # Drive direction / encoder polarity (flip if a wheel counts or drives backwards)
 RIGHT_ENC_SIGN   = -1
@@ -72,14 +72,14 @@ SEARCH_TRACK_MATCHING = 0.5      # looser ByteTrack matching while spin-searchin
 
 # Breakaway kicks (encoder-confirmed bursts that beat static friction)
 KICK_RPM       = 50.0  # forward kick: floor on departure from rest
-SPIN_KICK_RPM  = 18.0  # point-turn kick: floor for a standing re-centre / search spin
+SPIN_KICK_RPM  = 18.0  # point-turn kick: floor for a standing re-center / search spin
 KICK_TICKS     = 30    # release a kick once this many encoder ticks accumulate
 KICK_TIMEOUT_S = 0.5   # if still stalled after this long, ramp the kick up (don't give up)
 KICK_RAMP_STEP = 10.0  # wheel RPM added to a kick each KICK_TIMEOUT_S it stays stalled
 
 # Steering (angle) controller — continuous damped P, the angular twin of the
-# distance law: no discrete spin manoeuvre, the shopper is steered back to
-# centre every tick while driving (the old Spinner pulsed a point turn each
+# distance law: no discrete spin maneuver, the shopper is steered back to
+# center every tick while driving (the old Spinner pulsed a point turn each
 # time the angle crossed a threshold — same limit cycle the forward
 # controller had at the hold ring).
 KP_ANGLE           = 120.0  # steering RPM-difference per radian of angle error  [calibrate]
@@ -91,7 +91,7 @@ STEER_SIGN = +1   # angle→turn polarity. Flip to -1 if the cart corrects the W
 # Yaw coast compensation: steering eases off by the angle the cart will coast
 # through at its measured yaw rate (theta_eff = theta - omega*ANGULAR_INERTIA).
 # ANGULAR_INERTIA is learned online from every commanded turn-stop (search
-# exits, standing re-centres, return-home turns) — no startup calibration.
+# exits, standing re-centers, return-home turns) — no startup calibration.
 ANGULAR_INERTIA = 0.15  # s — initial guess; refined online by the InertiaLearner
 OMEGA_ALPHA     = 0.3   # EMA for the encoder-measured yaw rate (rad/s)
 
@@ -105,7 +105,7 @@ SEARCH_GRACE_S = 0.3   # coast (don't search) this long after losing the target
 THRESH_M        = HOLD_DIST  # standoff distance to hold (m)
 DIST_DEADBAND_M = 0.20       # no-drive band beyond the hold distance
 RESUME_HYST_M   = 0.10       # once stopped, error must exceed deadband+this to restart
-KP_DIST         = 30.0       # RPM per metre beyond the deadband                 [calibrate]
+KP_DIST         = 30.0       # RPM per meter beyond the deadband                 [calibrate]
 KD_DIST         = 8.0        # RPM per (m/s) of opening/closing rate dx          [calibrate]
 DX_ALPHA        = 0.2        # EMA factor for the smoothed dx/dt
 MIN_DRIVE_RPM   = 12.0       # smallest nonzero forward command (lower duty just stalls) [calibrate]
@@ -355,7 +355,7 @@ class Odometry:
     """Dead-reckoned cart pose from encoder deltas.
 
     Origin (0, 0, heading 0) at construction = the start pose ('home'). x/y in
-    metres, heading in radians (+CCW, 0 = the start facing direction). Uses the
+    meters, heading in radians (+CCW, 0 = the start facing direction). Uses the
     same encoder sign convention as ``_ticks_to_yaw`` so it stays consistent
     with the turn commands.
     """
@@ -368,11 +368,11 @@ class Odometry:
     def update(self, d_l, d_r):
         d_left   = d_l * M_PER_PULSE
         d_right  = d_r * M_PER_PULSE
-        d_centre = (d_left + d_right) / 2.0
+        d_center = (d_left + d_right) / 2.0
         d_theta  = (d_right - d_left) / TRACK_M   # +CCW (matches _ticks_to_yaw)
         mid = self.heading + d_theta / 2.0        # midpoint integration
-        self.x += d_centre * math.cos(mid)
-        self.y += d_centre * math.sin(mid)
+        self.x += d_center * math.cos(mid)
+        self.y += d_center * math.sin(mid)
         self.heading += d_theta
         return d_theta
 
@@ -572,8 +572,8 @@ class FollowController:
         (v_fwd * LINEAR_INERTIA) so the cart rolls into the hold ring.
       * Steering: angle deadband + slew limiting, with the angle error shrunk
         by the predicted yaw coast (omega * ANGULAR_INERTIA) so turns ease off
-        early instead of overshooting — centring is continuous, not a pulsed
-        spin manoeuvre.
+        early instead of overshooting — centering is continuous, not a pulsed
+        spin maneuver.
 
     The breakaway kicks live outside, in the ``Kick`` helpers."""
 
@@ -862,7 +862,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                         ctrl.S = S
                     mode_str = "KICK" if kick.active else "FOLLOW"
 
-                # Point-turn breakaway: a standing re-centre fights static
+                # Point-turn breakaway: a standing re-center fights static
                 # friction the forward kick never sees. The stall watch below
                 # arms spin_kick; while active, floor the steering difference
                 # until the encoders confirm rotation.
@@ -875,7 +875,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                 # Stall watch: effort commanded but the encoders are silent →
                 # arm the matching breakaway kick. Steering-only stalls need
                 # TURN_STALL_MIN_RPM of demand, so angle noise inside the
-                # deadband can never trigger a re-centre pulse.
+                # deadband can never trigger a re-center pulse.
                 moving = (abs(d_l) + abs(d_r)) >= 2
                 demanded = S > 0.0 or abs(rpm_diff) >= TURN_STALL_MIN_RPM
                 if moving or not demanded or kick.active or spin_kick.active:

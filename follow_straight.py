@@ -36,7 +36,7 @@ WHEEL_DIAMETER_M = 0.06778        # outer drive-wheel diameter (m)
 ENCODER_PPR      = 298            # encoder pulses per wheel rev (post-gearbox, 4x quadrature)
 GEAR_RATIO       = 5              # motor gearbox ratio
 
-WHEEL_CIRC  = math.pi * WHEEL_DIAMETER_M   # metres per wheel revolution
+WHEEL_CIRC  = math.pi * WHEEL_DIAMETER_M   # meters per wheel revolution
 
 # Drive direction / encoder polarity (flip if a wheel counts or drives backwards)
 RIGHT_ENC_SIGN   = -1
@@ -70,7 +70,7 @@ TICKS_PER_SEC = 1.0 / DT   # control ticks per second (=50); used for open-loop 
 # accumulating speed every frame; that avoids overshoot/stop/overshoot cycles.
 THRESH_M       = HOLD_DIST   # standoff distance to hold (m)
 DIST_DEADBAND_M = 0.20       # no drive inside this band around hold distance
-KP_DIST        = 30.0        # RPM per metre beyond the deadband
+KP_DIST        = 30.0        # RPM per meter beyond the deadband
 KD_DIST        = 8.0         # RPM per (m/s) target-distance closing rate
 DX_ALPHA       = 0.2         # EMA factor for smoothed dx/dt
 RPM_SLEW_PER_S = 35.0        # max command change per second
