@@ -373,7 +373,7 @@
   <div class="stats">
     <div class="stats-grid">
       <div class="stat reveal"><b>2.0 m</b><span>the polite gap it keeps to its shopper</span></div>
-      <div class="stat reveal"><b>30×/sec</b><span>how often the camera spots and re-locks you</span></div>
+      <div class="stat reveal"><b>30×/sec</b><span>how often it re-spots you — ten looks per blink of your eye</span></div>
       <div class="stat reveal"><b>100% on-device</b><span>all AI runs on the cart — no internet needed</span></div>
       <div class="stat reveal"><b>4 hrs</b><span>of following on a single battery charge</span></div>
       <div class="stat reveal"><b>0.5 s</b><span>motors stop themselves if the brain ever goes quiet</span></div>
@@ -413,7 +413,7 @@
     <div class="sec-head reveal">
       <span class="tag">How it works</span>
       <h2>See. Think. Move.</h2>
-      <p>Three jobs, three chips, one loop that repeats thirty times every second.</p>
+      <p>Three jobs, three chips, one loop that repeats thirty times every second — that's checking the world more often than a movie changes frames, and ten full look-think-move cycles in the blink of an eye.</p>
     </div>
     <div class="cards">
       <div class="card reveal">
@@ -560,7 +560,7 @@
       <div class="card reveal">
         <div class="ic">🔁</div>
         <h3>Lost is not forgotten</h3>
-        <p>The fingerprint survives someone walking between you. When you reappear, the score spikes and the lock snaps back. It also updates slowly over time, so changing light doesn't break the match.</p>
+        <p>The fingerprint survives someone walking between you — when you reappear, the score spikes and the lock snaps back. And the matching itself runs on <b>regression-trained weights</b>: trained on real footage, it learned which color cues hold steady through shadows and shifting light, so a dim aisle or a passing shadow doesn't shake the lock.</p>
       </div>
     </div>
 
@@ -648,13 +648,17 @@
               <rect x="-20" y="-12" width="40" height="24" rx="5"/>
               <circle cx="22" cy="0" r="2.4" fill="#fb7185" stroke="none"/>
             </g>
+            <!-- drive ends AT cruise speed (end-slope 1), coast starts at the same
+                 speed (start-slope 2 = matched px/s) and decelerates smoothly to 0 -->
             <animateTransform attributeName="transform" type="translate" additive="sum"
-              values="0 0;450 0;517 0;517 0;0 0" keyTimes="0;0.55;0.78;0.94;1"
-              calcMode="spline" keySplines="0.3 0 0.7 1;0.15 0.55 0.35 1;0 0 1 1;0.45 0 0.55 1"
+              values="0 0;450 0;517 0;517 0;0 0" keyTimes="0;0.55;0.714;0.94;1"
+              calcMode="spline" keySplines="0.35 0 0.8 0.8;0.5 1 0.75 1;0 0 1 1;0.45 0 0.55 1"
+              dur="7s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values="1;1;0;0;1" keyTimes="0;0.92;0.95;0.985;1"
               dur="7s" repeatCount="indefinite"/>
           </g>
           <text x="600" y="74" text-anchor="middle" font-size="11.5" font-weight="800" fill="#fb7185" opacity="0">✗ glides past
-            <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.58;0.78;0.94;1" dur="7s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.6;0.74;0.92;0.96" dur="7s" repeatCount="indefinite"/>
           </text>
 
           <!-- lane 2: brakes early, lands on the line -->
@@ -664,13 +668,16 @@
               <rect x="-20" y="-12" width="40" height="24" rx="5"/>
               <circle cx="22" cy="0" r="2.4" fill="#34d399" stroke="none"/>
             </g>
+            <!-- cuts power earlier, so the same smooth deceleration lands on the line -->
             <animateTransform attributeName="transform" type="translate" additive="sum"
-              values="0 0;360 0;450 0;450 0;0 0" keyTimes="0;0.55;0.78;0.94;1"
-              calcMode="spline" keySplines="0.3 0 0.7 1;0.15 0.55 0.35 1;0 0 1 1;0.45 0 0.55 1"
+              values="0 0;360 0;450 0;450 0;0 0" keyTimes="0;0.55;0.825;0.94;1"
+              calcMode="spline" keySplines="0.35 0 0.8 0.8;0.5 1 0.75 1;0 0 1 1;0.45 0 0.55 1"
+              dur="7s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values="1;1;0;0;1" keyTimes="0;0.92;0.95;0.985;1"
               dur="7s" repeatCount="indefinite"/>
           </g>
           <text x="595" y="240" text-anchor="middle" font-size="11.5" font-weight="800" fill="#34d399" opacity="0">✓ right on it
-            <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.6;0.8;0.94;1" dur="7s" repeatCount="indefinite"/>
+            <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.71;0.85;0.92;0.96" dur="7s" repeatCount="indefinite"/>
           </text>
         </svg>
       </figure>
