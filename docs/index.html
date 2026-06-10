@@ -107,7 +107,8 @@
   .stat span{color:var(--muted);font-size:.88rem}
 
   /* ── sections ────────────────────────────────────── */
-  section{padding:90px 0 0}
+  section{padding:90px 0 0;scroll-margin-top:78px}
+  header{scroll-margin-top:0}
   .sec-head{max-width:46em;margin-bottom:40px}
   .sec-head .tag{color:var(--green);font-weight:700;font-size:.8rem;letter-spacing:.16em;text-transform:uppercase}
   .sec-head h2{font-size:clamp(1.7rem,3.4vw,2.4rem);letter-spacing:-.02em;margin:10px 0 12px;font-weight:800}
@@ -208,12 +209,14 @@
   .reveal.in{opacity:1;transform:none}
 
   /* ── responsive ──────────────────────────────────── */
+  @media (max-width:1020px){
+    .nav-links a:not(.btn){display:none}
+  }
   @media (max-width:900px){
     .hero{grid-template-columns:1fr}
     .stats-grid{grid-template-columns:repeat(2,1fr)}
     .cards,.cards.six{grid-template-columns:1fr 1fr}
     .hw{grid-template-columns:1fr}
-    .nav-links a:not(.btn){display:none}
     header{padding-top:120px}
     .demo-grid{grid-template-columns:1fr}
     .eyes{grid-template-columns:1fr}
@@ -399,11 +402,11 @@
         <figcaption>The plaza test: the cart picks its shopper out of the crowd and tails them — to it, everyone else is just an obstacle.</figcaption>
       </figure>
       <figure class="screenvid reveal">
-        <video controls preload="none" playsinline
+        <video autoplay muted loop playsinline preload="metadata"
                poster="assets/cartview-poster.jpg" aria-label="Live view through the cart's camera with detection boxes">
           <source src="assets/cartview.mp4" type="video/mp4">
         </video>
-        <figcaption>Through the cart's eyes, live: <b class="g">green</b> is its shopper, <b class="r">red</b> is everyone else — with distance and angle measured on every frame. <span class="hint">▶ press play</span></figcaption>
+        <figcaption>Through the cart's eyes, live: <b class="g">green</b> is its shopper, <b class="r">red</b> is everyone else — with distance and angle measured on every frame.</figcaption>
       </figure>
     </div>
   </section>
@@ -803,10 +806,12 @@
 
 <script>
   // ── hero scene: looping simulation of the real control loop ──
-  // The shopper walks the route at constant speed. The cart is simulated the
-  // way the real one works: speed proportional to the gap (so it eases off
-  // and catches up naturally), an obstacle hold when someone crosses the
-  // line between them, and a spin-search when the shopper goes out of sight.
+  // The shopper walks the route; the cart is a free agent that PURSUES the
+  // shopper directly (no path memory, like the real robot): heading steers
+  // toward the person, speed is proportional to the straight-line gap, it
+  // noses around shelf ends, holds when someone crosses the line between
+  // them, and spin-searches when the shopper disappears down an aisle —
+  // re-locking the moment the person enters its spinning field of view.
   (function(){
     const route = document.getElementById('route');
     if (!route || !route.getTotalLength) return;
@@ -817,17 +822,66 @@
     const obs = [1,2,3].map(i => ({ g: $('o'+i), ring: $('o'+i+'r') }));
 
     const L = route.getTotalLength();
-    const V = 58;            // shopper speed (px/s); 46 px ≈ 1 m
-    const VMAX = 130, KP = 6;// cart: speed = KP·(gap error), capped — like the real law
+    const V = 58;             // shopper speed (px/s); 46 px ≈ 1 m
+    const VMAX = 130, KP = 6; // cart: speed = KP·(distance error), capped
     const GAP = 92, PXM = 46;
-    const T = L / V;         // master loop period
+    const T = L / V;          // master loop period
+    const LOOK = 80, MARGIN = 22, PUSH = 14;   // shelf avoidance
     const GREEN='#34d399', CORAL='#fb7185', AMBER='#fbbf24';
+    const SHELVES = [[200,105,330,38],[240,240,310,38],[190,368,330,38]];
 
     const at = d => route.getPointAtLength(((d % L) + L) % L);
     const wrap = a => { while (a >  Math.PI) a -= 2*Math.PI;
                         while (a < -Math.PI) a += 2*Math.PI; return a; };
-    // the shopper is "out of sight" while crossing the corridor behind the middle shelf
-    const hiddenAt = p => p.x > 150 && p.x < 560 && p.y > 283 && p.y < 348;
+    // "out of sight": the shopper is in the aisle behind the middle shelf row
+    const hiddenAt = p => p.x > 120 && p.x < 560 && p.y > 283 && p.y < 348;
+
+    // segment-vs-rect (Liang–Barsky) for the steering look-ahead
+    function segRect(ax, ay, bx, by, r){
+      let t0 = 0, t1 = 1;
+      const dx = bx - ax, dy = by - ay;
+      const tests = [[-dx, ax - r[0]], [dx, r[0] + r[2] - ax],
+                     [-dy, ay - r[1]], [dy, r[1] + r[3] - ay]];
+      for (const [p, q] of tests){
+        if (p === 0){ if (q < 0) return false; }
+        else {
+          const rr = q / p;
+          if (p < 0){ if (rr > t1) return false; if (rr > t0) t0 = rr; }
+          else      { if (rr < t0) return false; if (rr < t1) t1 = rr; }
+        }
+      }
+      return true;
+    }
+    // desired direction with shelf-slide avoidance: if the look-ahead ray hits
+    // a shelf, slide along its edge toward the shopper instead
+    function steer(cx, cy, s, des){
+      const tx = cx + Math.cos(des) * LOOK, ty = cy + Math.sin(des) * LOOK;
+      for (const [rx, ry, rw, rh] of SHELVES){
+        if (segRect(cx, cy, tx, ty, [rx - MARGIN, ry - MARGIN, rw + 2*MARGIN, rh + 2*MARGIN])){
+          if (cy > ry + rh || cy < ry){
+            let sx = Math.cos(des);
+            if (Math.abs(sx) < 0.2) sx = s.x > cx ? 1 : -1;
+            return sx > 0 ? 0 : Math.PI;
+          }
+          let sy = Math.sin(des);
+          if (Math.abs(sy) < 0.2) sy = s.y > cy ? 1 : -1;
+          return sy > 0 ? Math.PI / 2 : -Math.PI / 2;
+        }
+      }
+      return des;
+    }
+    function pushout(p){
+      for (const [rx, ry, rw, rh] of SHELVES){
+        if (p.x > rx - PUSH && p.x < rx + rw + PUSH && p.y > ry - PUSH && p.y < ry + rh + PUSH){
+          const exits = [[p.x - (rx - PUSH), -1, 0], [rx + rw + PUSH - p.x, 1, 0],
+                         [p.y - (ry - PUSH), 0, -1], [ry + rh + PUSH - p.y, 0, 1]];
+          exits.sort((a, b) => a[0] - b[0]);
+          const [d, ux, uy] = exits[0];
+          p.x += ux * d; p.y += uy * d;
+        }
+      }
+      return p;
+    }
 
     // obstacle choreography, synced to the master loop
     function obPos(i, tm, t){
@@ -871,8 +925,10 @@
       label.setAttribute('y', (s.y + c.y) / 2 - 10);
     }
 
-    let d_c = -GAP, heading = 0, mode = 'FOLLOW',
-        blockUntil = -9, foundUntil = -9, lastMode = '', prevT;
+    const start0 = at(-GAP), ahead0 = at(6);
+    let cx = start0.x, cy = start0.y,
+        heading = Math.atan2(ahead0.y - start0.y, ahead0.x - start0.x),
+        mode = 'FOLLOW', blockUntil = -9, foundUntil = -9, lastMode = '', prevT;
 
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches){
       const d = GAP + 170, s = at(d), c = at(d - GAP), a = at(d - GAP + 6);
@@ -889,8 +945,8 @@
       const t = now / 1000;
       const dt = Math.min(prevT === undefined ? 0.016 : t - prevT, 0.05);
       prevT = t;
-      const tm = t % T, d_s = V * t;
-      const s = at(d_s), c = at(d_c);
+      const tm = t % T;
+      const s = at(V * t);
 
       // obstacles
       const opos = [];
@@ -902,47 +958,55 @@
         opos[i] = p;
       });
 
-      // mode machine: SEARCH when the shopper is out of sight; otherwise the
-      // obstacle hold (with the same 0.6 s hysteresis the real cart uses)
+      // straight-line distance and bearing to the shopper — the real signals
+      const dist = Math.hypot(s.x - cx, s.y - cy);
+      const bearing = Math.atan2(s.y - cy, s.x - cx);
+
+      // mode machine: SEARCH while the shopper is out of sight, re-lock the
+      // moment they enter the spinning field of view; otherwise the obstacle
+      // hold (with the same 0.6 s hysteresis the real cart uses)
       const hidden = hiddenAt(s);
       let blocker = -1;
       if (mode === 'SEARCH'){
-        if (!hidden){ mode = 'FOUND'; foundUntil = t + 1.1; }
+        if (!hidden && Math.abs(wrap(bearing - heading)) < 0.45){
+          mode = 'FOUND'; foundUntil = t + 1.1;
+        }
       } else if (hidden){
         mode = 'SEARCH';
       } else {
-        opos.forEach((p, i) => { if (p && blocking(c, s, p)) blocker = i; });
+        opos.forEach((p, i) => { if (p && blocking({x:cx,y:cy}, s, p)) blocker = i; });
         if (blocker >= 0) blockUntil = t + 0.6;
         mode = t < blockUntil ? 'BLOCKED' : (t < foundUntil ? 'FOUND' : 'FOLLOW');
       }
 
-      // cart motion along the route — proportional law, like the real one
-      const gap = ((d_s - d_c) % L + L) % L;
-      const v = (mode === 'SEARCH' || mode === 'BLOCKED')
-                ? 0 : Math.min(Math.max(KP * (gap - GAP), 0), VMAX);
-      d_c += v * dt;
-      const c2 = at(d_c);
-
-      // heading: along the route while driving; aimed at the shopper while
-      // holding; spinning while searching
-      if (mode === 'SEARCH'){ heading += 2.4 * dt; }
-      else {
-        let des;
-        if (v > 2){ const a = at(d_c + 6); des = Math.atan2(a.y - c2.y, a.x - c2.x); }
-        else des = Math.atan2(s.y - c2.y, s.x - c2.x);
+      // motion: spin in place while searching; otherwise steer at the shopper
+      // (sliding around shelf ends) and drive proportionally to the gap
+      if (mode === 'SEARCH'){
+        heading += 2.4 * dt;
+      } else {
+        const des = steer(cx, cy, s, bearing);
         heading += Math.max(-4.5 * dt, Math.min(4.5 * dt, wrap(des - heading)));
+        if (mode !== 'BLOCKED'){
+          let v = Math.min(Math.max(KP * (dist - GAP), 0), VMAX);
+          const mis = Math.abs(wrap(des - heading));
+          v = mis > 1.2 ? 0 : v * Math.max(0, Math.cos(mis));
+          cx += Math.cos(heading) * v * dt;
+          cy += Math.sin(heading) * v * dt;
+          const p = pushout({x: cx, y: cy});
+          cx = p.x; cy = p.y;
+        }
       }
 
-      place(s, c2, heading);
+      place(s, {x: cx, y: cy}, heading);
 
-      // dressing: tether/label colors, live gap readout, cone tint,
+      // dressing: tether/label colors, live distance readout, cone tint,
       // blocker highlight, out-of-sight shopper, found flash
       const searching = mode === 'SEARCH';
       tether.setAttribute('opacity', searching ? 0 : 1);
       label.setAttribute('opacity', searching ? 0 : 1);
       tether.setAttribute('stroke', mode === 'BLOCKED' ? 'rgba(251,113,133,.65)' : 'rgba(52,211,153,.55)');
       label.setAttribute('fill', mode === 'BLOCKED' ? CORAL : GREEN);
-      label.textContent = (gap / PXM).toFixed(1) + ' m';
+      label.textContent = (dist / PXM).toFixed(1) + ' m';
       youlbl.textContent = searching ? 'out of sight…' : 'YOU';
       youlbl.setAttribute('fill', searching ? '#9aa7c7' : GREEN);
       shopper.setAttribute('opacity', searching ? 0.45 : 1);
@@ -970,14 +1034,18 @@
     requestAnimationFrame(tick);
   })();
 
-  // ── demo loop: only play while on screen (saves battery/data) ──
+  // ── demo loops: only play while on screen (saves battery/data) ──
   (function(){
-    const v = document.getElementById('followvid');
-    if (!v || !('IntersectionObserver' in window)) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches){ v.removeAttribute('autoplay'); v.pause(); return; }
-    new IntersectionObserver(es => {
-      es.forEach(e => { if (e.isIntersecting) v.play().catch(()=>{}); else v.pause(); });
-    }, { threshold: 0.25 }).observe(v);
+    const vids = document.querySelectorAll('.demo-grid video');
+    if (!vids.length || !('IntersectionObserver' in window)) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+      vids.forEach(v => { v.removeAttribute('autoplay'); v.pause(); });
+      return;
+    }
+    const io = new IntersectionObserver(es => {
+      es.forEach(e => { if (e.isIntersecting) e.target.play().catch(()=>{}); else e.target.pause(); });
+    }, { threshold: 0.25 });
+    vids.forEach(v => io.observe(v));
   })();
 
   // ── reveal-on-scroll ──
