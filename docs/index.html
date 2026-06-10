@@ -190,8 +190,12 @@
   .shot figcaption{color:var(--muted);font-size:.88rem;padding:10px 6px 2px}
   .build-grid{display:grid;grid-template-columns:1fr 1.25fr;gap:16px;align-items:stretch}
 
-  /* ── what the cart sees ──────────────────────────── */
+  /* ── what the cart sees / explainer rows ─────────── */
   .eyes{display:grid;grid-template-columns:1.3fr 1fr;gap:26px;align-items:center;margin-top:16px}
+  .eyes.flip > figure{order:2}
+  .card .ic{font-size:1.3rem}
+  .safety.note{background:rgba(96,165,250,.10);border-color:rgba(96,165,250,.3)}
+  .safety.note p{color:#dbeafe}
   .eyes-copy h3{font-size:1.25rem;margin-bottom:8px;letter-spacing:-.01em}
   .eyes-copy p{color:var(--muted);margin-bottom:12px}
   .eyes-copy ul{list-style:none;display:grid;gap:10px}
@@ -234,6 +238,8 @@
     <div class="nav-links">
       <a href="#demo">Demo</a>
       <a href="#how">How it works</a>
+      <a href="#color">Colour lock</a>
+      <a href="#control">Controls</a>
       <a href="#abilities">Abilities</a>
       <a href="#hardware">Hardware</a>
       <a class="btn ghost" href="https://github.com/terrencelei/Autonomous-Shopping-Cart" target="_blank" rel="noopener">GitHub ↗</a>
@@ -442,6 +448,244 @@
     </div>
   </section>
 
+  <!-- ── colour lock ──────────────────────────────── -->
+  <section id="color">
+    <div class="sec-head reveal">
+      <span class="tag">Colour lock</span>
+      <h2>How it knows it's <em>you</em>.</h2>
+      <p>The camera finds every person. Telling its shopper apart from a stranger is the clever part — and it's done with colour.</p>
+    </div>
+
+    <figure class="shot reveal">
+      <svg viewBox="0 0 760 310" role="img" aria-label="Diagram: the cart scans its shopper's outfit into a colour fingerprint, then scores every person it sees against that fingerprint — the best match keeps the green target box">
+        <rect width="760" height="310" rx="10" fill="#0c1228"/>
+
+        <text x="28" y="34" font-size="11" font-weight="800" letter-spacing="2" fill="#9aa7c7">1 · DURING WARM-UP</text>
+        <text x="400" y="34" font-size="11" font-weight="800" letter-spacing="2" fill="#9aa7c7">2 · EVERY FRAME AFTER</text>
+        <line x1="368" y1="22" x2="368" y2="288" stroke="rgba(255,255,255,.08)"/>
+
+        <!-- shopper being scanned -->
+        <g transform="translate(80,170)">
+          <circle cx="0" cy="-54" r="13" fill="#8b9bb8"/>
+          <rect x="-21" y="-38" width="42" height="46" rx="9" fill="#3b82f6"/>
+          <rect x="-16" y="10" width="32" height="42" rx="7" fill="#64748b"/>
+          <rect x="-30" y="-70" width="60" height="3.5" rx="2" fill="#34d399" opacity=".9">
+            <animate attributeName="y" values="-70;50;-70" dur="3s" repeatCount="indefinite"/>
+          </rect>
+          <text y="78" text-anchor="middle" font-size="11" fill="#9aa7c7">it studies your outfit…</text>
+        </g>
+
+        <path d="M128 165 H168" stroke="#34d399" stroke-width="2" marker-end="url(#arrh)"/>
+
+        <!-- fingerprint card -->
+        <g transform="translate(180,118)">
+          <rect width="130" height="92" rx="12" fill="rgba(255,255,255,.05)" stroke="rgba(255,255,255,.14)"/>
+          <rect x="12" y="12" width="50" height="30" rx="6" fill="#3b82f6"/>
+          <rect x="68" y="12" width="50" height="30" rx="6" fill="#1d4ed8"/>
+          <rect x="12" y="50" width="50" height="30" rx="6" fill="#64748b"/>
+          <rect x="68" y="50" width="50" height="30" rx="6" fill="#334155"/>
+          <text x="65" y="112" text-anchor="middle" font-size="11" font-weight="700" fill="#eef2ff">colour fingerprint</text>
+          <text x="65" y="127" text-anchor="middle" font-size="10" fill="#9aa7c7">(no face — just colours)</text>
+        </g>
+
+        <path d="M322 165 H360" stroke="#34d399" stroke-width="2" marker-end="url(#arrh)"/>
+
+        <!-- the lineup -->
+        <g transform="translate(440,178)">
+          <circle cx="0" cy="-54" r="13" fill="#8b9bb8"/>
+          <rect x="-21" y="-38" width="42" height="46" rx="9" fill="#b45309"/>
+          <rect x="-16" y="10" width="32" height="42" rx="7" fill="#475569"/>
+          <rect x="-31" y="-102" width="62" height="22" rx="11" fill="rgba(255,255,255,.06)" stroke="rgba(255,255,255,.14)"/>
+          <text y="-87" text-anchor="middle" font-size="11.5" font-weight="700" fill="#9aa7c7">32%</text>
+        </g>
+        <g transform="translate(560,178)">
+          <rect x="-34" y="-76" width="68" height="134" rx="10" fill="none" stroke="#34d399" stroke-width="2.5">
+            <animate attributeName="stroke-opacity" values="1;.45;1" dur="2s" repeatCount="indefinite"/>
+          </rect>
+          <circle cx="0" cy="-54" r="13" fill="#8b9bb8"/>
+          <rect x="-21" y="-38" width="42" height="46" rx="9" fill="#3b82f6"/>
+          <rect x="-16" y="10" width="32" height="42" rx="7" fill="#64748b"/>
+          <rect x="-52" y="-108" width="104" height="24" rx="12" fill="rgba(52,211,153,.15)" stroke="rgba(52,211,153,.5)"/>
+          <text y="-91" text-anchor="middle" font-size="11.5" font-weight="800" fill="#34d399">97% — YOU ✓</text>
+        </g>
+        <g transform="translate(680,178)">
+          <circle cx="0" cy="-54" r="13" fill="#8b9bb8"/>
+          <rect x="-21" y="-38" width="42" height="46" rx="9" fill="#eab308"/>
+          <rect x="-16" y="10" width="32" height="42" rx="7" fill="#1f2937"/>
+          <rect x="-31" y="-102" width="62" height="22" rx="11" fill="rgba(255,255,255,.06)" stroke="rgba(255,255,255,.14)"/>
+          <text y="-87" text-anchor="middle" font-size="11.5" font-weight="700" fill="#9aa7c7">41%</text>
+        </g>
+        <text x="560" y="280" text-anchor="middle" font-size="11" fill="#9aa7c7">every person is scored against the fingerprint — best match keeps the green box</text>
+
+        <defs>
+          <marker id="arrh" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" fill="#34d399"/>
+          </marker>
+        </defs>
+      </svg>
+    </figure>
+
+    <div class="cards" style="margin-top:16px">
+      <div class="card reveal">
+        <div class="ic">📸</div>
+        <h3>It studies your outfit</h3>
+        <p>During the 15-second warm-up, it builds a colour fingerprint of whoever it's locked onto — today's hoodie, today's pants. That fingerprint becomes its memory of you.</p>
+      </div>
+      <div class="card reveal">
+        <div class="ic">🎯</div>
+        <h3>Everyone gets scored</h3>
+        <p>Every frame, every person in view is compared to the fingerprint. The best match keeps the green box — and the score rides right on the label (the <i>sim: 0.98</i> you can see in the demo video).</p>
+      </div>
+      <div class="card reveal">
+        <div class="ic">🔁</div>
+        <h3>Lost is not forgotten</h3>
+        <p>The fingerprint survives someone walking between you. When you reappear, the score spikes and the lock snaps back. It also updates slowly over time, so changing light doesn't break the match.</p>
+      </div>
+    </div>
+
+    <div class="safety note reveal">
+      <div class="sicon">🔒</div>
+      <p><b>Privacy, by design.</b> The cart never learns a face — only the colours of today's outfit, and it forgets even that when it's switched off. (Fine print: identical twins in identical hoodies could fool it. Colour is its memory, not biometrics.)</p>
+    </div>
+  </section>
+
+  <!-- ── controls & calibration ───────────────────── -->
+  <section id="control">
+    <div class="sec-head reveal">
+      <span class="tag">Controls &amp; self-calibration</span>
+      <h2>Smooth on purpose.</h2>
+      <p>Robots usually jerk — stop, go, overshoot, correct. This one doesn't, because of three small ideas working together.</p>
+    </div>
+
+    <!-- idea 1: speed matches the gap -->
+    <div class="eyes reveal">
+      <figure class="shot">
+        <svg viewBox="0 0 680 230" role="img" aria-label="Diagram: the further the cart is from its shopper, the faster it drives; at the two-metre bubble it waits">
+          <rect width="680" height="230" rx="10" fill="#0c1228"/>
+          <line x1="20" y1="172" x2="660" y2="172" stroke="rgba(255,255,255,.10)" stroke-width="2"/>
+
+          <!-- shopper + bubble -->
+          <g transform="translate(585,150)">
+            <circle r="78" fill="rgba(52,211,153,.06)" stroke="rgba(52,211,153,.35)" stroke-dasharray="5 7"/>
+            <circle r="9" fill="#34d399"/>
+            <circle r="14" fill="none" stroke="#34d399" stroke-width="1.5" opacity=".7"/>
+            <text y="-90" text-anchor="middle" font-size="11.5" font-weight="800" fill="#34d399" letter-spacing="1">2 m BUBBLE</text>
+          </g>
+
+          <!-- same cart, three distances -->
+          <g stroke="#34d399" fill="rgba(52,211,153,.15)" stroke-width="2">
+            <g transform="translate(85,150)">
+              <rect x="-20" y="-12" width="40" height="24" rx="5"/>
+              <circle cx="22" cy="0" r="2.4" fill="#34d399" stroke="none"/>
+            </g>
+            <g transform="translate(295,150)">
+              <rect x="-20" y="-12" width="40" height="24" rx="5"/>
+              <circle cx="22" cy="0" r="2.4" fill="#34d399" stroke="none"/>
+            </g>
+            <g transform="translate(478,150)">
+              <rect x="-20" y="-12" width="40" height="24" rx="5"/>
+              <circle cx="22" cy="0" r="2.4" fill="#34d399" stroke="none"/>
+            </g>
+          </g>
+          <!-- speed arrows -->
+          <line x1="112" y1="150" x2="196" y2="150" stroke="#34d399" stroke-width="3.5" marker-end="url(#arr2)"/>
+          <line x1="322" y1="150" x2="362" y2="150" stroke="#34d399" stroke-width="3.5" marker-end="url(#arr2)" opacity=".75"/>
+
+          <text x="85" y="205" text-anchor="middle" font-size="11.5" fill="#9aa7c7">far behind → hurries</text>
+          <text x="295" y="205" text-anchor="middle" font-size="11.5" fill="#9aa7c7">closing in → eases off</text>
+          <text x="478" y="205" text-anchor="middle" font-size="11.5" fill="#9aa7c7">at the bubble → waits</text>
+
+          <defs>
+            <marker id="arr2" markerWidth="9" markerHeight="9" refX="6" refY="4.5" orient="auto">
+              <path d="M0,0 L9,4.5 L0,9 z" fill="#34d399"/>
+            </marker>
+          </defs>
+        </svg>
+      </figure>
+      <div class="eyes-copy">
+        <h3>1 · Speed matches the gap</h3>
+        <p>The cart's speed is dialled directly from how far behind it is. A big gap means hurry; a shrinking gap means ease off; inside the two-metre bubble it simply waits. No on/off switching — one smooth ramp, like easing up to a red light.</p>
+        <p>Steering works exactly the same way: the further you drift from the centre of its view, the firmer it turns back toward you — and softly near the middle, so it never twitches.</p>
+      </div>
+    </div>
+
+    <!-- idea 2: coast learning -->
+    <div class="eyes flip reveal">
+      <figure class="shot">
+        <svg viewBox="0 0 680 270" role="img" aria-label="Animation: on its first stop the cart cuts power at the stop line and glides past it; after learning its momentum it cuts power early and rolls to a stop exactly on the line">
+          <rect width="680" height="270" rx="10" fill="#0c1228"/>
+          <line x1="520" y1="34" x2="520" y2="246" stroke="rgba(52,211,153,.5)" stroke-dasharray="5 6" stroke-width="2"/>
+          <text x="520" y="22" text-anchor="middle" font-size="11" font-weight="800" letter-spacing="1.5" fill="#34d399">THE PERFECT STOP SPOT</text>
+
+          <text x="26" y="66" font-size="11.5" font-weight="800" fill="#9aa7c7" letter-spacing="1">FIRST STOP</text>
+          <text x="26" y="176" font-size="11.5" font-weight="800" fill="#9aa7c7" letter-spacing="1">AFTER A FEW STOPS</text>
+
+          <!-- lane 1: cuts power at the line, glides past -->
+          <g transform="translate(520,96)"><text y="-12" text-anchor="middle" font-size="10.5" fill="#fb7185">⏻ cuts power here</text></g>
+          <g transform="translate(70,95)">
+            <g stroke="#fb7185" fill="rgba(251,113,133,.13)" stroke-width="2">
+              <rect x="-20" y="-12" width="40" height="24" rx="5"/>
+              <circle cx="22" cy="0" r="2.4" fill="#fb7185" stroke="none"/>
+            </g>
+            <animateTransform attributeName="transform" type="translate" additive="sum"
+              values="0 0;450 0;517 0;517 0;0 0" keyTimes="0;0.55;0.78;0.94;1"
+              calcMode="spline" keySplines="0.3 0 0.7 1;0.15 0.55 0.35 1;0 0 1 1;0.45 0 0.55 1"
+              dur="7s" repeatCount="indefinite"/>
+          </g>
+          <text x="600" y="74" text-anchor="middle" font-size="11.5" font-weight="800" fill="#fb7185" opacity="0">✗ glides past
+            <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.58;0.78;0.94;1" dur="7s" repeatCount="indefinite"/>
+          </text>
+
+          <!-- lane 2: brakes early, lands on the line -->
+          <g transform="translate(430,206)"><text y="-12" text-anchor="middle" font-size="10.5" fill="#34d399">⏻ cuts power early — it knows it will glide</text></g>
+          <g transform="translate(70,205)">
+            <g stroke="#34d399" fill="rgba(52,211,153,.15)" stroke-width="2">
+              <rect x="-20" y="-12" width="40" height="24" rx="5"/>
+              <circle cx="22" cy="0" r="2.4" fill="#34d399" stroke="none"/>
+            </g>
+            <animateTransform attributeName="transform" type="translate" additive="sum"
+              values="0 0;360 0;450 0;450 0;0 0" keyTimes="0;0.55;0.78;0.94;1"
+              calcMode="spline" keySplines="0.3 0 0.7 1;0.15 0.55 0.35 1;0 0 1 1;0.45 0 0.55 1"
+              dur="7s" repeatCount="indefinite"/>
+          </g>
+          <text x="595" y="240" text-anchor="middle" font-size="11.5" font-weight="800" fill="#34d399" opacity="0">✓ right on it
+            <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.6;0.8;0.94;1" dur="7s" repeatCount="indefinite"/>
+          </text>
+        </svg>
+      </figure>
+      <div class="eyes-copy">
+        <h3>2 · It measures its own momentum</h3>
+        <p>A loaded cart can't stop on a dime — it glides. So at <em>every</em> stop, the cart measures how far it glided and remembers the lesson: <i>glide ÷ speed = my momentum</i>. On the next approach it cuts power that much earlier and rolls up to the line exactly.</p>
+        <p>The same trick tames its turns — every spin teaches it how much it swings past. That's the whole calibration story: there is no calibration day. <b>Every stop <i>is</i> the calibration.</b></p>
+      </div>
+    </div>
+
+    <!-- idea 3: the kick -->
+    <div class="eyes reveal">
+      <figure class="shot">
+        <svg viewBox="0 0 680 180" role="img" aria-label="Graph of speed over time: zero while standing, a brief spike labelled the shove, then settling to a gentle cruise">
+          <rect width="680" height="180" rx="10" fill="#0c1228"/>
+          <line x1="50" y1="140" x2="640" y2="140" stroke="rgba(255,255,255,.12)"/>
+          <line x1="50" y1="30" x2="50" y2="140" stroke="rgba(255,255,255,.12)"/>
+          <text x="40" y="38" text-anchor="end" font-size="10" fill="#9aa7c7">speed</text>
+          <text x="640" y="156" text-anchor="end" font-size="10" fill="#9aa7c7">time →</text>
+          <path d="M50,140 L150,140 L156,52 L196,52 C240,52 250,96 300,96 L640,96"
+                fill="none" stroke="#34d399" stroke-width="3" stroke-linejoin="round"/>
+          <text x="120" y="128" text-anchor="middle" font-size="11" fill="#9aa7c7">standing still</text>
+          <text x="176" y="40" text-anchor="middle" font-size="11.5" font-weight="800" fill="#34d399">the shove</text>
+          <text x="430" y="84" text-anchor="middle" font-size="11" fill="#9aa7c7">settles into the smooth ramp</text>
+          <line x1="226" y1="58" x2="226" y2="140" stroke="rgba(52,211,153,.35)" stroke-dasharray="3 5"/>
+          <text x="232" y="132" font-size="10" fill="#9aa7c7">released the instant the wheels confirm motion</text>
+        </svg>
+      </figure>
+      <div class="eyes-copy">
+        <h3>3 · …and a little kick to get rolling</h3>
+        <p>Floors grip, and carts are heavy — a gentle command from a standstill just hums. So the cart gives itself a brief, measured shove, and releases it the instant the wheel sensors confirm it broke free.</p>
+        <p>If it ever stalls mid-crawl, the shove comes back automatically, a little stronger each time, until it's rolling again. Stubborn, but politely.</p>
+      </div>
+    </div>
+  </section>
+
   <!-- ── abilities ────────────────────────────────── -->
   <section id="abilities">
     <div class="sec-head reveal">
@@ -523,7 +767,7 @@
   </div>
 
   <footer>
-    <span>🛒 Autonomous Shopping Cart — built by Terrence Lei</span>
+    <span>🛒 Autonomous Shopping Cart — built by Terrence Lei, Jonah Lee, Damian Martinez &amp; Jack Lei</span>
     <span><a href="https://github.com/terrencelei/Autonomous-Shopping-Cart" target="_blank" rel="noopener">github.com/terrencelei/Autonomous-Shopping-Cart</a></span>
   </footer>
 </main>
