@@ -8,6 +8,8 @@
 <meta property="og:title" content="Autonomous Shopping Cart">
 <meta property="og:description" content="A cart that follows you around the store — AI camera, Raspberry Pi brain, self-tuning control. No remote, no phone, no cloud.">
 <meta property="og:type" content="website">
+<meta property="og:image" content="https://terrencelei.github.io/Autonomous-Shopping-Cart/assets/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛒</text></svg>">
 <style>
   :root{
@@ -169,6 +171,38 @@
   footer{padding:50px 0 40px;color:var(--muted);font-size:.88rem;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
   footer a{color:var(--ink);border-bottom:1px solid rgba(255,255,255,.25)}
 
+  /* ── demo videos ─────────────────────────────────── */
+  .demo-grid{display:grid;grid-template-columns:minmax(240px,330px) 1fr;gap:20px;align-items:start}
+  .demo-grid figure{margin:0}
+  .demo-grid figcaption{color:var(--muted);font-size:.88rem;padding:12px 6px 0;line-height:1.5}
+  .demo-grid .hint{color:var(--green);font-weight:600;white-space:nowrap}
+  b.g{color:var(--green)} b.r{color:var(--coral)} b.o{color:#fbbf24}
+  .phone video{
+    width:100%;display:block;border-radius:26px;
+    border:1px solid var(--panel-edge);outline:6px solid rgba(255,255,255,.05);
+    box-shadow:0 30px 80px rgba(0,0,0,.5);background:#000;
+  }
+  .screenvid video{
+    width:100%;display:block;border-radius:14px;
+    border:1px solid var(--panel-edge);
+    box-shadow:0 30px 80px rgba(0,0,0,.45);background:#000;
+  }
+
+  /* ── photo figures ───────────────────────────────── */
+  .shot{margin:0;background:var(--panel);border:1px solid var(--panel-edge);border-radius:var(--radius);padding:10px}
+  .shot img{width:100%;display:block;border-radius:10px}
+  .shot.light img{background:#fff}
+  .shot figcaption{color:var(--muted);font-size:.88rem;padding:10px 6px 2px}
+  .build-grid{display:grid;grid-template-columns:1fr 1.25fr;gap:16px;align-items:stretch}
+
+  /* ── what the cart sees ──────────────────────────── */
+  .eyes{display:grid;grid-template-columns:1.3fr 1fr;gap:26px;align-items:center;margin-top:16px}
+  .eyes-copy h3{font-size:1.25rem;margin-bottom:8px;letter-spacing:-.01em}
+  .eyes-copy p{color:var(--muted);margin-bottom:12px}
+  .eyes-copy ul{list-style:none;display:grid;gap:10px}
+  .eyes-copy li{color:var(--muted);font-size:.95rem;padding-left:2px}
+  .eyes-copy li i{color:var(--ink);font-style:normal;font-weight:600}
+
   /* ── reveal animation ────────────────────────────── */
   .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease}
   .reveal.in{opacity:1;transform:none}
@@ -181,6 +215,10 @@
     .hw{grid-template-columns:1fr}
     .nav-links a:not(.btn){display:none}
     header{padding-top:120px}
+    .demo-grid{grid-template-columns:1fr}
+    .phone{max-width:330px;margin:0 auto}
+    .eyes{grid-template-columns:1fr}
+    .build-grid{grid-template-columns:1fr}
   }
   @media (max-width:560px){
     .cards,.cards.six{grid-template-columns:1fr}
@@ -200,6 +238,7 @@
   <div class="nav-inner">
     <a class="logo" href="#top"><span class="dot"></span>Autonomous Shopping Cart</a>
     <div class="nav-links">
+      <a href="#demo">Demo</a>
       <a href="#how">How it works</a>
       <a href="#abilities">Abilities</a>
       <a href="#hardware">Hardware</a>
@@ -219,7 +258,7 @@
         No remote. No phone. No cloud.
       </p>
       <div class="hero-cta">
-        <a class="btn primary" href="#how">See how it works ↓</a>
+        <a class="btn primary" href="#demo">Watch it work ↓</a>
         <a class="btn ghost" href="https://github.com/terrencelei/Autonomous-Shopping-Cart" target="_blank" rel="noopener">View the code ↗</a>
       </div>
     </div>
@@ -324,6 +363,31 @@
 
 <main class="wrap">
 
+  <!-- ── demo ─────────────────────────────────────── -->
+  <section id="demo">
+    <div class="sec-head reveal">
+      <span class="tag">Real footage</span>
+      <h2>Watch it work.</h2>
+      <p>No remote, no rails, no tricks — the cart picks its own speed and steering. Same robot, two views.</p>
+    </div>
+    <div class="demo-grid">
+      <figure class="phone reveal">
+        <video id="followvid" autoplay muted loop playsinline preload="metadata"
+               poster="assets/follow-poster.jpg" aria-label="The cart following its shopper across a courtyard">
+          <source src="assets/follow.mp4" type="video/mp4">
+        </video>
+        <figcaption>The courtyard test: the cart tails its shopper and stops when they stop.</figcaption>
+      </figure>
+      <figure class="screenvid reveal">
+        <video controls preload="none" playsinline
+               poster="assets/cartview-poster.jpg" aria-label="Live view through the cart's camera with detection boxes">
+          <source src="assets/cartview.mp4" type="video/mp4">
+        </video>
+        <figcaption>Through the cart's eyes, live: <b class="g">green</b> is its shopper, <b class="r">red</b> is everyone else — with distance and angle measured on every frame. <span class="hint">▶ press play</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
   <!-- ── how it works ─────────────────────────────── -->
   <section id="how">
     <div class="sec-head reveal">
@@ -364,6 +428,22 @@
       <div class="pipe-foot" style="flex-basis:100%">
         <span class="loop">⟲</span>
         <span>…and the wheel measurements flow straight back to the brain, fifty times a second. That closed loop is what makes the motion smooth.</span>
+      </div>
+    </div>
+
+    <!-- what the cart sees -->
+    <div class="eyes reveal">
+      <figure class="shot">
+        <img src="assets/vision.jpg" alt="The cart's camera view: one person boxed in green as TARGET with distance and angle, several others boxed in red as OBSTACLE" loading="lazy" decoding="async">
+      </figure>
+      <div class="eyes-copy">
+        <h3>What the cart actually sees</h3>
+        <p>A real frame from its camera, mid-walk on a crowded plaza:</p>
+        <ul>
+          <li><b class="g">■ TARGET</b> — the locked shopper, with live distance (<i>2.7&nbsp;m</i>), direction (<i>−20.8°</i>), and how well their colours match its memory (<i>98%</i>).</li>
+          <li><b class="r">■ OBSTACLE</b> — every other person, tracked so the cart can pause instead of pushing through.</li>
+          <li><b class="o">■ STATUS</b> — the top-left corner shows what it's doing and the numbers it's acting on, every frame.</li>
+        </ul>
       </div>
     </div>
   </section>
@@ -416,7 +496,17 @@
       <h2>Four parts, honestly wired.</h2>
       <p>Off-the-shelf hardware, custom firmware and control software — all open on GitHub.</p>
     </div>
-    <div class="hw">
+    <div class="build-grid">
+      <figure class="shot light reveal">
+        <img src="assets/cad.jpg" alt="CAD model of the cart chassis: box body on a wheeled base with the camera mount on the front" loading="lazy" decoding="async">
+        <figcaption>Designed in CAD first…</figcaption>
+      </figure>
+      <figure class="shot reveal">
+        <img src="assets/cart-photo.jpg" alt="The real prototype: wooden chassis with the camera mounted up front and the Pi, ESP32, drivers, battery and wiring inside" loading="lazy" decoding="async">
+        <figcaption>…then built and wired by hand. Camera up front, brain and battery in the basket.</figcaption>
+      </figure>
+    </div>
+    <div class="hw" style="margin-top:16px">
       <div class="card reveal"><div class="ic">📷</div><div><h3>Sony IMX500 AI camera</h3><p>Runs the people-spotting neural network on the image sensor itself, so detection costs the main computer nothing.</p></div></div>
       <div class="card reveal"><div class="ic">🧠</div><div><h3>Raspberry Pi 5</h3><p>The brain. Tracks the shopper, runs both control loops, watches for obstacles, and keeps the map of its own movement.</p></div></div>
       <div class="card reveal"><div class="ic">⚡</div><div><h3>ESP32 + dual motor drivers</h3><p>The muscle. Translates the Pi's commands into wheel power a thousand times a second, through two TB9051FTG driver chips.</p></div></div>
@@ -482,6 +572,16 @@
       requestAnimationFrame(tick);
     }
     requestAnimationFrame(tick);
+  })();
+
+  // ── demo loop: only play while on screen (saves battery/data) ──
+  (function(){
+    const v = document.getElementById('followvid');
+    if (!v || !('IntersectionObserver' in window)) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches){ v.removeAttribute('autoplay'); v.pause(); return; }
+    new IntersectionObserver(es => {
+      es.forEach(e => { if (e.isIntersecting) v.play().catch(()=>{}); else v.pause(); });
+    }, { threshold: 0.25 }).observe(v);
   })();
 
   // ── reveal-on-scroll ──
