@@ -172,16 +172,11 @@
   footer a{color:var(--ink);border-bottom:1px solid rgba(255,255,255,.25)}
 
   /* ── demo videos ─────────────────────────────────── */
-  .demo-grid{display:grid;grid-template-columns:minmax(240px,330px) 1fr;gap:20px;align-items:start}
+  .demo-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
   .demo-grid figure{margin:0}
   .demo-grid figcaption{color:var(--muted);font-size:.88rem;padding:12px 6px 0;line-height:1.5}
   .demo-grid .hint{color:var(--green);font-weight:600;white-space:nowrap}
   b.g{color:var(--green)} b.r{color:var(--coral)} b.o{color:#fbbf24}
-  .phone video{
-    width:100%;display:block;border-radius:26px;
-    border:1px solid var(--panel-edge);outline:6px solid rgba(255,255,255,.05);
-    box-shadow:0 30px 80px rgba(0,0,0,.5);background:#000;
-  }
   .screenvid video{
     width:100%;display:block;border-radius:14px;
     border:1px solid var(--panel-edge);
@@ -216,7 +211,6 @@
     .nav-links a:not(.btn){display:none}
     header{padding-top:120px}
     .demo-grid{grid-template-columns:1fr}
-    .phone{max-width:330px;margin:0 auto}
     .eyes{grid-template-columns:1fr}
     .build-grid{grid-template-columns:1fr}
   }
@@ -371,12 +365,12 @@
       <p>No remote, no rails, no tricks — the cart picks its own speed and steering. Same robot, two views.</p>
     </div>
     <div class="demo-grid">
-      <figure class="phone reveal">
+      <figure class="screenvid reveal">
         <video id="followvid" autoplay muted loop playsinline preload="metadata"
-               poster="assets/follow-poster.jpg" aria-label="The cart following its shopper across a courtyard">
+               poster="assets/follow-poster.jpg" aria-label="The cart following its shopper across a busy plaza">
           <source src="assets/follow.mp4" type="video/mp4">
         </video>
-        <figcaption>The courtyard test: the cart tails its shopper and stops when they stop.</figcaption>
+        <figcaption>The plaza test: the cart picks its shopper out of the crowd and tails them — to it, everyone else is just an obstacle.</figcaption>
       </figure>
       <figure class="screenvid reveal">
         <video controls preload="none" playsinline
