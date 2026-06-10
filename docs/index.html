@@ -257,9 +257,8 @@
       <span class="eyebrow">● Live robotics project</span>
       <h1>A shopping cart that <span class="grad">follows you</span> around the store.</h1>
       <p class="lede">
-        It watches with an AI camera, picks you out of the crowd, and tags along at a polite
-        two-meter distance — speeding up, slowing down, and steering smoothly, all by itself.
-        No remote. No phone. No cloud.
+        An AI camera picks you out of the crowd. The cart tags along two meters behind —
+        speeding up, slowing down, steering on its own. No remote. No phone. No cloud.
       </p>
       <div class="hero-cta">
         <a class="btn primary" href="#demo">Watch it work ↓</a>
@@ -374,9 +373,9 @@
   <!-- stats -->
   <div class="stats">
     <div class="stats-grid">
-      <div class="stat reveal"><b>2.0 m</b><span>the polite gap it keeps to its shopper</span></div>
-      <div class="stat reveal"><b>30×/sec</b><span>how often it re-spots you — ten decisions per blink of your eye</span></div>
-      <div class="stat reveal"><b>100% on-device</b><span>all AI runs on the cart — no internet needed</span></div>
+      <div class="stat reveal"><b>2.0 m</b><span>the gap it keeps behind you</span></div>
+      <div class="stat reveal"><b>30×/sec</b><span>ten decisions per blink of your eye</span></div>
+      <div class="stat reveal"><b>100% on-device</b><span>all AI runs on the cart, no internet</span></div>
       <div class="stat reveal"><b>4 hrs</b><span>of following on a single battery charge</span></div>
     </div>
   </div>
@@ -397,14 +396,14 @@
                poster="assets/follow-poster.jpg" aria-label="The cart following its shopper across a busy plaza">
           <source src="assets/follow.mp4" type="video/mp4">
         </video>
-        <figcaption>The plaza test: the cart picks its shopper out of the crowd and tails them — to it, everyone else is just an obstacle.</figcaption>
+        <figcaption>The plaza test: the cart picks out its shopper and tails them. Everyone else is just an obstacle.</figcaption>
       </figure>
       <figure class="screenvid reveal">
         <video autoplay muted loop playsinline preload="metadata"
                poster="assets/cartview-poster.jpg" aria-label="Live view through the cart's camera with detection boxes">
           <source src="assets/cartview.mp4" type="video/mp4">
         </video>
-        <figcaption>Through the cart's eyes, live: <b class="g">green</b> is its shopper, <b class="r">red</b> is everyone else — with distance and angle measured on every frame.</figcaption>
+        <figcaption>Through the cart's eyes: <b class="g">green</b> = its shopper, <b class="r">red</b> = everyone else, with live distance and angle.</figcaption>
       </figure>
     </div>
   </section>
@@ -414,26 +413,26 @@
     <div class="sec-head reveal">
       <span class="tag">How it works</span>
       <h2>See. Think. Move.</h2>
-      <p>Three jobs, three chips, one loop that repeats thirty times every second — that's checking the world more often than a movie changes frames, and ten full decisions in the blink of an eye.</p>
+      <p>Three jobs, three chips, one loop — thirty times every second. That's more often than a movie changes frames.</p>
     </div>
     <div class="cards">
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/></svg></div>
         <div class="step">01 · SEE</div>
         <h3>A camera with a brain of its own</h3>
-        <p>The camera chip itself runs a neural network thirty times a second, spotting every person in view. The cart locks onto its shopper and memorizes the colors they're wearing — so it can tell <em>you</em> apart from a stranger in the same aisle.</p>
+        <p>The camera chip runs a neural network that spots every person in view. The cart locks onto <em>you</em> and memorizes the colors you're wearing.</p>
       </div>
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3a7 7 0 0 1 7 7c0 2.4-1.2 3.9-2.4 5.2-.9 1-1.6 1.9-1.6 3.3h-6c0-1.4-.7-2.3-1.6-3.3C6.2 13.9 5 12.4 5 10a7 7 0 0 1 7-7z"/><path d="M9.5 21.5h5"/></svg></div>
         <div class="step">02 · THINK</div>
         <h3>Two smooth decisions per frame</h3>
-        <p>A Raspberry Pi turns "where are you" into "how fast" and "which way". Both are continuous, gentle adjustments — the way you'd ease a car up to a red light — never a lurch between stop and go.</p>
+        <p>A Raspberry Pi turns "where are you" into "how fast" and "which way" — gently, like easing a car up to a red light.</p>
       </div>
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><circle cx="7" cy="17" r="2.6"/><circle cx="17" cy="17" r="2.6"/><path d="M3 17h1.4M9.6 17h4.8M19.6 17H21M5 13l1.5-6h11L19 13"/></svg></div>
         <div class="step">03 · MOVE</div>
         <h3>Wheels that report back</h3>
-        <p>A small ESP32 chip powers the two wheels, and sensors on each wheel report exactly how far they really turned. The cart constantly compares "what I asked for" with "what actually happened".</p>
+        <p>An ESP32 chip powers the wheels, and sensors report how far each really turned. The cart always knows what actually happened.</p>
       </div>
     </div>
 
@@ -448,7 +447,7 @@
       <div class="node"><div class="emoji">🛞</div><b>Wheels</b><span>encoders measure motion</span></div>
       <div class="pipe-foot" style="flex-basis:100%">
         <span class="loop">⟲</span>
-        <span>…and the wheel measurements flow straight back to the brain, fifty times a second. That closed loop is what makes the motion smooth.</span>
+        <span>…and the wheel data flows straight back to the brain. That closed loop is what keeps the motion smooth.</span>
       </div>
     </div>
 
@@ -461,9 +460,9 @@
         <h3>What the cart actually sees</h3>
         <p>A real frame from its camera, mid-walk on a crowded plaza:</p>
         <ul>
-          <li><b class="g">■ TARGET</b> — the locked shopper, with live distance (<i>2.7&nbsp;m</i>), direction (<i>−20.8°</i>), and how well their colors match its memory (<i>98%</i>).</li>
-          <li><b class="r">■ OBSTACLE</b> — every other person, tracked so the cart can pause instead of pushing through.</li>
-          <li><b class="o">■ STATUS</b> — the top-left corner shows what it's doing and the numbers it's acting on, every frame.</li>
+          <li><b class="g">■ TARGET</b> — the locked shopper: distance, direction, and color match (<i>98%</i>).</li>
+          <li><b class="r">■ OBSTACLE</b> — everyone else, tracked so the cart can pause for them.</li>
+          <li><b class="o">■ STATUS</b> — what the cart is doing right now, updated every frame.</li>
         </ul>
       </div>
     </div>
@@ -551,23 +550,23 @@
       <div class="card reveal">
         <div class="ic">📸</div>
         <h3>It studies your outfit</h3>
-        <p>During the 15-second warm-up, it builds a color fingerprint of whoever it's locked onto — today's hoodie, today's pants. That fingerprint becomes its memory of you.</p>
+        <p>During a 15-second warm-up it builds a color fingerprint of your outfit. That fingerprint is its memory of you.</p>
       </div>
       <div class="card reveal">
         <div class="ic">🎯</div>
         <h3>Everyone gets scored</h3>
-        <p>Every frame, every person in view is compared to the fingerprint. The best match keeps the green box — and the score rides right on the label (the <i>sim: 0.98</i> you can see in the demo video).</p>
+        <p>Every person in view is compared to the fingerprint, thirty times a second. The best match keeps the green box.</p>
       </div>
       <div class="card reveal">
         <div class="ic">🔁</div>
         <h3>Lost is not forgotten</h3>
-        <p>The fingerprint survives someone walking between you — when you reappear, the score spikes and the lock snaps back. And the matching itself runs on <b>regression-trained weights</b>: trained on real footage, it learned which color cues hold steady through shadows and shifting light, so a dim aisle or a passing shadow doesn't shake the lock.</p>
+        <p>If someone blocks the view, the lock snaps back the moment you reappear. The match uses <b>regression-trained weights</b>, so shadows and changing light don't shake it.</p>
       </div>
     </div>
 
     <div class="safety note reveal">
       <div class="sicon">🔒</div>
-      <p><b>Privacy, by design.</b> The cart never learns a face — only the colors of today's outfit, and it forgets even that when it's switched off. (Fine print: identical twins in identical hoodies could fool it. Color is its memory, not biometrics.)</p>
+      <p><b>Privacy, by design.</b> It never learns your face — only today's outfit colors, forgotten at power-off. (Yes, identical twins in matching hoodies could fool it.)</p>
     </div>
   </section>
 
@@ -626,8 +625,8 @@
       </figure>
       <div class="eyes-copy">
         <h3>1 · Speed matches the gap</h3>
-        <p>The cart's speed is dialed directly from how far behind it is. A big gap means hurry; a shrinking gap means ease off; inside the two-meter bubble it simply waits. No on/off switching — one smooth ramp, like easing up to a red light.</p>
-        <p>Steering works exactly the same way: the further you drift from the center of its view, the firmer it turns back toward you — and softly near the middle, so it never twitches.</p>
+        <p>Far behind → hurry. Getting close → ease off. Inside the bubble → wait. One smooth ramp, no on/off switching.</p>
+        <p>Steering works the same way: big angle, firm turn; small angle, gentle nudge.</p>
       </div>
     </div>
 
@@ -684,8 +683,8 @@
       </figure>
       <div class="eyes-copy">
         <h3>2 · It measures its own momentum</h3>
-        <p>A loaded cart can't stop on a dime — it glides. So at <em>every</em> stop, the cart measures how far it glided and remembers the lesson: <i>glide ÷ speed = my momentum</i>. On the next approach it cuts power that much earlier and rolls up to the line exactly.</p>
-        <p>The same trick tames its turns — every spin teaches it how much it swings past. That's the whole calibration story: there is no calibration day. <b>Every stop <i>is</i> the calibration.</b></p>
+        <p>A heavy cart glides past where it cuts power. So it measures every glide and learns its own momentum — next time it brakes early and lands right on the line.</p>
+        <p>Turns learn the same way. There is no calibration day — <b>every stop <i>is</i> the calibration.</b></p>
       </div>
     </div>
 
@@ -709,8 +708,8 @@
       </figure>
       <div class="eyes-copy">
         <h3>3 · …and a little kick to get rolling</h3>
-        <p>Floors grip, and carts are heavy — a gentle command from a standstill just hums. So the cart gives itself a brief, measured shove, and releases it the instant the wheel sensors confirm it broke free.</p>
-        <p>If it ever stalls mid-crawl, the shove comes back automatically, a little stronger each time, until it's rolling again. Stubborn, but politely.</p>
+        <p>A gentle push from standstill won't beat floor grip. So the cart gives itself a quick shove, released the instant the wheels confirm motion.</p>
+        <p>If it ever stalls, the shove returns — a little stronger each time. Stubborn, but politely.</p>
       </div>
     </div>
   </section>
@@ -726,32 +725,32 @@
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.2"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="9.5"/></svg></div>
         <h3>Keeps a polite distance</h3>
-        <p>It hangs back two meters. Walk on and it follows; stop and it eases to a halt. No tailgating, no bumper taps.</p>
+        <p>Hangs back two meters. Walk and it follows; stop and it eases to a halt. No tailgating.</p>
       </div>
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5 20c.8-3.8 3.6-6 7-6s6.2 2.2 7 6"/><path d="M16.5 3.5l1.2 1.2 2.3-2.3"/></svg></div>
         <h3>Knows who it's following</h3>
-        <p>Your color profile is its memory of you. Everyone else in the aisle is just labeled "obstacle" — politely avoided, never followed.</p>
+        <p>Your colors are its memory of you. Everyone else is just an obstacle — never followed.</p>
       </div>
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M8 3.5h8L21 8v8l-4.5 4.5h-8L3.5 16V8L8 3.5z"/><path d="M12 8v5"/><circle cx="12" cy="16" r=".4"/></svg></div>
         <h3>Waits for people in the way</h3>
-        <p>If someone steps between you and the cart, it pauses — still aiming at you — and rolls on the moment the path clears.</p>
+        <p>Someone steps between you? It pauses, keeps aiming at you, and rolls on when the path clears.</p>
       </div>
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 12L19 7"/><path d="M12 3a9 9 0 1 1-9 9"/><path d="M12 7a5 5 0 1 0 5 5"/><circle cx="12" cy="12" r="1.2"/></svg></div>
         <h3>Never gives up the search</h3>
-        <p>Lost you around a corner? It turns toward where it last saw you and keeps scanning — patiently, forever — until you're back in view.</p>
+        <p>Lost you around a corner? It turns toward where it last saw you and keeps scanning until you're back.</p>
       </div>
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M3.5 11L12 4l8.5 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-6h4v6"/></svg></div>
         <h3>Finds its own way back</h3>
-        <p>Turn it around 180° while it's parked and it takes the hint: it retraces its own wheel history and drives back to where it started.</p>
+        <p>Spin it around while parked and it takes the hint — it drives itself back to where it started.</p>
       </div>
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3.5"/></svg></div>
         <h3>Teaches itself to drive</h3>
-        <p>Every stop teaches it how far it coasts; every turn teaches it how it swings. It tunes its own physics as it goes — no calibration sessions.</p>
+        <p>Every stop and turn teaches it its own physics. No calibration sessions — it tunes itself as it goes.</p>
       </div>
     </div>
   </section>
@@ -770,26 +769,26 @@
       </figure>
       <figure class="shot reveal">
         <img src="assets/cart-photo.jpg" alt="The real prototype: wooden chassis with the camera mounted up front and the Pi, ESP32, drivers, battery and wiring inside" loading="lazy" decoding="async">
-        <figcaption>…then built and wired by hand. Camera up front, brain and battery in the basket.</figcaption>
+        <figcaption>…then built and wired by hand — camera up front, brains in the basket.</figcaption>
       </figure>
     </div>
     <div class="hw" style="margin-top:16px">
-      <div class="card reveal"><div class="ic">📷</div><div><h3>Sony IMX500 AI camera</h3><p>Runs the people-spotting neural network on the image sensor itself, so detection costs the main computer nothing.</p></div></div>
-      <div class="card reveal"><div class="ic">🧠</div><div><h3>Raspberry Pi 5</h3><p>The brain. Tracks the shopper, runs both control loops, watches for obstacles, and keeps the map of its own movement.</p></div></div>
-      <div class="card reveal"><div class="ic">⚡</div><div><h3>ESP32 + dual motor drivers</h3><p>The muscle. Translates the Pi's commands into wheel power a thousand times a second, through two TB9051FTG driver chips.</p></div></div>
-      <div class="card reveal"><div class="ic">🛞</div><div><h3>Wheel encoders</h3><p>The inner ear. Each wheel reports its exact rotation, which powers the smooth control, the self-learning, and the way-back-home memory.</p></div></div>
-      <div class="card reveal hw-wide"><div class="ic">🔋</div><div><h3>12 V battery pack</h3><p>The heart. A single charge keeps the cart seeing, thinking, and following for about <b>four hours</b> — a full shopping trip many times over.</p></div></div>
+      <div class="card reveal"><div class="ic">📷</div><div><h3>Sony IMX500 AI camera</h3><p>Runs the people-spotting neural network on the sensor itself — detection costs the brain nothing.</p></div></div>
+      <div class="card reveal"><div class="ic">🧠</div><div><h3>Raspberry Pi 5</h3><p>The brain. Tracks the shopper, decides speed and steering, watches for obstacles.</p></div></div>
+      <div class="card reveal"><div class="ic">⚡</div><div><h3>ESP32 + dual motor drivers</h3><p>The muscle. Turns the Pi's commands into wheel power through two motor driver chips.</p></div></div>
+      <div class="card reveal"><div class="ic">🛞</div><div><h3>Wheel encoders</h3><p>The inner ear. Each wheel reports its exact rotation — the feedback behind the smooth control and self-learning.</p></div></div>
+      <div class="card reveal hw-wide"><div class="ic">🔋</div><div><h3>12 V battery pack</h3><p>The heart. One charge runs the whole cart for about <b>four hours</b>.</p></div></div>
     </div>
     <div class="safety reveal">
       <div class="sicon">🛡️</div>
-      <p><b>Safety is wired in, not bolted on.</b> If the brain ever goes quiet — a crash, an unplugged cable, anything — the motors stop themselves within half a second. And when someone steps into the cart's path, forward motion pauses until they're clear.</p>
+      <p><b>Safety is wired in, not bolted on.</b> If the brain ever goes quiet, the motors stop themselves within half a second. If someone steps into the path, the cart waits.</p>
     </div>
   </section>
 
   <!-- ── CTA ──────────────────────────────────────── -->
   <div class="cta reveal">
     <h2>Curious how deep it goes?</h2>
-    <p>Computer vision, control theory, embedded firmware and a self-tuning robot — all in one readable codebase. The README has the full technical story.</p>
+    <p>Vision, controls, and firmware in one readable codebase. The README has the full story.</p>
     <div class="hero-cta" style="justify-content:center">
       <a class="btn primary" href="https://github.com/terrencelei/Autonomous-Shopping-Cart" target="_blank" rel="noopener">Explore the project on GitHub ↗</a>
       <a class="btn ghost" href="https://github.com/terrencelei/Autonomous-Shopping-Cart#readme" target="_blank" rel="noopener">Read the technical README</a>
