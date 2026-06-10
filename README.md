@@ -1,5 +1,7 @@
 # Autonomous Shopping Cart
 
+> **🛒 New here? Take the friendly tour first → [terrencelei.github.io/Autonomous-Shopping-Cart](https://terrencelei.github.io/Autonomous-Shopping-Cart/)** — a visual, non-technical introduction to the project.
+
 A self-following shopping cart that tracks a designated shopper and treats all other people as obstacles. The main program is **`follow.py`** — a single-process reactive follower on the Raspberry Pi.
 
 | Component | Role | Technology |
