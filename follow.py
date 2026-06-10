@@ -7,8 +7,10 @@ spin + displacement pseudocode.
     angle estimates, IMX500 detector, and ByteTrack target lock.
   * Drive: speaks the ESP32 RPM protocol directly ("L<rpm> R<rpm>\\n") and
     reads "E,<l>,<r>\\n" encoder feedback.  The proven breakaway kick
-    (KICK_RPM = 18 released after KICK_TICKS = 45 encoder ticks) is reused.
-  * Control: implemented fresh from the pseudocode (drift / spin / follow).
+    (KICK_RPM released after KICK_TICKS encoder ticks) is reused.
+  * Control: damped proportional distance follow (deadband + hysteresis +
+    slew limiting, coast-compensated by an online-learned LINEAR_INERTIA)
+    plus the drift-compensated spin-to-centre.
     Self-contained — the hardware/dimensional specs it needs are defined
     below (keep in sync if the cart is re-measured).
 
@@ -98,12 +100,27 @@ PURSUE_RPM       = 30.0   # forward wheel RPM when chasing the last-known positi
 PURSUE_MAX_M     = 2.5    # give up after driving this far forward with no target
 PURSUE_ENABLED   = False  # disabled for now: when lost, always spin-search (no forward pursue)
 
-# Distance (displacement) controller
-THRESH_M       = HOLD_DIST   # standoff distance to hold (m)
-LINEAR_INERTIA = 0.0    # s — forward coast factor, reserved for linear drift  [calibrate]
-KP_DIST        = 20.0   # RPM speed change per (m/s) of approach rate dx        [calibrate]
-KI_DIST        = 0.0    # RPM speed change per metre of standoff error (x-thresh) [calibrate]
-DX_ALPHA       = 0.3    # EMA factor for the smoothed dx/dt
+# Distance (displacement) controller — damped proportional with a deadband and
+# slew limiting (the law follow_straight.py proved out; replaces the old
+# integrating S += KP*dx law, whose windup + hard 2.00 m stop caused the
+# forward/backward lurching at the hold ring).
+THRESH_M        = HOLD_DIST  # standoff distance to hold (m)
+DIST_DEADBAND_M = 0.20       # no-drive band beyond the hold distance
+RESUME_HYST_M   = 0.10       # once stopped, error must exceed deadband+this to restart
+KP_DIST         = 30.0       # RPM per metre beyond the deadband                 [calibrate]
+KD_DIST         = 8.0        # RPM per (m/s) of opening/closing rate dx          [calibrate]
+DX_ALPHA        = 0.2        # EMA factor for the smoothed dx/dt
+MIN_DRIVE_RPM   = 12.0       # smallest nonzero forward command (lower duty just stalls) [calibrate]
+RPM_SLEW_UP_PER_S   = 50.0   # max command increase per second (gentle accel)
+RPM_SLEW_DOWN_PER_S = 150.0  # max command decrease per second (firm, but no brake-slam)
+
+# Forward coast compensation: brake early by the distance the cart will coast.
+# LINEAR_INERTIA is learned online from every commanded stop (coast distance /
+# speed at the stop) — the forward twin of the spin controller's inertia refine.
+LINEAR_INERTIA = 0.0    # s — forward coast factor; error -= v_fwd*LINEAR_INERTIA (learned)
+LI_LEARN_ALPHA = 0.3    # EMA weight of each new coast measurement
+LI_MAX_S       = 1.0    # sanity cap (s)
+V_FWD_ALPHA    = 0.3    # EMA for the encoder-measured forward speed (m/s)
 
 # Basic obstacle avoidance: pause forward motion when an obstacle is closer than
 # the target and roughly in the path; resume normal follow once it clears.
@@ -133,8 +150,10 @@ KD_ANGLE = 0.0    # RPM of wheel-difference per (rad/s) of angular rate         
 STEER_SIGN = +1   # angle→turn polarity for BOTH steering and re-centre spins.
                   # Flip to -1 if the cart corrects the WRONG way.
 
-# Limits
-MAX_RPM = 800.0  # wheel RPM cap (= cart_motor.ino's ~100 RPM full-PWM point)
+# Limits — cart_motor.ino clamps commands to ±100 and maps 100 → full PWM, so
+# any cap above 100 is pure windup headroom: the controller saturates the
+# firmware, steering differentials get erased, and unwinding takes seconds.
+MAX_RPM = 100.0  # wheel RPM cap = cart_motor.ino's full-PWM point
 
 
 # =============================================================================
@@ -638,23 +657,80 @@ class Kick:
             _trace(f"kick ramp → {self._rpm:.0f}rpm (still stalled)")
 
 
-class FollowController:
-    """Live state for the follow loop.  ``step`` returns (S, rpm_diff) — forward
-    wheel RPM and steering RPM-difference — or None on a tick that ran a
-    blocking re-centre spin (caller skips its send).  The breakaway kick lives
-    outside, in the ``Kick`` helper."""
+class CoastLearner:
+    """Online LINEAR_INERTIA estimator — the forward twin of the spin
+    controller's inertia refine.
+
+    Watches the outgoing wheel commands; when a straight-ish forward drive is
+    commanded to a stop while the cart still has measurable speed, it counts
+    how far the encoders coast before settling.  Each event yields
+    coast_m / v0 = seconds of coast, EMA-blended into LINEAR_INERTIA, which
+    the distance law uses to start braking early (error -= v*LINEAR_INERTIA).
+    """
+
+    MIN_V0_MPS = 0.05    # ignore stops from a crawl — encoder noise dominates
+    SETTLE_S   = 0.20    # no encoder movement for this long = settled
+    TIMEOUT_S  = 1.5     # abandon the measurement (pushed by hand / new command)
 
     def __init__(self):
-        self.S = 0.0           # current forward wheel RPM
+        self._was_fwd = False
+        self._coasting = False
+
+    def feed(self, cmd_l, cmd_r, d_l, d_r, v_fwd, now):
+        global LINEAR_INERTIA
+        stopped = (cmd_l == 0.0 and cmd_r == 0.0)
+
+        if self._coasting:
+            if not stopped or (now - self._t0) > self.TIMEOUT_S:
+                self._coasting = False            # restarted / timed out — discard
+            else:
+                self._dist += ((d_l + d_r) / 2.0) * M_PER_PULSE
+                if d_l or d_r:
+                    self._last_move = now
+                elif (now - self._last_move) >= self.SETTLE_S:
+                    self._coasting = False        # settled — fold in the measurement
+                    li = abs(self._dist) / self._v0
+                    if LINEAR_INERTIA <= 0.0:     # first sample seeds directly
+                        LINEAR_INERTIA = min(li, LI_MAX_S)
+                    else:
+                        LINEAR_INERTIA = min(LI_MAX_S,
+                                             (1.0 - LI_LEARN_ALPHA) * LINEAR_INERTIA
+                                             + LI_LEARN_ALPHA * li)
+                    _trace(f"coast learn: {abs(self._dist) * 100:.1f}cm @ {self._v0:.2f}m/s "
+                           f"→ LINEAR_INERTIA {LINEAR_INERTIA:.3f}s")
+        elif stopped and self._was_fwd and v_fwd >= self.MIN_V0_MPS:
+            self._coasting = True                 # forward drive just commanded to stop
+            self._v0 = v_fwd
+            self._dist = 0.0
+            self._t0 = self._last_move = now
+
+        # "Forward-ish": both wheels forward and mostly straight (not a spin).
+        self._was_fwd = (cmd_l > 0.0 and cmd_r > 0.0 and
+                         abs(cmd_l - cmd_r) < 0.5 * (cmd_l + cmd_r))
+
+
+class FollowController:
+    """Live state for the follow loop.  ``step`` returns (S, rpm_diff) — forward
+    wheel RPM and steering RPM-difference.  Damped proportional distance law
+    with a deadband, stop/restart hysteresis and slew limiting, plus coast
+    compensation: the standoff error is reduced by the distance the cart will
+    coast at its current speed (v_fwd * LINEAR_INERTIA) so it slows early and
+    rolls into the hold ring instead of braking past it.  The breakaway kick
+    lives outside, in the ``Kick`` helper."""
+
+    def __init__(self):
+        self.S = 0.0           # current forward wheel RPM (slew-limited state)
         self.dx = 0.0          # smoothed d(distance)/dt  (m/s)
         self._prev_x = None
         self._prev_theta = 0.0
+        self._holding = False  # stopped at the ring; restart needs deadband+hysteresis
 
     def after_spin(self):
-        """Reset forward state after a re-centre spin: re-kick from rest and
-        discard the stale distance derivative (the cart turned in place)."""
-        self.S = 0.0
+        """Discard the stale distance derivative after a centring spin (the
+        geometry to the target jumped); keep S — forward drive continued
+        through the non-blocking spin."""
         self._prev_x = None
+        self.dx = 0.0
 
     def _derivatives(self, x, theta, dt):
         raw_dx = 0.0 if self._prev_x is None else (x - self._prev_x) / dt
@@ -665,13 +741,22 @@ class FollowController:
         return dtheta
 
     def target_lost(self, motors=None):
-        """Coast to a stop and reset derivative history when no target."""
+        """Stop and reset derivative history when no target."""
         self.S = 0.0
+        self.dx = 0.0
         self._prev_x = None
+        self._holding = False
         if motors is not None:
             motors.send_rpm(0.0, 0.0)
 
-    def step(self, x, angle_deg, dt):
+    def coast_step(self, dt):
+        """One tick of coasting down during the lost-target grace window: slew
+        S toward 0 instead of brake-slamming on a one-frame lock flicker."""
+        self.S = max(0.0, self.S - RPM_SLEW_DOWN_PER_S * dt)
+        self._prev_x = None
+        return self.S
+
+    def step(self, x, angle_deg, dt, v_fwd=0.0):
         """Distance + in-band steering. Returns (S, rpm_diff). Big re-centre
         turns are handled by the non-blocking Spinner in the run loop, so this
         only does small steering corrections while following."""
@@ -679,15 +764,31 @@ class FollowController:
         dtheta = self._derivatives(x, theta, dt)
         rpm_diff = KP_ANGLE * theta + KD_ANGLE * dtheta
 
-        # Distance control (PI). Breakaway kick is applied by the caller's Kick.
-        # Forward-only: stop at the hold distance or closer, never reverse.
-        if x - THRESH_M < 0.0:
-            _trace(f"step: dist {x:.2f} < hold {THRESH_M:.2f} → stop")
-            self.S = 0.0
+        # Effective standoff error, shrunk by the predicted coast distance so
+        # the cart starts braking early instead of sailing through the ring.
+        error = (x - THRESH_M) - max(v_fwd, 0.0) * LINEAR_INERTIA
+
+        # Deadband + hysteresis: drive only when clearly beyond the hold ring;
+        # once stopped, restart only when clearly outside it again, so vision
+        # noise at the boundary can't toggle stop/kick/stop.
+        resume_at = DIST_DEADBAND_M + (RESUME_HYST_M if self._holding else 0.0)
+        if error <= resume_at:
+            self._holding = True
+            target_s = 0.0
+            _trace(f"step: err {error:+.2f} ≤ {resume_at:.2f} → hold")
         else:
-            delta_S = KP_DIST * self.dx + KI_DIST * (x - THRESH_M)
-            self.S = _clip(self.S + delta_S, 0.0, MAX_RPM)   # clamp >= 0: no reverse
-            _trace(f"step: PI dist={x:.2f} dx={self.dx:+.2f} → S={self.S:+.1f} diff={rpm_diff:+.1f}")
+            self._holding = False
+            target_s = KP_DIST * (error - DIST_DEADBAND_M) + KD_DIST * self.dx
+            target_s = _clip(target_s, 0.0, MAX_RPM)   # forward-only: never reverse
+            if 0.0 < target_s < MIN_DRIVE_RPM:
+                target_s = MIN_DRIVE_RPM               # below this duty the cart stalls
+            _trace(f"step: P dist={x:.2f} err={error:+.2f} dx={self.dx:+.2f} "
+                   f"→ target={target_s:.1f} diff={rpm_diff:+.1f}")
+
+        # Slew limiting: gentle acceleration, firm (but not slammed) deceleration.
+        self.S = _clip(target_s,
+                       self.S - RPM_SLEW_DOWN_PER_S * dt,
+                       self.S + RPM_SLEW_UP_PER_S * dt)
         return self.S, rpm_diff
 
 def calibrate_angular_inertia(motors, spin_revs=1.0, coast_window_s=1.5):
@@ -731,9 +832,15 @@ def calibrate_angular_inertia(motors, spin_revs=1.0, coast_window_s=1.5):
     motors.send_rpm(-spin_rpm, +spin_rpm)
     target_yaw = spin_revs * 2.0 * math.pi
     t_ramp = time.monotonic()
+    t_tx = time.monotonic()
     yaw_at_ramp = 0.0
     while abs(_ticks_to_yaw(cum_dl, cum_dr)) < target_yaw:
         time.sleep(0.005)
+        if time.monotonic() - t_tx >= 0.1:
+            # Keep feeding the ESP32's 500 ms command watchdog — a slow 360°
+            # takes many seconds, and a single send would stutter-stop the spin.
+            motors.send_rpm(-spin_rpm, +spin_rpm)
+            t_tx = time.monotonic()
         dl, dr = motors.read_deltas()
         _record(dl, dr, "drive")
         if time.monotonic() - t_ramp >= KICK_TIMEOUT_S:
@@ -763,13 +870,25 @@ def calibrate_angular_inertia(motors, spin_revs=1.0, coast_window_s=1.5):
         coast_dl += dl
         coast_dr += dr
 
-    # ── phase 4: compute (use the actual final spin RPM, post-ramp) ────────────
+    # ── phase 4: compute ───────────────────────────────────────────────────────
+    # The link is open-loop (a commanded RPM is really a PWM duty, not a real
+    # speed), so divide the coast by the yaw rate the encoders actually
+    # measured over the last 0.3 s of the drive phase — falling back to the
+    # commanded rate only if the window is too sparse.
     overshoot_rad = abs(_ticks_to_yaw(coast_dl, coast_dr))
-    omega_kick    = _rpm_to_yaw(spin_rpm)
-    result        = overshoot_rad / omega_kick if omega_kick > 0 else 0.0
+    drive_i = [i for i, ph in enumerate(phases)
+               if ph == "drive" and times[i] >= t_stop_rel - 0.3]
+    omega_kick = 0.0
+    if len(drive_i) >= 2:
+        span = times[drive_i[-1]] - times[drive_i[0]]
+        if span > 0:
+            omega_kick = abs(yaws[drive_i[-1]] - yaws[drive_i[0]]) / span
+    if omega_kick <= 0.0:
+        omega_kick = _rpm_to_yaw(spin_rpm)
+    result = overshoot_rad / omega_kick if omega_kick > 0 else 0.0
 
     print(f"  spin {spin_rpm:.0f} rpm  overshoot {math.degrees(overshoot_rad):.2f}°  "
-          f"omega {omega_kick:.3f} rad/s  → ANGULAR_INERTIA = {result:.5f} s")
+          f"omega(measured) {omega_kick:.3f} rad/s  → ANGULAR_INERTIA = {result:.5f} s")
 
     ANGULAR_INERTIA = result
 
@@ -906,14 +1025,28 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     obstacle_blocked_until = 0.0
     measure_residual = False
     spin_start_angle = 0.0
+    v_fwd = 0.0                  # encoder-measured forward speed (m/s, EMA)
+    stall_since = None           # post-kick stall watchdog timer
+    coast_learner = CoastLearner()
 
-    print("follow.py — spin-to-centre + PI distance follow")
+    print("follow.py — spin-to-centre + damped-P distance follow")
     print(f"Hold {THRESH_M:.2f} m  centre band ±{THETA_THRESH_DEG:.0f}°  "
           f"turn {TURN_RPM} rpm  kick {KICK_RPM} rpm/{KICK_TICKS} ticks  max {MAX_RPM:.0f} rpm")
 
-    # 10 s camera + colour-tracking warmup before any motion.
+    # Camera + colour-tracking warmup before any motion.
     _warmup_vision(cap, tracker, smooth_state, target_lock, Y,
                    seconds=VISION_WARMUP_S, no_display=no_display)
+
+    # Startup spin calibration (one full 360°): measures ANGULAR_INERTIA from
+    # the post-stop encoder coast, seeding the Spinner's drift compensation
+    # (the online refine keeps tuning it from each spin's residual angle).
+    if motors.has_serial:
+        if countdown > 0:
+            print(f"*** Calibration spin + follow start in {countdown}s — keep the cart clear ***")
+            for k in range(countdown, 0, -1):
+                print(f"  {k}...")
+                time.sleep(1.0)
+        calibrate_angular_inertia(motors)
 
     start = time.monotonic()
     prev_t = start
@@ -941,6 +1074,8 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
             # Dead reckoning runs on slip-rejected deltas (cmd_*_rpm = last tick's command).
             od_l, od_r = deslip(d_l, d_r, cmd_l_rpm, cmd_r_rpm, dt)
             meas_yaw = odom.update(od_l, od_r)
+            v_inst = ((od_l + od_r) / 2.0) * M_PER_PULSE / dt   # forward speed (m/s)
+            v_fwd = (1.0 - V_FWD_ALPHA) * v_fwd + V_FWD_ALPHA * v_inst
             # Uncommanded rotation = measured yaw minus the yaw we actually commanded
             # last tick. A manual spin adds to the measured yaw but not the commanded,
             # so it accumulates whether the cart is following, stopped, or searching.
@@ -980,20 +1115,27 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                     l_rpm, r_rpm = cmd
                     mode_str = "RETURN"
             elif target_row is None:
-                # Target lost. After a short grace period reacquire: if it was last
-                # seen near centre it just walked too far → PURSUE forward; if still
-                # not found, spin-SEARCH. If it was last seen out to the side it left
-                # the frame sideways → spin-SEARCH straight away. SEARCH spins forever.
-                ctrl.target_lost()          # reset forward state (don't send 0 — reacquire drives)
+                # Target lost. During the grace window coast down (slewed)
+                # instead of brake-slamming — a one-frame lock flicker no
+                # longer jerks the cart. After the grace, reacquire: if it was
+                # last seen near centre it just walked too far → PURSUE
+                # forward; if still not found, spin-SEARCH. If it was last
+                # seen out to the side → spin-SEARCH straight away.
                 kick.cancel()
-                prev_S = 0.0
                 x = angle_deg = None
                 if lost_since is None:
                     lost_since = now
 
-                l_rpm = r_rpm = 0.0
-                mode_str = "LOST"
-                if (now - lost_since) >= SEARCH_GRACE_S:
+                if (now - lost_since) < SEARCH_GRACE_S:
+                    S = ctrl.coast_step(dt)   # decay toward 0, hold the line
+                    prev_S = S
+                    l_rpm = r_rpm = S
+                    mode_str = "LOST"
+                else:
+                    ctrl.target_lost()        # reset forward state (reacquire drives)
+                    prev_S = 0.0
+                    l_rpm = r_rpm = 0.0
+                    mode_str = "LOST"
                     if not searcher.active and not pursuer.active:
                         if PURSUE_ENABLED and abs(last_angle_deg) <= LOST_SIDE_ANGLE_DEG:
                             pursuer.start()                              # centred → chase forward
@@ -1039,7 +1181,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                     _trace(f"inertia refine: residual {angle_deg:+.1f}° → ANGULAR_INERTIA {ANGULAR_INERTIA:.4f}s")
                     measure_residual = False
 
-                S, rpm_diff = ctrl.step(x, angle_deg, dt)
+                S, rpm_diff = ctrl.step(x, angle_deg, dt, v_fwd)
 
                 # Engage a drift-compensated centring spin only while the shopper
                 # is still beyond the hold distance. If YOLO actively sees them
@@ -1058,6 +1200,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                     fwd = 0.0 if (blocked or S <= 0.0) else S    # forward during the spin
                     if cmd is None:            # spin finished → refine inertia next frame
                         measure_residual = True
+                        ctrl.after_spin()      # drop the stale distance derivative
                         l_rpm = r_rpm = fwd
                     else:                      # forward + the spin's point-turn, peak-clamped
                         turn_l, turn_r = cmd
@@ -1082,12 +1225,27 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
                         if kick.active:        # floor the speed at the (ramping) kick level
                             S = math.copysign(max(abs(S), kick.rpm), S)
                             ctrl.S = S
+                            stall_since = None
+                        elif abs(d_l) + abs(d_r) < 2:
+                            # Post-kick stall watch: commanded forward but not
+                            # moving (e.g. a low-RPM crawl below breakaway) —
+                            # after KICK_TIMEOUT_S re-shove with a fresh kick.
+                            if stall_since is None:
+                                stall_since = now
+                            elif now - stall_since >= KICK_TIMEOUT_S:
+                                kick.arm()
+                                stall_since = None
+                        else:
+                            stall_since = None
                         mode_str = "KICK" if kick.active else "FOLLOW"
                     prev_S = S
                     l_rpm, r_rpm = mix_wheels(S, rpm_diff)
 
             cmd_l_rpm, cmd_r_rpm = l_rpm, r_rpm
             motors.send_rpm(l_rpm, r_rpm)
+            if mode_str not in ("KICK", "FOLLOW"):
+                stall_since = None
+            coast_learner.feed(cmd_l_rpm, cmd_r_rpm, d_l, d_r, v_fwd, now)
 
             if t - last_log >= 0.5:
                 last_log = t

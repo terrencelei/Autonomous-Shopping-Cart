@@ -5,7 +5,7 @@ A self-following shopping cart that tracks a designated shopper and treats all o
 | Component | Role | Technology |
 |-----------|------|------------|
 | **Vision** | Sensing | YOLO11n on IMX500 NPU + ByteTrack (`vision/yolo_detect.py`) |
-| **Follower** | Control | `follow.py` — reactive spin-to-centre + PI distance follow |
+| **Follower** | Control | `follow.py` — reactive spin-to-centre + damped-P distance follow |
 | **ESP32** | Motor control | Dual TB9051FTG drivers with quadrature encoders |
 
 ### Runtime pipeline
@@ -34,7 +34,7 @@ python3 follow.py --trace         # echo serial traffic + control-flow calls
 
 Stop with **Ctrl-C** (or **Q** in the Cart View window). Headless mode is auto-enabled if no display is detected. `follow_straight.py` is a distance-only (no steering) variant with the same flags.
 
-> **Startup sequence:** `follow.py` first runs a **10 s vision warmup** (`VISION_WARMUP_S`) so ByteTrack and the colour tracking settle on the shopper — stand in view during this. It then spins **one full 360°** to measure `ANGULAR_INERTIA`, and only then starts following. **Safety:** keep the cart clear of people and obstacles when you start it (it spins in place during calibration).
+> **Startup sequence:** `follow.py` first runs a **15 s vision warmup** (`VISION_WARMUP_S`) so ByteTrack and the colour tracking settle on the shopper — stand in view during this. After the `--countdown` delay it then spins **one full 360°** to measure `ANGULAR_INERTIA`, and only then starts following. **Safety:** keep the cart clear of people and obstacles when you start it (it spins in place during calibration).
 
 ### Autostart on boot (optional)
 
@@ -183,7 +183,7 @@ python3 follow.py --trace         # echo serial traffic + control-flow calls
 Each frame it reads the locked shopper's `(distance, angle)` and then:
 
 1. **Centering — `Spinner` (with forward drive).** If `|angle| > THETA_THRESH_DEG` it engages a non-blocking drift-compensated point turn (`Spinner`: a spin kick at `SPIN_KICK_RPM` released after `KICK_TICKS`, then a steady turn at `TURN_RPM`, with coast compensation from `ANGULAR_INERTIA`). The distance controller's forward speed is **added to the spin's wheel commands**, so the cart arcs toward the shopper while still closing the distance — it never stalls in place to spin. **Online inertia refine:** the frame after a spin, the target's leftover angle is the over/undershoot — `ANGULAR_INERTIA` is nudged (`INERTIA_LEARN_K`: overshoot → more, undershoot → less), seeded by the startup 360° calibration, so spins self-tune. Inside the centre band it just steers while driving (the mixing in step 3).
-2. **Distance — PI.** Inside the centre band it holds `THRESH_M` (= `HOLD_DIST`, 2 m): `S += KP_DIST·dx + KI_DIST·(x − thresh)`, clipped to `MAX_RPM` (= 100 rpm). `dx` is a smoothed finite difference of distance. On departure from rest a separate `Kick` floors the forward speed at `KICK_RPM` (= 50 rpm) until `KICK_TICKS` of encoder movement confirm breakaway. If the cart is still stalled after `KICK_TIMEOUT_S`, the kick ramps up by `KICK_RAMP_STEP` up to `MAX_RPM`.
+2. **Distance — damped P.** Inside the centre band it holds `THRESH_M` (= `HOLD_DIST`, 2 m) with the same law `follow_straight.py` uses: `S = KP_DIST·(error − deadband) + KD_DIST·dx`, slew-limited (`RPM_SLEW_UP_PER_S` / `RPM_SLEW_DOWN_PER_S`) and clipped to `MAX_RPM` (= 100 rpm, the firmware's full-PWM point). The error is **coast-compensated**: `error = (x − thresh) − v·LINEAR_INERTIA`, where `LINEAR_INERTIA` is learned online from every commanded stop (coast distance ÷ speed — the forward twin of the spin-inertia refine), so the cart brakes early and rolls into the ring instead of through it. A `DIST_DEADBAND_M` no-drive band plus `RESUME_HYST_M` restart hysteresis keeps vision noise at the 2 m boundary from toggling stop/kick/stop. On departure from rest a separate `Kick` floors the forward speed at `KICK_RPM` (= 50 rpm) until `KICK_TICKS` of encoder movement confirm breakaway; if still stalled after `KICK_TIMEOUT_S` the kick ramps up by `KICK_RAMP_STEP` (a stall watch also re-arms it if a low-RPM crawl stalls later). A momentary target dropout no longer brake-slams: during `SEARCH_GRACE_S` the cart coasts down on the slew instead.
 3. **Mixing.** Steering `rpm_diff = KP_ANGLE·θ + KD_ANGLE·dθ` is mixed onto the wheels (`R = S + rpm_diff`, `L = S − rpm_diff`) with peak scaling so neither wheel exceeds `MAX_RPM`, then sent as `L<rpm> R<rpm>`.
 4. **Lost → reacquire.** If the shopper leaves the frame, after a `SEARCH_GRACE_S` grace period (so a one-frame dropout doesn't trigger it) the cart reacquires based on where it was last seen:
    - **Roughly centred** (`|last angle| ≤ LOST_SIDE_ANGLE_DEG`) — it just walked too far → `Pursuer` drives **straight forward to the last-known position** (kick ramps to beat stall, then `PURSUE_RPM`). If it covers `PURSUE_MAX_M` and still hasn't found them → fall through to **search**.
@@ -206,9 +206,9 @@ Detection: each tick it accumulates the **measured yaw minus the commanded yaw**
 
 ### Startup calibration
 
-On launch, `follow.py` runs `calibrate_angular_inertia()`: it spins the cart at `SPIN_KICK_RPM`, hard-stops, and measures how far the encoders coast to set `ANGULAR_INERTIA` automatically (logged to `calibration_angular_inertia.csv` / `.png`). **Keep the cart clear at launch.** It is skipped — leaving `ANGULAR_INERTIA = 0` (so `drift()` is a no-op and there is no spin overshoot compensation) — if there's no ESP32 serial (`--no-drive`, or the port didn't open) or the spin can't reach the tick threshold within its timeout. The console prints which case occurred.
+On launch (after the vision warmup and the `--countdown` delay), `follow.py` runs `calibrate_angular_inertia()`: it spins the cart at `SPIN_KICK_RPM`, hard-stops, and measures how far the encoders coast to set `ANGULAR_INERTIA` automatically (logged to `calibration_angular_inertia.csv` / `.png`). The coast is divided by the yaw rate the encoders actually measured before the stop (not the commanded RPM — the link is open-loop PWM), and the spin command is re-sent every 100 ms so the ESP32's 500 ms watchdog can't stutter the calibration. **Keep the cart clear at launch.** It is skipped — leaving `ANGULAR_INERTIA = 0` (so `drift()` is a no-op and there is no spin overshoot compensation) — if there's no ESP32 serial (`--no-drive`, or the port didn't open) or the spin can't reach the tick threshold within its timeout. The console prints which case occurred.
 
-The other gains and `LINEAR_INERTIA` at the top of `follow.py` are placeholders marked `[calibrate]`.
+`LINEAR_INERTIA` needs no startup drive: it is learned online from every commanded stop while following (see *Control loop* step 2). The other gains at the top of `follow.py` marked `[calibrate]` are hand-tuned values.
 
 The Cart View overlay and terminal monitor show `follow.py`'s own state each tick — `FOLLOW`, `SPIN`, `KICK`, `STOP`, `BLOCKED`, `SEARCH`, `PURSUE`, `RETURN`, `HOME`, or `LOST` — not the A\* planner's state machine.
 
@@ -250,7 +250,7 @@ cmd L+18.0 R+18.0rpm  actual L+14.2 R+13.9rpm
 
 ```
 autonomous-shopping-cart/
-├── follow.py                       # MAIN PROGRAM — reactive follower (spin-to-centre + PI
+├── follow.py                       # MAIN PROGRAM — reactive follower (spin-to-centre + damped-P
 │                                   #   distance, obstacle hold, search/pursue, return-home)
 ├── follow_straight.py              # Distance-only (no steering) follower variant
 ├── calibrate_angular_inertia.py    # Standalone angular-inertia calibration
@@ -300,4 +300,4 @@ Calibrate `MAX_RPM` in `firmware/cart_motor/cart_motor.ino`. Run the cart at ful
 Check `RIGHT_ENC_SIGN` / `LEFT_ENC_SIGN` — if either encoder counts the wrong direction the odometry will diverge quickly. Verify with: push the cart forward by hand and check that both encoder counts in the `E,<l>,<r>` stream increase.
 
 **Obstacle avoidance not triggering:**
-The cart only avoids from `IN_VIEW`, `FOLLOW_GOAL`, and `RETURN_CENTER`. If the cart is in a search state (`SPIN` etc.) when an obstacle appears, avoidance does not interrupt it. This is by design — avoidance is only relevant while actively following.
+The obstacle hold only runs while a TARGET is visible (`FOLLOW`/`KICK`/`SPIN` ticks). In `SEARCH`, `PURSUE`, and `RETURN` the cart does not check obstacles. This is by design — avoidance is only relevant while actively following.
