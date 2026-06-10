@@ -65,7 +65,7 @@ HOLD_DIST = 2.0                   # target hold distance (m)
 
 # Vision capture
 CAM_W, CAM_H, CAM_FPS = 640, 480, 30
-VISION_WARMUP_S = 15.0   # run vision (no drive) this long at startup so colour tracking settles
+VISION_WARMUP_S = 15.0   # run vision (no drive) this long at startup so color tracking settles
 SEARCH_PERSON_CONFIDENCE = 0.15  # lower YOLO person threshold while spin-searching
 SEARCH_TRACK_ACTIVATION = 0.05   # lower ByteTrack activation threshold while spin-searching
 SEARCH_TRACK_MATCHING = 0.5      # looser ByteTrack matching while spin-searching
@@ -650,8 +650,8 @@ class FollowController:
 
 def _warmup_vision(cap, tracker, smooth_state, target_lock, Y, seconds, no_display):
     """Run the vision pipeline (no drive) for ``seconds`` so ByteTrack and the
-    TargetLock colour profile settle on the shopper before the cart moves."""
-    print(f"Warming up camera + colour tracking for {seconds:.0f}s — stand in view…")
+    TargetLock color profile settle on the shopper before the cart moves."""
+    print(f"Warming up camera + color tracking for {seconds:.0f}s — stand in view…")
     t0 = time.monotonic()
     while time.monotonic() - t0 < seconds:
         ret, frame = cap.read()
@@ -662,7 +662,7 @@ def _warmup_vision(cap, tracker, smooth_state, target_lock, Y, seconds, no_displ
         out, _rows = Y.annotate_frame(frame, tracked, smooth_state, target_lock, time.monotonic())
         if not no_display:
             remaining = seconds - (time.monotonic() - t0)
-            Y.cv2.putText(out, f"CALIBRATING colour… {remaining:.0f}s", (10, 25),
+            Y.cv2.putText(out, f"CALIBRATING color… {remaining:.0f}s", (10, 25),
                           Y.cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
             Y.cv2.imshow("Cart View", out)
             if Y.cv2.waitKey(1) & 0xFF == ord("q"):
@@ -724,7 +724,7 @@ def run(drive=True, no_display=False, countdown=3, duration=0.0, trace=False):
     print(f"Hold {THRESH_M:.2f}m ±{DIST_DEADBAND_M:.2f}  angle deadband ±{ANGLE_DEADBAND_DEG:.0f}°  "
           f"kick {KICK_RPM:.0f}/{SPIN_KICK_RPM:.0f} rpm  max {MAX_RPM:.0f} rpm")
 
-    # Camera + colour-tracking warmup before any motion.
+    # Camera + color-tracking warmup before any motion.
     _warmup_vision(cap, tracker, smooth_state, target_lock, Y,
                    seconds=VISION_WARMUP_S, no_display=no_display)
 

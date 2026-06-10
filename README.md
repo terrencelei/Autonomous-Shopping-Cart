@@ -36,7 +36,7 @@ python3 follow.py --trace         # echo serial traffic + control-flow calls
 
 Stop with **Ctrl-C** (or **Q** in the Cart View window). Headless mode is auto-enabled if no display is detected. `follow_straight.py` is a distance-only (no steering) variant with the same flags.
 
-> **Startup sequence:** `follow.py` first runs a **15 s vision warmup** (`VISION_WARMUP_S`) so ByteTrack and the colour tracking settle on the shopper — stand in view during this. After the `--countdown` delay it starts following immediately; there is no calibration run — both inertia constants are learned on the fly (see *Inertia learning*). **Safety:** keep the cart's path clear when it starts.
+> **Startup sequence:** `follow.py` first runs a **15 s vision warmup** (`VISION_WARMUP_S`) so ByteTrack and the color tracking settle on the shopper — stand in view during this. After the `--countdown` delay it starts following immediately; there is no calibration run — both inertia constants are learned on the fly (see *Inertia learning*). **Safety:** keep the cart's path clear when it starts.
 
 ### Autostart on boot (optional)
 
