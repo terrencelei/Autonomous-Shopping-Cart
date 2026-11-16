@@ -9,260 +9,311 @@
 <meta property="og:description" content="A cart that follows you around the store — AI camera, Raspberry Pi brain, self-tuning control. No remote, no phone, no cloud.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://terrencelei.github.io/Autonomous-Shopping-Cart/assets/og.jpg">
+<meta name="theme-color" content="#0a0a0b">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛒</text></svg>">
+<script>document.documentElement.classList.add('js')</script>
 <style>
+  /* Design system: near-black and paper scenes, system type, one green for "the shopper", one red for "everyone else". */
   :root{
-    --bg:#0a0f1e;
-    --bg2:#0e1530;
-    --panel:rgba(255,255,255,.045);
-    --panel-edge:rgba(255,255,255,.09);
-    --ink:#eef2ff;
-    --muted:#9aa7c7;
-    --green:#34d399;
-    --green-soft:rgba(52,211,153,.14);
-    --coral:#fb7185;
-    --coral-soft:rgba(251,113,133,.14);
-    --blue:#60a5fa;
-    --radius:18px;
-    --maxw:1100px;
-    --nav-clearance:96px;
-    --hero-top-gap:190px;
+    --bg:#0a0a0b; --bg-2:#111113; --bg-3:#18181b;
+    --paper:#f5f5f7; --paper-2:#ffffff;
+    --fg:#f5f5f7; --fg-2:rgba(245,245,247,.74); --fg-3:rgba(245,245,247,.50); --fg-4:rgba(245,245,247,.28);
+    --ink:#1d1d1f; --ink-2:#424245; --ink-3:#6e6e73;
+    --line:rgba(255,255,255,.10); --line-2:rgba(255,255,255,.20); --line-3:rgba(255,255,255,.55);
+    --line-ink:rgba(0,0,0,.08); --line-ink-2:rgba(0,0,0,.16);
+    --ok:#30d158; --bad:#ff453a; --warn:#ffb340; --focus:#2997ff;
+    --txt-2:var(--fg-2); --txt-3:var(--fg-3); --surface:var(--bg-2);
+    --c-ok:var(--ok); --c-bad:var(--bad); --c-warn:var(--warn);
+    --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Helvetica Neue",Helvetica,Arial,sans-serif;
+    --text:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,Arial,sans-serif;
+    --ease:cubic-bezier(.22,.61,.36,1); --ease-out:cubic-bezier(.16,1,.3,1); --ease-io:cubic-bezier(.65,0,.35,1);
+    --maxw:1360px; --gutter:clamp(20px,4.2vw,48px);
+    --r-s:12px; --r:20px;
+    --sec-pad:clamp(80px,9vw,128px);
+    --nav-h:52px;
   }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html{scroll-behavior:smooth}
-  body{
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Helvetica,Arial,sans-serif;
-    background:
-      radial-gradient(1100px 500px at 75% -10%, rgba(52,211,153,.10), transparent 60%),
-      radial-gradient(900px 500px at -10% 25%, rgba(96,165,250,.10), transparent 60%),
-      var(--bg);
-    color:var(--ink);
-    line-height:1.6;
-    padding-top:var(--nav-clearance);
-    -webkit-font-smoothing:antialiased;
-  }
+  *,*::before,*::after{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%;text-size-adjust:100%;scroll-padding-top:calc(var(--nav-h) + 8px);background:var(--bg)}
+  @media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--text);font-size:17px;line-height:1.47;
+    -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility;overflow-x:hidden}
+  img,svg,video{display:block;max-width:100%}
+  img{height:auto}
+  h1,h2,h3,p,ul,figure{margin:0}
+  ul{padding:0;list-style:none}
   a{color:inherit;text-decoration:none}
-  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+  button{font:inherit;color:inherit}
+  :focus-visible{outline:2px solid var(--focus);outline-offset:3px;border-radius:6px}
+  .skip{position:absolute;left:12px;top:-60px;z-index:100;background:var(--fg);color:var(--ink);padding:10px 14px;border-radius:10px;font-weight:600}
+  .skip:focus{top:12px}
 
-  /* ── nav ─────────────────────────────────────────── */
-  nav{
-    position:fixed;top:0;left:0;right:0;z-index:100;
-    background:rgba(10,15,30,.65);
-    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
-    border-bottom:1px solid rgba(255,255,255,.06);
-  }
-  .nav-inner{max-width:var(--maxw);margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:22px}
-  .logo{font-weight:800;letter-spacing:.2px;display:flex;align-items:center;gap:10px;font-size:1.02rem}
-  .logo .dot{width:10px;height:10px;border-radius:50%;background:var(--green);box-shadow:0 0 12px var(--green)}
-  .nav-links{display:flex;gap:20px;margin-left:auto;align-items:center}
-  .nav-links a{color:var(--muted);font-size:.92rem;font-weight:500;transition:color .2s}
-  .nav-links a:hover{color:var(--ink)}
-  .btn{
-    display:inline-flex;align-items:center;gap:8px;
-    padding:10px 18px;border-radius:999px;font-weight:600;font-size:.95rem;
-    border:1px solid var(--panel-edge);transition:transform .15s ease, background .2s, border-color .2s;
-  }
-  .btn:hover{transform:translateY(-1px)}
-  .btn.primary{background:var(--green);color:#06281c;border-color:transparent;box-shadow:0 8px 30px rgba(52,211,153,.35)}
-  .btn.primary:hover{background:#46e3aa}
-  .btn.ghost{background:var(--panel)}
-  .btn.ghost:hover{border-color:rgba(255,255,255,.22)}
-  .nav-links .btn{padding:8px 16px;font-size:.88rem}
+  /* ── layout ──────────────────────────────────────── */
+  .wrap{width:100%;max-width:calc(var(--maxw) + 2*var(--gutter));margin:0 auto;padding:0 var(--gutter)}
+  .sec{position:relative;padding:var(--sec-pad) 0}
+  main > .sec{isolation:isolate}
+  .sec--dark{background:var(--bg);color:var(--fg)}
+  .sec--light{background:var(--paper);color:var(--ink);
+    --line:var(--line-ink);--line-2:var(--line-ink-2);--txt-2:var(--ink-2);--txt-3:var(--ink-3);--surface:var(--paper-2);
+    --c-ok:#1f8a3b;--c-bad:#d70015;--c-warn:#a85a00}
+  .sec-head{max-width:880px;margin:0 0 clamp(28px,3.4vw,48px)}
+  .sec-head .tag,.eyebrow{display:block;margin:0 0 14px;font-size:clamp(18px,1.5vw,22px);line-height:1.25;font-weight:600;letter-spacing:-.005em;color:var(--txt-2)}
+  .sec-head h2,.cta h2{font-family:var(--font);font-size:clamp(34px,5.2vw,68px);line-height:1.04;font-weight:700;letter-spacing:-.03em;text-wrap:balance}
+  .sec-head h2 em{font-style:normal;color:var(--txt-3)}
+  .sec-head p,.cta p{margin-top:18px;max-width:34em;font-size:clamp(18px,1.7vw,24px);line-height:1.35;font-weight:500;letter-spacing:-.012em;color:var(--txt-3);text-wrap:pretty}
 
-  /* ── hero ────────────────────────────────────────── */
-  header{padding:var(--hero-top-gap) 0 40px}
-  .hero{display:grid;grid-template-columns:1.05fr 1fr;gap:48px;align-items:center}
-  h1{font-size:clamp(2.3rem,5vw,3.6rem);line-height:1.08;letter-spacing:-.02em;margin:20px 0 18px;font-weight:800}
-  h1 .grad{background:linear-gradient(90deg,var(--green),var(--blue));-webkit-background-clip:text;background-clip:text;color:transparent}
-  .lede{color:var(--muted);font-size:1.13rem;max-width:34em}
-  .hero-cta{display:flex;gap:14px;margin-top:30px;flex-wrap:wrap}
+  /* ── controls ────────────────────────────────────── */
+  .btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:0 20px;border-radius:999px;border:1px solid var(--line-2);
+    background:transparent;color:inherit;font-size:15px;font-weight:500;letter-spacing:-.01em;cursor:pointer;
+    transition:background .25s var(--ease),border-color .25s var(--ease),color .25s var(--ease),transform .25s var(--ease)}
+  .btn:hover{background:rgba(255,255,255,.08);border-color:var(--line-3)}
+  .btn:active{transform:scale(.98)}
+  .btn svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  .btn.primary{background:var(--fg);color:var(--ink);border-color:var(--fg)}
+  .btn.primary:hover{background:#fff;border-color:#fff}
 
-  .scene-card{
-    background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02));
-    border:1px solid var(--panel-edge);border-radius:var(--radius);
-    padding:14px;box-shadow:0 30px 80px rgba(0,0,0,.45);
-  }
-  .scene-card svg{display:block;width:100%;height:auto;border-radius:10px}
-  .scene-caption{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 6px 2px;color:var(--muted);font-size:.82rem}
-  .legend{display:flex;gap:14px;white-space:nowrap}
-  .legend span{display:inline-flex;align-items:center;gap:6px}
-  .legend i{width:9px;height:9px;border-radius:50%;display:inline-block}
-  .legend .you i{background:var(--green)}
-  .legend .obs i{background:var(--coral)}
+  /* ── nav: adopts the theme of the scene beneath it ── */
+  .nav{position:fixed;inset:0 0 auto 0;z-index:50;height:var(--nav-h);display:flex;align-items:center;
+    background:rgba(10,10,11,.72);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);
+    border-bottom:1px solid rgba(255,255,255,.08)}
+  .nav,.nav .brand,.nav-links a{transition:background .4s var(--ease),border-color .4s var(--ease),color .4s var(--ease)}
+  .nav .wrap{display:flex;align-items:center;justify-content:space-between;gap:24px}
+  .brand{display:inline-flex;align-items:center;min-height:44px;font-family:var(--font);font-weight:700;font-size:17px;letter-spacing:-.01em;color:var(--fg);white-space:nowrap}
+  .nav-links{display:flex;align-items:center;gap:clamp(14px,2.2vw,30px)}
+  .nav-links a:not(.btn){position:relative;display:inline-flex;align-items:center;min-height:44px;padding:0 9px;margin:0 -9px;font-size:12.5px;letter-spacing:-.005em;color:var(--fg-2);white-space:nowrap}
+  .nav-links a:not(.btn):hover,.nav-links a[aria-current="true"]{color:var(--fg)}
+  .nav-links a:not(.btn)::after{content:"";position:absolute;left:9px;right:9px;bottom:9px;height:1px;background:var(--fg);transform:scaleX(0);transition:transform .35s var(--ease-out)}
+  .nav-links a[aria-current="true"]::after{transform:scaleX(1)}
+  .nav-cta{position:relative;min-height:32px;height:32px;padding:0 14px;font-size:12.5px}
+  .nav-cta::before{content:"";position:absolute;left:0;right:0;top:-6px;bottom:-6px}
+  .nav-menu{display:none;place-items:center;width:44px;height:44px;margin-right:-10px;padding:0;border:0;border-radius:50%;background:none;color:inherit;cursor:pointer}
+  .nav-menu svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round}
+  .nav-menu path{transition:transform .35s var(--ease-out);transform-origin:50% 50%}
+  .nav-menu[aria-expanded="true"] path:first-child{transform:translateY(3px) rotate(45deg)}
+  .nav-menu[aria-expanded="true"] path:last-child{transform:translateY(-3px) rotate(-45deg)}
+  .nav-sheet{position:absolute;left:0;right:0;top:100%;padding:6px var(--gutter) 14px;background:rgba(10,10,11,.94);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid rgba(255,255,255,.08)}
+  .nav-sheet[hidden]{display:none}
+  .nav-sheet a{display:flex;align-items:center;min-height:44px;border-bottom:1px solid rgba(255,255,255,.08);font-family:var(--font);font-size:17px;font-weight:600;letter-spacing:-.015em;color:var(--fg)}
+  .nav-sheet li:last-child a{border-bottom:0}
+  .nav--light{background:rgba(245,245,247,.78);border-bottom-color:rgba(0,0,0,.08);color:var(--ink)}
+  .nav--light .brand,.nav--light .nav-links a:not(.btn):hover,.nav--light .nav-links a[aria-current="true"]{color:var(--ink)}
+  .nav--light .nav-links a:not(.btn){color:var(--ink-2)}
+  .nav--light .nav-links a:not(.btn)::after{background:var(--ink)}
+  .nav--light .nav-cta{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  .nav--light .nav-cta:hover{background:#000;border-color:#000}
+  .nav--light .nav-sheet{background:rgba(245,245,247,.96);border-bottom-color:rgba(0,0,0,.08)}
+  .nav--light .nav-sheet a{color:var(--ink);border-bottom-color:rgba(0,0,0,.08)}
+  @media (max-width:900px){.nav-links li:not(.keep){display:none}.nav-menu{display:inline-grid}}
+  @media (min-width:901px){.nav-sheet{display:none!important}}
 
-  /* ── stats strip ─────────────────────────────────── */
-  .stats{margin:64px 0 0}
-  .stats-grid{
-    display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;
-  }
-  .stat{
-    background:var(--panel);border:1px solid var(--panel-edge);border-radius:var(--radius);
-    padding:20px 22px;text-align:left;
-  }
-  .stat b{display:block;font-size:1.7rem;letter-spacing:-.02em;color:var(--ink)}
-  .stat span{color:var(--muted);font-size:.88rem}
-
-  /* ── sections ────────────────────────────────────── */
-  section{padding:90px 0 0;scroll-margin-top:calc(var(--nav-clearance) + 16px)}
-  header{scroll-margin-top:0}
-  .sec-head{max-width:46em;margin-bottom:40px}
-  .sec-head .tag{color:var(--green);font-weight:700;font-size:.8rem;letter-spacing:.16em;text-transform:uppercase}
-  .sec-head h2{font-size:clamp(1.7rem,3.4vw,2.4rem);letter-spacing:-.02em;margin:10px 0 12px;font-weight:800}
-  .sec-head p{color:var(--muted);font-size:1.05rem}
-
-  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-  .card{
-    background:var(--panel);border:1px solid var(--panel-edge);border-radius:var(--radius);
-    padding:26px;transition:transform .2s ease,border-color .2s;
-  }
-  .card:hover{transform:translateY(-3px);border-color:rgba(52,211,153,.35)}
-  .card .ic{
-    width:46px;height:46px;border-radius:13px;display:flex;align-items:center;justify-content:center;
-    background:var(--green-soft);border:1px solid rgba(52,211,153,.25);margin-bottom:16px;
-  }
-  .card .ic svg{width:24px;height:24px;stroke:var(--green);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-  .card h3{font-size:1.08rem;margin-bottom:8px;font-weight:700}
-  .card p{color:var(--muted);font-size:.95rem}
-  .card .step{font-size:.74rem;font-weight:800;letter-spacing:.14em;color:var(--green);margin-bottom:8px}
-
-  /* ── pipeline ────────────────────────────────────── */
-  .pipe{
-    display:flex;align-items:stretch;gap:10px;flex-wrap:wrap;
-    background:var(--panel);border:1px solid var(--panel-edge);border-radius:var(--radius);
-    padding:26px;
-  }
-  .node{flex:1;min-width:150px;text-align:center;padding:18px 10px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid var(--panel-edge)}
-  .node .emoji{font-size:1.6rem}
-  .node b{display:block;margin-top:6px;font-size:.98rem}
-  .node span{color:var(--muted);font-size:.8rem}
-  .arrow{display:flex;flex-direction:column;justify-content:center;align-items:center;color:var(--green);min-width:64px}
-  .arrow b{font-size:1.3rem;line-height:1}
-  .arrow span{font-size:.68rem;color:var(--muted);margin-top:4px;text-align:center}
-  .pipe-foot{display:flex;align-items:center;gap:10px;margin-top:14px;color:var(--muted);font-size:.85rem}
-  .pipe-foot .loop{color:var(--green);font-weight:700}
-
-  /* ── abilities grid (2 cols) ─────────────────────── */
-  .cards.six{grid-template-columns:repeat(3,1fr)}
-
-  /* ── hardware ────────────────────────────────────── */
-  .hw{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
-  .hw .card{display:flex;gap:18px;align-items:flex-start}
-  .hw .hw-wide{grid-column:1/-1}
-  .hw .ic{flex-shrink:0;margin-bottom:0;font-size:1.4rem;background:rgba(96,165,250,.12);border-color:rgba(96,165,250,.25)}
-  .safety{
-    margin-top:16px;border-radius:var(--radius);padding:22px 26px;
-    background:var(--coral-soft);border:1px solid rgba(251,113,133,.3);
-    display:flex;gap:14px;align-items:flex-start;
-  }
-  .safety .sicon{font-size:1.3rem;line-height:1.4}
-  .safety p{color:#fecdd3;font-size:.95rem}
-  .safety b{color:#fff}
-
-  /* ── final CTA / footer ──────────────────────────── */
-  .cta{
-    margin-top:90px;text-align:center;
-    background:linear-gradient(180deg,rgba(52,211,153,.10),rgba(96,165,250,.06));
-    border:1px solid rgba(52,211,153,.22);border-radius:24px;padding:64px 30px;
-  }
-  .cta h2{font-size:clamp(1.6rem,3vw,2.2rem);letter-spacing:-.02em;font-weight:800;margin-bottom:12px}
-  .cta p{color:var(--muted);max-width:36em;margin:0 auto 28px}
-  footer{padding:50px 0 40px;color:var(--muted);font-size:.88rem;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
-  footer a{color:var(--ink);border-bottom:1px solid rgba(255,255,255,.25)}
+  /* ── hero: fills the first viewport; the demo video is its backdrop and flies into its slot on scroll ── */
+  .hero{position:relative;display:flex;flex-direction:column;justify-content:center;min-height:100vh;min-height:100svh;
+    padding:calc(var(--nav-h) + clamp(40px,6vw,88px)) 0 clamp(72px,9vw,112px);text-align:center;overflow:hidden}
+  .hero-bg,.hero-shade{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .hero-bg{object-fit:cover;background:var(--bg)}
+  .hero-shade{background:radial-gradient(ellipse 70% 60% at 50% 46%,rgba(10,10,11,.62),rgba(10,10,11,.32) 70%),linear-gradient(rgba(10,10,11,.6),rgba(10,10,11,.25) 38%,rgba(10,10,11,.5) 72%,var(--bg))}
+  .hero > .wrap,.hero-cue{z-index:4}
+  .hero > .wrap{position:relative}
+  .fly-on .hero-bg{display:none}
+  .fly-on .hero-shade{position:fixed;inset:0;z-index:3}
+  .hero-runway{height:0}
+  .fly-on .hero-runway{height:35vh}
+  .hero h1{max-width:20ch;margin:0 auto;font-family:var(--font);font-size:clamp(40px,6.6vw,92px);line-height:1.02;font-weight:700;letter-spacing:-.032em;text-wrap:balance}
+  .hero .lede{max-width:34em;margin:26px auto 0;font-size:clamp(18px,1.7vw,24px);line-height:1.35;font-weight:500;letter-spacing:-.012em;color:var(--fg-2);text-wrap:balance}
+  .hero-cta{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin:36px auto 0}
+  .hero-authors{max-width:52em;margin:24px auto 0;font-size:clamp(14px,1.15vw,16px);line-height:1.55;color:var(--fg-3);text-wrap:balance}
+  .hero-authors b{color:var(--fg-2);font-weight:600;white-space:nowrap}
+  .hero-cue{position:absolute;left:50%;bottom:clamp(22px,3.4vw,36px);width:1px;height:40px;margin-left:-.5px;overflow:hidden;background:linear-gradient(var(--line-2),transparent);pointer-events:none}
+  .hero-cue::after{content:"";position:absolute;left:0;top:-14px;width:1px;height:14px;background:var(--fg-2);animation:heroCue 2.6s var(--ease-io) 1.4s infinite}
+  @keyframes heroCue{0%{transform:translateY(0);opacity:0}20%{opacity:1}100%{transform:translateY(58px);opacity:0}}
+  .hero [data-hero]{opacity:0;transform:translate3d(0,16px,0);animation:heroIn 1.2s var(--ease-out) forwards}
+  .hero [data-hero="2"]{animation-delay:.12s}.hero [data-hero="3"]{animation-delay:.24s}.hero [data-hero="4"]{animation-delay:.36s}
+  @keyframes heroIn{to{opacity:1;transform:none}}
+  @media (max-width:600px){.hero-cta{gap:8px}.hero-cta .btn{padding:0 15px;font-size:14px}}
 
   /* ── demo videos ─────────────────────────────────── */
-  .demo-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
-  .demo-grid figure{margin:0}
-  .demo-grid figcaption{color:var(--muted);font-size:.88rem;padding:12px 6px 0;line-height:1.5}
-  .demo-grid .hint{color:var(--green);font-weight:600;white-space:nowrap}
-  b.g{color:var(--green)} b.r{color:var(--coral)} b.o{color:#fbbf24}
-  .screenvid video{
-    width:100%;display:block;border-radius:14px;
-    border:1px solid var(--panel-edge);
-    box-shadow:0 30px 80px rgba(0,0,0,.45);background:#000;
-  }
+  .demo-grid{display:grid;grid-template-columns:1.345fr 1fr;gap:clamp(16px,2vw,28px);align-items:start}
+  .demo-wrap{position:relative;border-radius:var(--r-s);background:#000}
+  .demo-wrap.wide{aspect-ratio:16/9}
+  .demo-wrap.tall{aspect-ratio:960/726}
+  .demo-wrap video{width:100%;height:100%;object-fit:cover;border-radius:var(--r-s);background:#000}
+  .demo-vid.is-flying{position:fixed;left:0;top:0;z-index:2;pointer-events:none}
+  .demo-badge{position:absolute;left:12px;bottom:12px;display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 11px 0 9px;border-radius:13px;
+    background:rgba(10,10,11,.58);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);font-size:12px;font-weight:600;letter-spacing:.01em;color:#fff;pointer-events:none;transition:opacity .4s var(--ease-out)}
+  .demo-badge i{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(48,209,88,.22)}
+  .demo-vid.is-flying + .demo-badge{opacity:0}
+  .demo-grid figcaption,.shot figcaption,.scene-caption{margin-top:12px;font-size:13px;line-height:1.45;color:var(--txt-3)}
+  b.g{color:var(--c-ok)} b.r{color:var(--c-bad)} b.o{color:var(--c-warn)}
 
-  /* ── photo figures ───────────────────────────────── */
-  .shot{margin:0;background:var(--panel);border:1px solid var(--panel-edge);border-radius:var(--radius);padding:10px}
-  .shot img{width:100%;display:block;border-radius:10px}
+  /* ── simulation + stats ──────────────────────────── */
+  .sim-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:clamp(24px,4vw,64px);align-items:center}
+  .scene-card svg{width:100%;height:auto;border-radius:var(--r-s)}
+  .scene-caption{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap}
+  .legend{display:flex;gap:14px;white-space:nowrap}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:7px;height:7px;border-radius:50%}
+  .legend .you i{background:var(--ok)}
+  .legend .obs i{background:var(--bad)}
+  .stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 clamp(20px,3vw,40px)}
+  .stat{padding:22px 0;border-top:1px solid var(--line)}
+  .stat b{display:block;font-family:var(--font);font-size:clamp(28px,3vw,44px);line-height:1.05;font-weight:700;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+  .stat span{display:block;margin-top:8px;font-size:13px;line-height:1.4;color:var(--txt-3)}
+
+  /* ── cards ───────────────────────────────────────── */
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(12px,1.4vw,18px)}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:clamp(22px,2.2vw,30px)}
+  .card .ic{width:28px;height:28px;margin-bottom:20px}
+  .card .ic svg{width:28px;height:28px;stroke:var(--txt-2);fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+  .card .step{margin-bottom:10px;font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--txt-3);font-variant-numeric:tabular-nums}
+  .card h3{font-family:var(--font);font-size:clamp(19px,1.6vw,22px);line-height:1.15;font-weight:650;letter-spacing:-.02em;margin-bottom:10px}
+  .card p{font-size:15px;line-height:1.5;color:var(--txt-3)}
+  .card p b{color:var(--txt-2);font-weight:600}
+
+  /* ── pipeline ────────────────────────────────────── */
+  .pipe{display:flex;align-items:stretch;gap:10px;flex-wrap:wrap;margin-top:clamp(12px,1.4vw,18px);padding:clamp(18px,2vw,26px);
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+  .node{flex:1;min-width:150px;display:flex;flex-direction:column;justify-content:center;text-align:center;padding:18px 10px;border-radius:var(--r-s);border:1px solid var(--line-2)}
+  .node b{font-family:var(--font);font-size:16px;font-weight:650;letter-spacing:-.015em}
+  .node span{margin-top:2px;font-size:12.5px;color:var(--txt-3)}
+  .arrow{display:flex;flex-direction:column;justify-content:center;align-items:center;min-width:72px;color:var(--txt-3)}
+  .arrow b{font-size:18px;line-height:1;font-weight:400}
+  .arrow span{margin-top:5px;font-size:11px;line-height:1.3;text-align:center}
+  .pipe-foot{display:flex;align-items:baseline;gap:10px;flex-basis:100%;margin-top:10px;font-size:13px;color:var(--txt-3)}
+  .pipe-foot .loop{color:var(--c-ok);font-weight:700}
+
+  /* ── figure + copy rows ──────────────────────────── */
+  .shot svg,.shot img{width:100%;border-radius:var(--r-s)}
   .shot.light img{background:#fff}
-  .shot figcaption{color:var(--muted);font-size:.88rem;padding:10px 6px 2px}
-  .build-grid{display:grid;grid-template-columns:1fr 1.25fr;gap:16px;align-items:stretch}
-
-  /* ── what the cart sees / explainer rows ─────────── */
-  .eyes{display:grid;grid-template-columns:1.3fr 1fr;gap:26px;align-items:center;margin-top:16px}
+  .eyes{display:grid;grid-template-columns:1.3fr 1fr;gap:clamp(24px,4vw,64px);align-items:center;margin-top:clamp(28px,4vw,56px)}
+  .sec-head + .eyes{margin-top:0}
   .eyes.flip > figure{order:2}
-  .card .ic{font-size:1.3rem}
-  .safety.note{background:rgba(96,165,250,.10);border-color:rgba(96,165,250,.3)}
-  .safety.note p{color:#dbeafe}
-  .eyes-copy h3{font-size:1.25rem;margin-bottom:8px;letter-spacing:-.01em}
-  .eyes-copy p{color:var(--muted);margin-bottom:12px}
-  .eyes-copy ul{list-style:none;display:grid;gap:10px}
-  .eyes-copy li{color:var(--muted);font-size:.95rem;padding-left:2px}
-  .eyes-copy li i{color:var(--ink);font-style:normal;font-weight:600}
+  .eyes-copy h3{font-family:var(--font);font-size:clamp(22px,2.2vw,30px);line-height:1.12;font-weight:650;letter-spacing:-.02em;margin-bottom:14px}
+  .eyes-copy p{margin-bottom:12px;color:var(--txt-3);text-wrap:pretty}
+  .eyes-copy p b{color:var(--txt-2);font-weight:600}
+  .eyes-copy ul{display:grid;gap:10px}
+  .eyes-copy li{font-size:15px;color:var(--txt-3)}
+  .eyes-copy li i{color:var(--txt-2);font-style:normal;font-weight:600}
+  .build-grid{display:grid;grid-template-columns:1fr 1fr;gap:clamp(12px,1.4vw,18px);align-items:start}
+  .build-grid .shot img{aspect-ratio:4/3;object-fit:cover}
+  .build-grid .shot.light img{object-fit:contain}
+  .safety{margin-top:clamp(12px,1.4vw,18px);padding:20px clamp(22px,2.2vw,30px);border-radius:var(--r);background:var(--surface);border:1px solid var(--line)}
+  .safety p{font-size:15px;line-height:1.5;color:var(--txt-3)}
+  .safety b{color:inherit;font-weight:600}
+  .safety p b{color:var(--txt-2)}
+  .cards + .cards,.shot + .cards{margin-top:clamp(12px,1.4vw,18px)}
 
-  /* ── reveal animation ────────────────────────────── */
-  .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease}
-  .reveal.in{opacity:1;transform:none}
+  /* ── closing + footer ────────────────────────────── */
+  .cta{text-align:center}
+  .cta p{margin-left:auto;margin-right:auto}
+  .cta .hero-cta{margin-top:32px}
+  footer{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:var(--sec-pad);padding-top:24px;border-top:1px solid var(--line);font-size:13px;color:var(--fg-3)}
+  footer a{color:var(--fg-2)}
+  footer a:hover{color:var(--fg)}
+
+  /* ── reveal ──────────────────────────────────────── */
+  .js .reveal{opacity:0;transform:translate3d(0,24px,0);transition:opacity 1s var(--ease-out),transform 1.1s var(--ease-out)}
+  .js .reveal.in{opacity:1;transform:none}
 
   /* ── responsive ──────────────────────────────────── */
-  @media (max-width:1020px){
-    .nav-links a:not(.btn){display:none}
-  }
   @media (max-width:900px){
-    .hero{grid-template-columns:1fr}
-    .stats-grid{grid-template-columns:repeat(2,1fr)}
-    .cards,.cards.six{grid-template-columns:1fr 1fr}
-    .hw{grid-template-columns:1fr}
-    header{padding-top:130px}
-    .demo-grid{grid-template-columns:1fr}
-    .eyes{grid-template-columns:1fr}
-    .build-grid{grid-template-columns:1fr}
+    .demo-grid,.sim-grid,.eyes,.build-grid{grid-template-columns:1fr}
+    .eyes.flip > figure{order:0}
+    .cards{grid-template-columns:1fr 1fr}
   }
   @media (max-width:560px){
-    .cards,.cards.six{grid-template-columns:1fr}
-    .stats-grid{grid-template-columns:1fr 1fr}
-    .arrow{min-width:100%;transform:rotate(90deg);padding:4px 0}
+    .cards{grid-template-columns:1fr}
+    .arrow{min-width:100%;padding:2px 0}
+    .arrow b{transform:rotate(90deg)}
   }
   @media (prefers-reduced-motion:reduce){
-    html{scroll-behavior:auto}
-    .reveal{opacity:1;transform:none;transition:none}
-    .card,.btn{transition:none}
+    .js .reveal{opacity:1;transform:none;transition:none}
+    .hero [data-hero]{animation:none;opacity:1;transform:none}
+    .hero-cue::after{animation:none;top:0}
+    .btn{transition:none}
   }
 </style>
 </head>
 <body>
 
-<nav>
-  <div class="nav-inner">
-    <a class="logo" href="#top"><span class="dot"></span>Autonomous Shopping Cart</a>
-    <div class="nav-links">
-      <a href="#demo">Demo</a>
-      <a href="#how">How it works</a>
-      <a href="#color">Color lock</a>
-      <a href="#control">Controls</a>
-      <a href="#abilities">Abilities</a>
-      <a href="#hardware">Hardware</a>
-      <a class="btn ghost" href="https://github.com/terrencelei/Autonomous-Shopping-Cart" target="_blank" rel="noopener">GitHub ↗</a>
-    </div>
+<a class="skip" href="#main">Skip to content</a>
+
+<nav class="nav" aria-label="Primary">
+  <div class="wrap">
+    <a class="brand" href="#top">Autonomous Shopping Cart</a>
+    <ul class="nav-links">
+      <li><a href="#demo">Demo</a></li>
+      <li><a href="#sim">Simulation</a></li>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#color">Color lock</a></li>
+      <li><a href="#control">Controls</a></li>
+      <li><a href="#abilities">Abilities</a></li>
+      <li><a href="#hardware">Hardware</a></li>
+      <li class="keep"><a class="btn primary nav-cta" href="https://github.com/terrencelei/Autonomous-Shopping-Cart" target="_blank" rel="noopener">GitHub</a></li>
+    </ul>
+    <button class="nav-menu" type="button" aria-expanded="false" aria-controls="nav-sheet" aria-label="Sections"><svg viewBox="0 0 18 18" aria-hidden="true"><path d="M2 6h14"/><path d="M2 12h14"/></svg></button>
   </div>
+  <div class="nav-sheet" id="nav-sheet" hidden><ul></ul></div>
 </nav>
 
-<header id="top" class="wrap">
-  <div class="hero">
-    <div>
-      <h1>A shopping cart that <span class="grad">follows you</span> around the store.</h1>
-      <p class="lede">
-        An AI camera picks you out of the crowd. The cart tags along two meters behind —
-        speeding up, slowing down, steering on its own. No remote. No phone. No cloud.
-      </p>
-      <div class="hero-cta">
-        <a class="btn primary" href="#demo">Watch it work ↓</a>
-        <a class="btn ghost" href="https://github.com/terrencelei/Autonomous-Shopping-Cart" target="_blank" rel="noopener">View the code ↗</a>
+<main id="main">
+  <header class="hero" id="top">
+    <img class="hero-bg" src="assets/follow-poster.jpg" alt="" aria-hidden="true" decoding="async" fetchpriority="high">
+    <span class="hero-shade" aria-hidden="true"></span>
+    <div class="wrap">
+      <h1 data-hero="1">A shopping cart that follows you around the store.</h1>
+      <p class="lede" data-hero="2">An AI camera picks you out of the crowd. The cart tags along two meters behind, speeding up, slowing down, steering on its own. No remote. No phone. No cloud.</p>
+      <div class="hero-cta" data-hero="3">
+        <a class="btn" href="#demo"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7-4.5z"/></svg>Video</a>
+        <a class="btn" href="https://github.com/terrencelei/Autonomous-Shopping-Cart" target="_blank" rel="noopener"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"/></svg>Code</a>
+        <a class="btn" href="https://github.com/terrencelei/Autonomous-Shopping-Cart#readme" target="_blank" rel="noopener"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2h5.5L12 4.5V14H4z"/><path d="M6 7h4M6 10h4"/></svg>README</a>
       </div>
+      <p class="hero-authors" data-hero="4"><b>Terrence Lei</b>, <b>Jonah Lee</b>, <b>Damian Martinez</b>, <b>Jack Lei</b></p>
     </div>
+    <span class="hero-cue" aria-hidden="true"></span>
+  </header>
+  <div class="hero-runway" aria-hidden="true"></div>
 
-    <div class="scene-card">
+
+  <!-- ── demo ─────────────────────────────────────── -->
+  <section id="demo" class="sec sec--dark">
+   <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">Real footage</span>
+      <h2>Watch it work.</h2>
+      <p>No remote, no rails, no tricks — the cart picks its own speed and steering. Same robot, two views.</p>
+    </div>
+    <div class="demo-grid">
+      <figure>
+        <div class="demo-wrap wide">
+          <video class="demo-vid" id="followvid" autoplay muted loop playsinline preload="auto"
+                 poster="assets/follow-poster.jpg" aria-label="The cart following its shopper across a busy plaza">
+            <source src="assets/follow.mp4" type="video/mp4">
+          </video>
+          <span class="demo-badge" aria-hidden="true"><i></i>Fully autonomous</span>
+        </div>
+        <figcaption>The plaza test: the cart picks out its shopper and tails them. Everyone else is just an obstacle.</figcaption>
+      </figure>
+      <figure class="reveal">
+        <div class="demo-wrap tall">
+          <video autoplay muted loop playsinline preload="metadata"
+                 poster="assets/cartview-poster.jpg" aria-label="Live view through the cart's camera with detection boxes">
+            <source src="assets/cartview.mp4" type="video/mp4">
+          </video>
+        </div>
+        <figcaption>Through the cart's eyes: <b class="g">green</b> = its shopper, <b class="r">red</b> = everyone else, with live distance and angle.</figcaption>
+      </figure>
+    </div>
+   </div>
+  </section>
+
+  <!-- ── simulation ───────────────────────────────── -->
+  <section id="sim" class="sec sec--dark">
+   <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">Simulation</span>
+    </div>
+    <div class="sim-grid">
+    <div class="scene-card reveal">
       <!-- Top-down animated store scene: the cart trails the shopper's path at a fixed gap -->
       <svg id="scene" viewBox="0 0 720 520" role="img" aria-label="Animated top-down simulation: the cart follows a shopper through store aisles at a steady two-meter gap and waits when people cross its path">
         <defs>
@@ -270,16 +321,16 @@
             <circle cx="2" cy="2" r="1.2" fill="rgba(255,255,255,.07)"/>
           </pattern>
         </defs>
-        <rect x="0" y="0" width="720" height="520" rx="12" fill="#0c1228"/>
+        <rect x="0" y="0" width="720" height="520" rx="12" fill="#111113"/>
         <rect x="0" y="0" width="720" height="520" rx="12" fill="url(#dots)"/>
 
         <!-- shelves -->
-        <g fill="rgba(96,165,250,.10)" stroke="rgba(96,165,250,.25)">
+        <g fill="rgba(255,255,255,.05)" stroke="rgba(255,255,255,.14)">
           <rect x="200" y="105" width="330" height="38" rx="9"/>
           <rect x="220" y="240" width="330" height="38" rx="9"/>
           <rect x="190" y="368" width="330" height="38" rx="9"/>
         </g>
-        <g font-size="11" fill="rgba(154,167,199,.55)" font-weight="600" letter-spacing="2">
+        <g font-size="11" fill="rgba(152,152,157,.55)" font-weight="600" letter-spacing="2">
           <text x="335" y="129">AISLE 3</text>
           <text x="355" y="264">AISLE 2</text>
           <text x="325" y="392">AISLE 1</text>
@@ -301,59 +352,59 @@
 
         <!-- moving obstacles (choreographed by the script) -->
         <g id="o1" opacity="0">
-          <circle id="o1r" r="16" fill="none" stroke="rgba(251,113,133,.45)" stroke-dasharray="3 5"/>
-          <circle r="8" fill="#fb7185"/>
-          <text y="-24" text-anchor="middle" font-size="9.5" font-weight="800" fill="rgba(251,113,133,.85)" letter-spacing="1.2">OBSTACLE</text>
+          <circle id="o1r" r="16" fill="none" stroke="rgba(255,69,58,.45)" stroke-dasharray="3 5"/>
+          <circle r="8" fill="#ff453a"/>
+          <text y="-24" text-anchor="middle" font-size="9.5" font-weight="800" fill="rgba(255,69,58,.85)" letter-spacing="1.2">OBSTACLE</text>
         </g>
         <g id="o2" opacity="0">
-          <circle id="o2r" r="16" fill="none" stroke="rgba(251,113,133,.45)" stroke-dasharray="3 5"/>
-          <circle r="8" fill="#fb7185"/>
-          <text y="-24" text-anchor="middle" font-size="9.5" font-weight="800" fill="rgba(251,113,133,.85)" letter-spacing="1.2">OBSTACLE</text>
+          <circle id="o2r" r="16" fill="none" stroke="rgba(255,69,58,.45)" stroke-dasharray="3 5"/>
+          <circle r="8" fill="#ff453a"/>
+          <text y="-24" text-anchor="middle" font-size="9.5" font-weight="800" fill="rgba(255,69,58,.85)" letter-spacing="1.2">OBSTACLE</text>
         </g>
         <g id="o3">
-          <circle id="o3r" r="16" fill="none" stroke="rgba(251,113,133,.45)" stroke-dasharray="3 5"/>
-          <circle r="8" fill="#fb7185"/>
-          <text y="-24" text-anchor="middle" font-size="9.5" font-weight="800" fill="rgba(251,113,133,.85)" letter-spacing="1.2">OBSTACLE</text>
+          <circle id="o3r" r="16" fill="none" stroke="rgba(255,69,58,.45)" stroke-dasharray="3 5"/>
+          <circle r="8" fill="#ff453a"/>
+          <text y="-24" text-anchor="middle" font-size="9.5" font-weight="800" fill="rgba(255,69,58,.85)" letter-spacing="1.2">OBSTACLE</text>
         </g>
 
         <!-- live mode readout -->
         <g id="modepill" transform="translate(16,16)">
-          <rect id="moderect" width="104" height="30" rx="15" fill="rgba(52,211,153,.12)" stroke="rgba(52,211,153,.4)"/>
-          <text id="modetext" x="52" y="20" text-anchor="middle" font-size="12.5" font-weight="800" letter-spacing="1.5" fill="#34d399">FOLLOW</text>
+          <rect id="moderect" width="104" height="30" rx="15" fill="rgba(48,209,88,.12)" stroke="rgba(48,209,88,.4)"/>
+          <text id="modetext" x="52" y="20" text-anchor="middle" font-size="12.5" font-weight="800" letter-spacing="1.5" fill="#30d158">FOLLOW</text>
         </g>
 
         <!-- tether between cart and shopper -->
-        <line id="tether" x1="0" y1="0" x2="0" y2="0" stroke="rgba(52,211,153,.55)" stroke-width="2" stroke-dasharray="4 6"/>
-        <text id="gaplabel" text-anchor="middle" font-size="12" font-weight="800" fill="#34d399"
-              stroke="#0c1228" stroke-width="5" paint-order="stroke" letter-spacing="1">2.0 m</text>
+        <line id="tether" x1="0" y1="0" x2="0" y2="0" stroke="rgba(48,209,88,.55)" stroke-width="2" stroke-dasharray="4 6"/>
+        <text id="gaplabel" text-anchor="middle" font-size="12" font-weight="800" fill="#30d158"
+              stroke="#111113" stroke-width="5" paint-order="stroke" letter-spacing="1">2.0 m</text>
 
         <!-- cart -->
         <g id="cart">
           <g id="cartbody">
-            <path id="cone" d="M0,0 L86,-44 A97,97 0 0 1 86,44 Z" fill="rgba(52,211,153,.08)"/>
-            <rect x="-18" y="-13" width="36" height="26" rx="6" fill="rgba(52,211,153,.15)" stroke="#34d399" stroke-width="2"/>
-            <line x1="-8" y1="-13" x2="-8" y2="13" stroke="rgba(52,211,153,.5)" stroke-width="1.5"/>
-            <line x1="2" y1="-13" x2="2" y2="13" stroke="rgba(52,211,153,.5)" stroke-width="1.5"/>
-            <circle cx="20" cy="0" r="2.6" fill="#34d399"/>
-            <rect x="-16" y="-18" width="10" height="5" rx="2" fill="#34d399" opacity=".8"/>
-            <rect x="-16" y="13" width="10" height="5" rx="2" fill="#34d399" opacity=".8"/>
-            <rect x="8" y="-18" width="10" height="5" rx="2" fill="#34d399" opacity=".8"/>
-            <rect x="8" y="13" width="10" height="5" rx="2" fill="#34d399" opacity=".8"/>
+            <path id="cone" d="M0,0 L86,-44 A97,97 0 0 1 86,44 Z" fill="rgba(48,209,88,.08)"/>
+            <rect x="-18" y="-13" width="36" height="26" rx="6" fill="rgba(48,209,88,.15)" stroke="#30d158" stroke-width="2"/>
+            <line x1="-8" y1="-13" x2="-8" y2="13" stroke="rgba(48,209,88,.5)" stroke-width="1.5"/>
+            <line x1="2" y1="-13" x2="2" y2="13" stroke="rgba(48,209,88,.5)" stroke-width="1.5"/>
+            <circle cx="20" cy="0" r="2.6" fill="#30d158"/>
+            <rect x="-16" y="-18" width="10" height="5" rx="2" fill="#30d158" opacity=".8"/>
+            <rect x="-16" y="13" width="10" height="5" rx="2" fill="#30d158" opacity=".8"/>
+            <rect x="8" y="-18" width="10" height="5" rx="2" fill="#30d158" opacity=".8"/>
+            <rect x="8" y="13" width="10" height="5" rx="2" fill="#30d158" opacity=".8"/>
           </g>
-          <text y="-26" text-anchor="middle" font-size="11" font-weight="800" fill="#9aa7c7"
-                stroke="#0c1228" stroke-width="5" paint-order="stroke" letter-spacing="1.5">CART</text>
+          <text y="-26" text-anchor="middle" font-size="11" font-weight="800" fill="#98989d"
+                stroke="#111113" stroke-width="5" paint-order="stroke" letter-spacing="1.5">CART</text>
         </g>
 
         <!-- shopper -->
         <g id="shopper">
-          <circle r="34" fill="none" stroke="rgba(52,211,153,.30)" stroke-dasharray="4 6">
+          <circle r="34" fill="none" stroke="rgba(48,209,88,.30)" stroke-dasharray="4 6">
             <animate attributeName="r" values="30;38;30" dur="2.6s" repeatCount="indefinite"/>
             <animate attributeName="stroke-opacity" values=".5;.15;.5" dur="2.6s" repeatCount="indefinite"/>
           </circle>
-          <circle r="9" fill="#34d399"/>
-          <circle r="14" fill="none" stroke="#34d399" stroke-width="1.6" opacity=".7"/>
-          <text id="youlabel" y="-24" text-anchor="middle" font-size="11" font-weight="800" fill="#34d399"
-                stroke="#0c1228" stroke-width="5" paint-order="stroke" letter-spacing="1.5">YOU</text>
+          <circle r="9" fill="#30d158"/>
+          <circle r="14" fill="none" stroke="#30d158" stroke-width="1.6" opacity=".7"/>
+          <text id="youlabel" y="-24" text-anchor="middle" font-size="11" font-weight="800" fill="#30d158"
+                stroke="#111113" stroke-width="5" paint-order="stroke" letter-spacing="1.5">YOU</text>
         </g>
       </svg>
       <div class="scene-caption">
@@ -364,48 +415,19 @@
         </span>
       </div>
     </div>
-  </div>
-
-  <!-- stats -->
-  <div class="stats">
     <div class="stats-grid">
       <div class="stat reveal"><b>2.0 m</b><span>the gap it keeps behind you</span></div>
       <div class="stat reveal"><b>30×/sec</b><span>ten decisions per blink of your eye</span></div>
       <div class="stat reveal"><b>100% on-device</b><span>all AI runs on the cart, no internet</span></div>
       <div class="stat reveal"><b>4 hrs</b><span>of following on a single battery charge</span></div>
     </div>
-  </div>
-</header>
-
-<main class="wrap">
-
-  <!-- ── demo ─────────────────────────────────────── -->
-  <section id="demo">
-    <div class="sec-head reveal">
-      <span class="tag">Real footage</span>
-      <h2>Watch it work.</h2>
-      <p>No remote, no rails, no tricks — the cart picks its own speed and steering. Same robot, two views.</p>
     </div>
-    <div class="demo-grid">
-      <figure class="screenvid reveal">
-        <video id="followvid" autoplay muted loop playsinline preload="metadata"
-               poster="assets/follow-poster.jpg" aria-label="The cart following its shopper across a busy plaza">
-          <source src="assets/follow.mp4" type="video/mp4">
-        </video>
-        <figcaption>The plaza test: the cart picks out its shopper and tails them. Everyone else is just an obstacle.</figcaption>
-      </figure>
-      <figure class="screenvid reveal">
-        <video autoplay muted loop playsinline preload="metadata"
-               poster="assets/cartview-poster.jpg" aria-label="Live view through the cart's camera with detection boxes">
-          <source src="assets/cartview.mp4" type="video/mp4">
-        </video>
-        <figcaption>Through the cart's eyes: <b class="g">green</b> = its shopper, <b class="r">red</b> = everyone else, with live distance and angle.</figcaption>
-      </figure>
-    </div>
+   </div>
   </section>
 
   <!-- ── how it works ─────────────────────────────── -->
-  <section id="how">
+  <section id="how" class="sec sec--light">
+   <div class="wrap">
     <div class="sec-head reveal">
       <span class="tag">How it works</span>
       <h2>See. Think. Move.</h2>
@@ -414,34 +436,34 @@
     <div class="cards">
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/></svg></div>
-        <div class="step">01 · SEE</div>
+        <div class="step">01 · See</div>
         <h3>A camera with a brain of its own</h3>
         <p>The camera chip runs a neural network that spots every person in view. The cart locks onto <em>you</em> and memorizes the colors you're wearing.</p>
       </div>
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3a7 7 0 0 1 7 7c0 2.4-1.2 3.9-2.4 5.2-.9 1-1.6 1.9-1.6 3.3h-6c0-1.4-.7-2.3-1.6-3.3C6.2 13.9 5 12.4 5 10a7 7 0 0 1 7-7z"/><path d="M9.5 21.5h5"/></svg></div>
-        <div class="step">02 · THINK</div>
+        <div class="step">02 · Think</div>
         <h3>Two smooth decisions per frame</h3>
         <p>A Raspberry Pi turns "where are you" into "how fast" and "which way" — gently, like easing a car up to a red light.</p>
       </div>
       <div class="card reveal">
         <div class="ic"><svg viewBox="0 0 24 24"><circle cx="7" cy="17" r="2.6"/><circle cx="17" cy="17" r="2.6"/><path d="M3 17h1.4M9.6 17h4.8M19.6 17H21M5 13l1.5-6h11L19 13"/></svg></div>
-        <div class="step">03 · MOVE</div>
+        <div class="step">03 · Move</div>
         <h3>Wheels that report back</h3>
         <p>An ESP32 chip powers the wheels, and sensors report how far each really turned. The cart always knows what actually happened.</p>
       </div>
     </div>
 
     <!-- pipeline -->
-    <div class="pipe reveal" style="margin-top:16px">
-      <div class="node"><div class="emoji">📷</div><b>AI Camera</b><span>finds people on-chip</span></div>
+    <div class="pipe reveal">
+      <div class="node"><b>AI Camera</b><span>finds people on-chip</span></div>
       <div class="arrow"><b>→</b><span>who &amp; where<br>30 fps</span></div>
-      <div class="node"><div class="emoji">🧠</div><b>Raspberry Pi 5</b><span>decides speed + steering</span></div>
+      <div class="node"><b>Raspberry Pi 5</b><span>decides speed + steering</span></div>
       <div class="arrow"><b>→</b><span>wheel commands<br>over USB</span></div>
-      <div class="node"><div class="emoji">⚡</div><b>ESP32</b><span>drives the motors</span></div>
+      <div class="node"><b>ESP32</b><span>drives the motors</span></div>
       <div class="arrow"><b>→</b><span>power</span></div>
-      <div class="node"><div class="emoji">🛞</div><b>Wheels</b><span>encoders measure motion</span></div>
-      <div class="pipe-foot" style="flex-basis:100%">
+      <div class="node"><b>Wheels</b><span>encoders measure motion</span></div>
+      <div class="pipe-foot">
         <span class="loop">⟲</span>
         <span>…and the wheel data flows straight back to the brain. That closed loop is what keeps the motion smooth.</span>
       </div>
@@ -462,10 +484,12 @@
         </ul>
       </div>
     </div>
+   </div>
   </section>
 
   <!-- ── color lock ──────────────────────────────── -->
-  <section id="color">
+  <section id="color" class="sec sec--light">
+   <div class="wrap">
     <div class="sec-head reveal">
       <span class="tag">Color lock</span>
       <h2>How it knows it's <em>you</em>.</h2>
@@ -474,24 +498,24 @@
 
     <figure class="shot reveal">
       <svg viewBox="0 0 760 310" role="img" aria-label="Diagram: the cart scans its shopper's outfit into a color fingerprint, then scores every person it sees against that fingerprint — the best match keeps the green target box">
-        <rect width="760" height="310" rx="10" fill="#0c1228"/>
+        <rect width="760" height="310" rx="10" fill="#111113"/>
 
-        <text x="28" y="34" font-size="11" font-weight="800" letter-spacing="2" fill="#9aa7c7">1 · DURING WARM-UP</text>
-        <text x="400" y="34" font-size="11" font-weight="800" letter-spacing="2" fill="#9aa7c7">2 · EVERY FRAME AFTER</text>
+        <text x="28" y="34" font-size="11" font-weight="800" letter-spacing="2" fill="#98989d">1 · DURING WARM-UP</text>
+        <text x="400" y="34" font-size="11" font-weight="800" letter-spacing="2" fill="#98989d">2 · EVERY FRAME AFTER</text>
         <line x1="368" y1="22" x2="368" y2="288" stroke="rgba(255,255,255,.08)"/>
 
         <!-- shopper being scanned -->
         <g transform="translate(80,170)">
-          <circle cx="0" cy="-54" r="13" fill="#8b9bb8"/>
+          <circle cx="0" cy="-54" r="13" fill="#8e8e93"/>
           <rect x="-21" y="-38" width="42" height="46" rx="9" fill="#3b82f6"/>
           <rect x="-16" y="10" width="32" height="42" rx="7" fill="#64748b"/>
-          <rect x="-30" y="-70" width="60" height="3.5" rx="2" fill="#34d399" opacity=".9">
+          <rect x="-30" y="-70" width="60" height="3.5" rx="2" fill="#30d158" opacity=".9">
             <animate attributeName="y" values="-70;50;-70" dur="3s" repeatCount="indefinite"/>
           </rect>
-          <text y="78" text-anchor="middle" font-size="11" fill="#9aa7c7">it studies your outfit…</text>
+          <text y="78" text-anchor="middle" font-size="11" fill="#98989d">it studies your outfit…</text>
         </g>
 
-        <path d="M128 165 H168" stroke="#34d399" stroke-width="2" marker-end="url(#arrh)"/>
+        <path d="M128 165 H168" stroke="#30d158" stroke-width="2" marker-end="url(#arrh)"/>
 
         <!-- fingerprint card -->
         <g transform="translate(180,118)">
@@ -500,74 +524,75 @@
           <rect x="68" y="12" width="50" height="30" rx="6" fill="#1d4ed8"/>
           <rect x="12" y="50" width="50" height="30" rx="6" fill="#64748b"/>
           <rect x="68" y="50" width="50" height="30" rx="6" fill="#334155"/>
-          <text x="65" y="112" text-anchor="middle" font-size="11" font-weight="700" fill="#eef2ff">color fingerprint</text>
-          <text x="65" y="127" text-anchor="middle" font-size="10" fill="#9aa7c7">(no face — just colors)</text>
+          <text x="65" y="112" text-anchor="middle" font-size="11" font-weight="700" fill="#f5f5f7">color fingerprint</text>
+          <text x="65" y="127" text-anchor="middle" font-size="10" fill="#98989d">(no face — just colors)</text>
         </g>
 
-        <path d="M322 165 H360" stroke="#34d399" stroke-width="2" marker-end="url(#arrh)"/>
+        <path d="M322 165 H360" stroke="#30d158" stroke-width="2" marker-end="url(#arrh)"/>
 
         <!-- the lineup -->
         <g transform="translate(440,178)">
-          <circle cx="0" cy="-54" r="13" fill="#8b9bb8"/>
+          <circle cx="0" cy="-54" r="13" fill="#8e8e93"/>
           <rect x="-21" y="-38" width="42" height="46" rx="9" fill="#b45309"/>
           <rect x="-16" y="10" width="32" height="42" rx="7" fill="#475569"/>
           <rect x="-31" y="-102" width="62" height="22" rx="11" fill="rgba(255,255,255,.06)" stroke="rgba(255,255,255,.14)"/>
-          <text y="-87" text-anchor="middle" font-size="11.5" font-weight="700" fill="#9aa7c7">32%</text>
+          <text y="-87" text-anchor="middle" font-size="11.5" font-weight="700" fill="#98989d">32%</text>
         </g>
         <g transform="translate(560,178)">
-          <rect x="-34" y="-76" width="68" height="134" rx="10" fill="none" stroke="#34d399" stroke-width="2.5">
+          <rect x="-34" y="-76" width="68" height="134" rx="10" fill="none" stroke="#30d158" stroke-width="2.5">
             <animate attributeName="stroke-opacity" values="1;.45;1" dur="2s" repeatCount="indefinite"/>
           </rect>
-          <circle cx="0" cy="-54" r="13" fill="#8b9bb8"/>
+          <circle cx="0" cy="-54" r="13" fill="#8e8e93"/>
           <rect x="-21" y="-38" width="42" height="46" rx="9" fill="#3b82f6"/>
           <rect x="-16" y="10" width="32" height="42" rx="7" fill="#64748b"/>
-          <rect x="-52" y="-108" width="104" height="24" rx="12" fill="rgba(52,211,153,.15)" stroke="rgba(52,211,153,.5)"/>
-          <text y="-91" text-anchor="middle" font-size="11.5" font-weight="800" fill="#34d399">97% — YOU ✓</text>
+          <rect x="-52" y="-108" width="104" height="24" rx="12" fill="rgba(48,209,88,.15)" stroke="rgba(48,209,88,.5)"/>
+          <text y="-91" text-anchor="middle" font-size="11.5" font-weight="800" fill="#30d158">97% — YOU ✓</text>
         </g>
         <g transform="translate(680,178)">
-          <circle cx="0" cy="-54" r="13" fill="#8b9bb8"/>
+          <circle cx="0" cy="-54" r="13" fill="#8e8e93"/>
           <rect x="-21" y="-38" width="42" height="46" rx="9" fill="#eab308"/>
           <rect x="-16" y="10" width="32" height="42" rx="7" fill="#1f2937"/>
           <rect x="-31" y="-102" width="62" height="22" rx="11" fill="rgba(255,255,255,.06)" stroke="rgba(255,255,255,.14)"/>
-          <text y="-87" text-anchor="middle" font-size="11.5" font-weight="700" fill="#9aa7c7">41%</text>
+          <text y="-87" text-anchor="middle" font-size="11.5" font-weight="700" fill="#98989d">41%</text>
         </g>
-        <text x="565" y="272" text-anchor="middle" font-size="11" fill="#9aa7c7">every person is scored against the fingerprint —</text>
-        <text x="565" y="288" text-anchor="middle" font-size="11" fill="#9aa7c7">the best match keeps the green box</text>
+        <text x="565" y="272" text-anchor="middle" font-size="11" fill="#98989d">every person is scored against the fingerprint —</text>
+        <text x="565" y="288" text-anchor="middle" font-size="11" fill="#98989d">the best match keeps the green box</text>
 
         <defs>
           <marker id="arrh" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-            <path d="M0,0 L8,4 L0,8 z" fill="#34d399"/>
+            <path d="M0,0 L8,4 L0,8 z" fill="#30d158"/>
           </marker>
         </defs>
       </svg>
     </figure>
 
-    <div class="cards" style="margin-top:16px">
+    <div class="cards">
       <div class="card reveal">
-        <div class="ic">📸</div>
+        <div class="step">01</div>
         <h3>It studies your outfit</h3>
         <p>During a 15-second warm-up it builds a color fingerprint of your outfit. That fingerprint is its memory of you.</p>
       </div>
       <div class="card reveal">
-        <div class="ic">🎯</div>
+        <div class="step">02</div>
         <h3>Everyone gets scored</h3>
         <p>Every person in view is compared to the fingerprint, thirty times a second. The best match keeps the green box.</p>
       </div>
       <div class="card reveal">
-        <div class="ic">🔁</div>
+        <div class="step">03</div>
         <h3>Lost is not forgotten</h3>
         <p>If someone blocks the view, the lock snaps back the moment you reappear. The match uses <b>regression-trained weights</b>, so shadows and changing light don't shake it.</p>
       </div>
     </div>
 
     <div class="safety note reveal">
-      <div class="sicon">🔒</div>
       <p><b>Privacy, by design.</b> It never learns your face — only today's outfit colors, forgotten at power-off. (Yes, identical twins in matching hoodies could fool it.)</p>
     </div>
+   </div>
   </section>
 
   <!-- ── controls & calibration ───────────────────── -->
-  <section id="control">
+  <section id="control" class="sec sec--dark">
+   <div class="wrap">
     <div class="sec-head reveal">
       <span class="tag">Controls &amp; self-calibration</span>
       <h2>Smooth on purpose.</h2>
@@ -578,43 +603,43 @@
     <div class="eyes reveal">
       <figure class="shot">
         <svg viewBox="0 0 680 230" role="img" aria-label="Diagram: the further the cart is from its shopper, the faster it drives; at the two-meter bubble it waits">
-          <rect width="680" height="230" rx="10" fill="#0c1228"/>
+          <rect width="680" height="230" rx="10" fill="#111113"/>
           <line x1="20" y1="172" x2="660" y2="172" stroke="rgba(255,255,255,.10)" stroke-width="2"/>
 
           <!-- shopper + bubble -->
           <g transform="translate(585,150)">
-            <circle r="78" fill="rgba(52,211,153,.06)" stroke="rgba(52,211,153,.35)" stroke-dasharray="5 7"/>
-            <circle r="9" fill="#34d399"/>
-            <circle r="14" fill="none" stroke="#34d399" stroke-width="1.5" opacity=".7"/>
-            <text y="-90" text-anchor="middle" font-size="11.5" font-weight="800" fill="#34d399" letter-spacing="1">2 m BUBBLE</text>
+            <circle r="78" fill="rgba(48,209,88,.06)" stroke="rgba(48,209,88,.35)" stroke-dasharray="5 7"/>
+            <circle r="9" fill="#30d158"/>
+            <circle r="14" fill="none" stroke="#30d158" stroke-width="1.5" opacity=".7"/>
+            <text y="-90" text-anchor="middle" font-size="11.5" font-weight="800" fill="#30d158" letter-spacing="1">2 m BUBBLE</text>
           </g>
 
           <!-- same cart, three distances -->
-          <g stroke="#34d399" fill="rgba(52,211,153,.15)" stroke-width="2">
+          <g stroke="#30d158" fill="rgba(48,209,88,.15)" stroke-width="2">
             <g transform="translate(85,150)">
               <rect x="-20" y="-12" width="40" height="24" rx="5"/>
-              <circle cx="22" cy="0" r="2.4" fill="#34d399" stroke="none"/>
+              <circle cx="22" cy="0" r="2.4" fill="#30d158" stroke="none"/>
             </g>
             <g transform="translate(295,150)">
               <rect x="-20" y="-12" width="40" height="24" rx="5"/>
-              <circle cx="22" cy="0" r="2.4" fill="#34d399" stroke="none"/>
+              <circle cx="22" cy="0" r="2.4" fill="#30d158" stroke="none"/>
             </g>
             <g transform="translate(478,150)">
               <rect x="-20" y="-12" width="40" height="24" rx="5"/>
-              <circle cx="22" cy="0" r="2.4" fill="#34d399" stroke="none"/>
+              <circle cx="22" cy="0" r="2.4" fill="#30d158" stroke="none"/>
             </g>
           </g>
           <!-- speed arrows -->
-          <line x1="112" y1="150" x2="196" y2="150" stroke="#34d399" stroke-width="3.5" marker-end="url(#arr2)"/>
-          <line x1="322" y1="150" x2="362" y2="150" stroke="#34d399" stroke-width="3.5" marker-end="url(#arr2)" opacity=".75"/>
+          <line x1="112" y1="150" x2="196" y2="150" stroke="#30d158" stroke-width="3.5" marker-end="url(#arr2)"/>
+          <line x1="322" y1="150" x2="362" y2="150" stroke="#30d158" stroke-width="3.5" marker-end="url(#arr2)" opacity=".75"/>
 
-          <text x="85" y="205" text-anchor="middle" font-size="11.5" fill="#9aa7c7">far behind → hurries</text>
-          <text x="295" y="205" text-anchor="middle" font-size="11.5" fill="#9aa7c7">closing in → eases off</text>
-          <text x="478" y="205" text-anchor="middle" font-size="11.5" fill="#9aa7c7">at the bubble → waits</text>
+          <text x="85" y="205" text-anchor="middle" font-size="11.5" fill="#98989d">far behind → hurries</text>
+          <text x="295" y="205" text-anchor="middle" font-size="11.5" fill="#98989d">closing in → eases off</text>
+          <text x="478" y="205" text-anchor="middle" font-size="11.5" fill="#98989d">at the bubble → waits</text>
 
           <defs>
             <marker id="arr2" markerUnits="userSpaceOnUse" markerWidth="16" markerHeight="16" refX="11" refY="8" orient="auto">
-              <path d="M0,0 L16,8 L0,16 z" fill="#34d399"/>
+              <path d="M0,0 L16,8 L0,16 z" fill="#30d158"/>
             </marker>
           </defs>
         </svg>
@@ -630,19 +655,19 @@
     <div class="eyes flip reveal">
       <figure class="shot">
         <svg viewBox="0 0 680 270" role="img" aria-label="Animation: on its first stop the cart cuts power at the stop line and glides past it; after learning its momentum it cuts power early and rolls to a stop exactly on the line">
-          <rect width="680" height="270" rx="10" fill="#0c1228"/>
-          <line x1="520" y1="34" x2="520" y2="246" stroke="rgba(52,211,153,.5)" stroke-dasharray="5 6" stroke-width="2"/>
-          <text x="520" y="22" text-anchor="middle" font-size="11" font-weight="800" letter-spacing="1.5" fill="#34d399">THE PERFECT STOP SPOT</text>
+          <rect width="680" height="270" rx="10" fill="#111113"/>
+          <line x1="520" y1="34" x2="520" y2="246" stroke="rgba(48,209,88,.5)" stroke-dasharray="5 6" stroke-width="2"/>
+          <text x="520" y="22" text-anchor="middle" font-size="11" font-weight="800" letter-spacing="1.5" fill="#30d158">THE PERFECT STOP SPOT</text>
 
-          <text x="26" y="66" font-size="11.5" font-weight="800" fill="#9aa7c7" letter-spacing="1">FIRST STOP</text>
-          <text x="26" y="176" font-size="11.5" font-weight="800" fill="#9aa7c7" letter-spacing="1">AFTER A FEW STOPS</text>
+          <text x="26" y="66" font-size="11.5" font-weight="800" fill="#98989d" letter-spacing="1">FIRST STOP</text>
+          <text x="26" y="176" font-size="11.5" font-weight="800" fill="#98989d" letter-spacing="1">AFTER A FEW STOPS</text>
 
           <!-- lane 1: cuts power at the line, glides past -->
-          <g transform="translate(520,96)"><text y="-12" text-anchor="middle" font-size="10.5" fill="#fb7185">⏻ cuts power here</text></g>
+          <g transform="translate(520,96)"><text y="-12" text-anchor="middle" font-size="10.5" fill="#ff453a">⏻ cuts power here</text></g>
           <g transform="translate(70,95)">
-            <g stroke="#fb7185" fill="rgba(251,113,133,.13)" stroke-width="2">
+            <g stroke="#ff453a" fill="rgba(255,69,58,.13)" stroke-width="2">
               <rect x="-20" y="-12" width="40" height="24" rx="5"/>
-              <circle cx="22" cy="0" r="2.4" fill="#fb7185" stroke="none"/>
+              <circle cx="22" cy="0" r="2.4" fill="#ff453a" stroke="none"/>
             </g>
             <!-- drive ends AT cruise speed (end-slope 1), coast starts at the same
                  speed (start-slope 2 = matched px/s) and decelerates smoothly to 0 -->
@@ -653,16 +678,16 @@
             <animate attributeName="opacity" values="1;1;0;0;1" keyTimes="0;0.92;0.95;0.985;1"
               dur="7s" repeatCount="indefinite"/>
           </g>
-          <text x="600" y="74" text-anchor="middle" font-size="11.5" font-weight="800" fill="#fb7185" opacity="0">✗ glides past
+          <text x="600" y="74" text-anchor="middle" font-size="11.5" font-weight="800" fill="#ff453a" opacity="0">✗ glides past
             <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.6;0.74;0.92;0.96" dur="7s" repeatCount="indefinite"/>
           </text>
 
           <!-- lane 2: brakes early, lands on the line -->
-          <g transform="translate(430,206)"><text y="-12" text-anchor="middle" font-size="10.5" fill="#34d399">⏻ cuts power early — it knows it will glide</text></g>
+          <g transform="translate(430,206)"><text y="-12" text-anchor="middle" font-size="10.5" fill="#30d158">⏻ cuts power early — it knows it will glide</text></g>
           <g transform="translate(70,205)">
-            <g stroke="#34d399" fill="rgba(52,211,153,.15)" stroke-width="2">
+            <g stroke="#30d158" fill="rgba(48,209,88,.15)" stroke-width="2">
               <rect x="-20" y="-12" width="40" height="24" rx="5"/>
-              <circle cx="22" cy="0" r="2.4" fill="#34d399" stroke="none"/>
+              <circle cx="22" cy="0" r="2.4" fill="#30d158" stroke="none"/>
             </g>
             <!-- cuts power earlier, so the same smooth deceleration lands on the line -->
             <animateTransform attributeName="transform" type="translate" additive="sum"
@@ -672,7 +697,7 @@
             <animate attributeName="opacity" values="1;1;0;0;1" keyTimes="0;0.92;0.95;0.985;1"
               dur="7s" repeatCount="indefinite"/>
           </g>
-          <text x="595" y="240" text-anchor="middle" font-size="11.5" font-weight="800" fill="#34d399" opacity="0">✓ right on it
+          <text x="595" y="240" text-anchor="middle" font-size="11.5" font-weight="800" fill="#30d158" opacity="0">✓ right on it
             <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.71;0.85;0.92;0.96" dur="7s" repeatCount="indefinite"/>
           </text>
         </svg>
@@ -688,18 +713,18 @@
     <div class="eyes reveal">
       <figure class="shot">
         <svg viewBox="0 0 680 180" role="img" aria-label="Graph of speed over time: zero while standing, a brief spike labeled the shove, then settling to a gentle cruise">
-          <rect width="680" height="180" rx="10" fill="#0c1228"/>
+          <rect width="680" height="180" rx="10" fill="#111113"/>
           <line x1="50" y1="140" x2="640" y2="140" stroke="rgba(255,255,255,.12)"/>
           <line x1="50" y1="30" x2="50" y2="140" stroke="rgba(255,255,255,.12)"/>
-          <text x="40" y="38" text-anchor="end" font-size="10" fill="#9aa7c7">speed</text>
-          <text x="640" y="156" text-anchor="end" font-size="10" fill="#9aa7c7">time →</text>
+          <text x="40" y="38" text-anchor="end" font-size="10" fill="#98989d">speed</text>
+          <text x="640" y="156" text-anchor="end" font-size="10" fill="#98989d">time →</text>
           <path d="M50,140 L150,140 L156,52 L196,52 C240,52 250,96 300,96 L640,96"
-                fill="none" stroke="#34d399" stroke-width="3" stroke-linejoin="round"/>
-          <text x="120" y="128" text-anchor="middle" font-size="11" fill="#9aa7c7">standing still</text>
-          <text x="176" y="40" text-anchor="middle" font-size="11.5" font-weight="800" fill="#34d399">the shove</text>
-          <text x="430" y="84" text-anchor="middle" font-size="11" fill="#9aa7c7">settles into the smooth ramp</text>
-          <line x1="226" y1="58" x2="226" y2="140" stroke="rgba(52,211,153,.35)" stroke-dasharray="3 5"/>
-          <text x="232" y="132" font-size="10" fill="#9aa7c7">released the instant the wheels confirm motion</text>
+                fill="none" stroke="#30d158" stroke-width="3" stroke-linejoin="round"/>
+          <text x="120" y="128" text-anchor="middle" font-size="11" fill="#98989d">standing still</text>
+          <text x="176" y="40" text-anchor="middle" font-size="11.5" font-weight="800" fill="#30d158">the shove</text>
+          <text x="430" y="84" text-anchor="middle" font-size="11" fill="#98989d">settles into the smooth ramp</text>
+          <line x1="226" y1="58" x2="226" y2="140" stroke="rgba(48,209,88,.35)" stroke-dasharray="3 5"/>
+          <text x="232" y="132" font-size="10" fill="#98989d">released the instant the wheels confirm motion</text>
         </svg>
       </figure>
       <div class="eyes-copy">
@@ -707,10 +732,12 @@
         <p>A gentle push from standstill won't beat floor grip. So the cart gives itself a quick shove, released the instant the wheels confirm motion.</p>
       </div>
     </div>
+   </div>
   </section>
 
   <!-- ── abilities ────────────────────────────────── -->
-  <section id="abilities">
+  <section id="abilities" class="sec sec--dark">
+   <div class="wrap">
     <div class="sec-head reveal">
       <span class="tag">Abilities</span>
       <h2>Small cart. Big manners.</h2>
@@ -748,10 +775,12 @@
         <p>Every stop and turn teaches it its own physics. No calibration sessions — it tunes itself as it goes.</p>
       </div>
     </div>
+   </div>
   </section>
 
   <!-- ── hardware ─────────────────────────────────── -->
-  <section id="hardware">
+  <section id="hardware" class="sec sec--light">
+   <div class="wrap">
     <div class="sec-head reveal">
       <span class="tag">Under the hood</span>
       <h2>Modular, precise, serviceable.</h2>
@@ -768,25 +797,29 @@
       </figure>
     </div>
     <div class="safety reveal">
-      <div class="sicon">🛡️</div>
       <p><b>Built to be maintained.</b> The modular layout keeps subsystems accessible, repeatable to manufacture, and ready to scale as the cart evolves.</p>
     </div>
+   </div>
   </section>
 
   <!-- ── CTA ──────────────────────────────────────── -->
+  <section class="sec sec--dark">
+   <div class="wrap">
   <div class="cta reveal">
     <h2>Curious how deep it goes?</h2>
     <p>Vision, controls, and firmware in one readable codebase. The README has the full story.</p>
     <div class="hero-cta" style="justify-content:center">
-      <a class="btn primary" href="https://github.com/terrencelei/Autonomous-Shopping-Cart" target="_blank" rel="noopener">Explore the project on GitHub ↗</a>
+      <a class="btn primary" href="https://github.com/terrencelei/Autonomous-Shopping-Cart" target="_blank" rel="noopener">Explore the project on GitHub</a>
       <a class="btn ghost" href="https://github.com/terrencelei/Autonomous-Shopping-Cart#readme" target="_blank" rel="noopener">Read the technical README</a>
     </div>
   </div>
 
   <footer>
-    <span>🛒 Autonomous Shopping Cart — built by Terrence Lei, Jonah Lee, Damian Martinez &amp; Jack Lei</span>
+    <span>Autonomous Shopping Cart — built by Terrence Lei, Jonah Lee, Damian Martinez &amp; Jack Lei</span>
     <span><a href="https://github.com/terrencelei/Autonomous-Shopping-Cart" target="_blank" rel="noopener">github.com/terrencelei/Autonomous-Shopping-Cart</a></span>
   </footer>
+   </div>
+  </section>
 </main>
 
 <script>
@@ -807,7 +840,7 @@
     const VMAX = 150, KP = 10; // catch-up: speed = KP·(gap error), capped
     const GAP = 92, PXM = 46;
     const T = L / V;
-    const GREEN='#34d399', CORAL='#fb7185';
+    const GREEN='#30d158', CORAL='#ff453a';
 
     const at = d => route.getPointAtLength(((d % L) + L) % L);
     const wrap = a => { while (a >  Math.PI) a -= 2*Math.PI;
@@ -917,37 +950,100 @@
 
       // dressing: colors, live straight-line distance, blocker highlight
       const dist = Math.hypot(s.x - c2.x, s.y - c2.y);
-      tether.setAttribute('stroke', mode === 'BLOCKED' ? 'rgba(251,113,133,.65)' : 'rgba(52,211,153,.55)');
+      tether.setAttribute('stroke', mode === 'BLOCKED' ? 'rgba(255,69,58,.65)' : 'rgba(48,209,88,.55)');
       label.setAttribute('fill', mode === 'BLOCKED' ? CORAL : GREEN);
       label.textContent = (dist / PXM).toFixed(1) + ' m';
-      cone.setAttribute('fill', mode === 'BLOCKED' ? 'rgba(251,113,133,.08)' : 'rgba(52,211,153,.08)');
+      cone.setAttribute('fill', mode === 'BLOCKED' ? 'rgba(255,69,58,.08)' : 'rgba(48,209,88,.08)');
       obs.forEach((o, i) => {
         const isB = (i === blocker && mode === 'BLOCKED');
         o.ring.setAttribute('r', isB ? 20 + 3 * Math.sin(t * 10) : 16);
-        o.ring.setAttribute('stroke', isB ? 'rgba(251,113,133,.95)' : 'rgba(251,113,133,.45)');
+        o.ring.setAttribute('stroke', isB ? 'rgba(255,69,58,.95)' : 'rgba(255,69,58,.45)');
       });
 
       if (mode !== lastMode){
         lastMode = mode;
-        if (mode === 'FOLLOW') pill('FOLLOW', GREEN, 'rgba(52,211,153,.12)', 'rgba(52,211,153,.4)');
-        else pill('WAITING FOR PATH', CORAL, 'rgba(251,113,133,.12)', 'rgba(251,113,133,.45)');
+        if (mode === 'FOLLOW') pill('FOLLOW', GREEN, 'rgba(48,209,88,.12)', 'rgba(48,209,88,.4)');
+        else pill('WAITING FOR PATH', CORAL, 'rgba(255,69,58,.12)', 'rgba(255,69,58,.45)');
       }
     }
     requestAnimationFrame(tick);
   })();
 
-  // ── demo loops: only play while on screen (saves battery/data) ──
+  // ── fly: the hero's backdrop IS the demo video; on scroll it shrinks from the full screen into its slot ──
   (function(){
+    const v = document.getElementById('followvid'), shade = document.querySelector('.hero-shade');
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const vids = document.querySelectorAll('.demo-grid video');
-    if (!vids.length || !('IntersectionObserver' in window)) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches){
-      vids.forEach(v => { v.removeAttribute('autoplay'); v.pause(); });
-      return;
+    if (reduced){ vids.forEach(x => { x.removeAttribute('autoplay'); x.pause(); x.controls = true; }); return; }
+    if ('IntersectionObserver' in window){          // loops only play while on screen
+      const io = new IntersectionObserver(es => {
+        es.forEach(e => { if (e.isIntersecting) e.target.play().catch(()=>{}); else e.target.pause(); });
+      }, { threshold: 0.1 });
+      vids.forEach(x => io.observe(x));
     }
-    const io = new IntersectionObserver(es => {
-      es.forEach(e => { if (e.isIntersecting) e.target.play().catch(()=>{}); else e.target.pause(); });
-    }, { threshold: 0.25 });
-    vids.forEach(v => io.observe(v));
+    if (!v || !shade) return;
+    const slot = v.parentElement, root = document.documentElement;
+    root.classList.add('fly-on');
+    let queued = false;
+    function frame(){
+      queued = false;
+      const vw = root.clientWidth, vh = window.innerHeight, r = slot.getBoundingClientRect();
+      const land = Math.max(76, vh - r.height - 48);          // the video arrives as soon as its slot is fully on screen
+      const k = Math.max(0, Math.min(1, (vh - r.top) / (vh - land)));
+      if (k >= 1){
+        if (v.classList.contains('is-flying')){ v.classList.remove('is-flying'); v.removeAttribute('style'); }
+        shade.style.opacity = 0; shade.style.visibility = 'hidden';
+        return;
+      }
+      const e = k * k * (3 - 2 * k);
+      v.classList.add('is-flying');
+      v.style.width = (vw + (r.width - vw) * e) + 'px';
+      v.style.height = (vh + (r.height - vh) * e) + 'px';
+      v.style.transform = `translate3d(${r.left * e}px,${r.top * e}px,0)`;
+      v.style.borderRadius = (12 * e) + 'px';
+      shade.style.visibility = ''; shade.style.opacity = 1 - e;
+    }
+    const ask = () => { if (!queued){ queued = true; requestAnimationFrame(frame); } };
+    addEventListener('scroll', ask, { passive: true });
+    addEventListener('resize', ask);
+    addEventListener('load', ask);
+    frame();
+  })();
+
+  // ── nav: takes the theme of the scene beneath it, marks the current section, phone sheet ──
+  (function(){
+    const nav = document.querySelector('.nav'), menu = nav.querySelector('.nav-menu'),
+          sheet = document.getElementById('nav-sheet'), list = sheet.querySelector('ul');
+    const links = [...nav.querySelectorAll('.nav-links a[href^="#"]')];
+    links.forEach(a => { const li = document.createElement('li'); li.appendChild(a.cloneNode(true)); list.appendChild(li); });
+    const all = [...links, ...list.querySelectorAll('a')];
+    const secs = [...document.querySelectorAll('main > .sec')];
+    const close = () => { sheet.hidden = true; menu.setAttribute('aria-expanded', 'false'); };
+    menu.addEventListener('click', () => {
+      const open = sheet.hidden; sheet.hidden = !open; menu.setAttribute('aria-expanded', String(open));
+    });
+    list.addEventListener('click', close);
+    addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+    let queued = false;
+    function frame(){
+      queued = false;
+      let under = null, cur = null;
+      const mid = window.innerHeight * 0.4;
+      secs.forEach(sec => {
+        const r = sec.getBoundingClientRect();
+        if (r.top <= 26 && r.bottom > 26) under = sec;
+        if (r.top <= mid && sec.id) cur = sec.id;
+      });
+      nav.classList.toggle('nav--light', !!under && under.classList.contains('sec--light'));
+      all.forEach(a => {
+        if (a.getAttribute('href') === '#' + cur) a.setAttribute('aria-current', 'true');
+        else a.removeAttribute('aria-current');
+      });
+    }
+    const ask = () => { if (!queued){ queued = true; requestAnimationFrame(frame); } };
+    addEventListener('scroll', ask, { passive: true });
+    addEventListener('resize', ask);
+    frame();
   })();
 
   // ── reveal-on-scroll ──
