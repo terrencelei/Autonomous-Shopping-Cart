@@ -1405,7 +1405,7 @@
     if (!box || !('IntersectionObserver' in window)) return;
     const cv = box.querySelector('canvas'), reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const THREE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
-    const GROUPS = { 1: ['camera'], 3: ['esp32', 'board'], 6: ['wheels', 'motors'] };   // parts-list number → model groups
+    const GROUPS = { 1: ['camera'], 3: ['esp32', 'board', 'tray'], 6: ['wheels', 'motors'] };   // parts-list number → model groups
     const VIEWS = { q: [0.72, 1.02], front: [0, 1.5], side: [Math.PI / 2, 1.5], top: [0.0001, 0.02] };
     let started = false;
     const io = new IntersectionObserver(es => { if (es[0].isIntersecting && !started){ started = true; io.disconnect(); start(); } }, { rootMargin: '500px' });
@@ -1454,9 +1454,11 @@
         const mesh = new T.Mesh(g, mat); mesh.renderOrder = wall ? 2 : 1;
         // where this piece goes in the exploded view
         const c = m.cen.map((v, k) => v - mid[k]);
-        const e = { deck: [0,0,0], posts: [0,0,0], shelf: [0,.10,0], board: [0,.17,0], esp32: [0,.24,0], camera: [.10,0,0],
-                    motors: [0,-.07,0], casters: [0,-.07,0], wheels: [0,-.07, Math.sign(c[2]) * .08],
-                    walls: Math.abs(c[0]) > Math.abs(c[2]) ? [Math.sign(c[0]) * .10, 0, 0] : [0, 0, Math.sign(c[2]) * .10] }[m.g] || [0,0,0];
+        // exploded view: the stack lifts apart in its own order (deck, tray, breadboards, ESP32, shelf), each wall slides
+        // straight out from its side, the camera leaves with the front wall, and the drivetrain drops below the deck
+        const side = Math.abs(c[0]) > Math.abs(c[2]) ? [Math.sign(c[0]) * .13, 0, 0] : [0, 0, Math.sign(c[2]) * .13];
+        const e = { deck: [0,0,0], posts: [0,0,0], tray: [0,.05,0], board: [0,.085,0], esp32: [0,.115,0], shelf: [0,.21,0],
+                    camera: [.19,0,0], walls: side, motors: [0,-.07,0], casters: [0,-.07,0], wheels: [0,-.07, Math.sign(c[2]) * .08] }[m.g] || [0,0,0];
         scene.add(mesh);
         return { mesh, mat, g: m.g, e, base: wall ? 0.3 : 1 };
       });
@@ -1479,9 +1481,9 @@
           m.mesh.visible = m.mat.opacity > 0.01;
           m.mat.depthWrite = m.mat.opacity > 0.9;
         });
-        const sp = Math.sin(cur.ph), dist = cur.d * (1 + 0.32 * cur.ex);
+        const sp = Math.sin(cur.ph), dist = cur.d * (1 + 0.55 * cur.ex);
         cam.position.set(dist * sp * Math.cos(cur.th), dist * Math.cos(cur.ph) + 0.01, dist * sp * Math.sin(cur.th));
-        cam.lookAt(0, 0.01 + 0.03 * cur.ex, 0);
+        cam.lookAt(0.03 * cur.ex, 0.01 + 0.06 * cur.ex, 0);
         key.position.copy(cam.position).add(new T.Vector3(0.4, 1.2, 0.3)); fill.position.set(-cam.position.x, 0.3, -cam.position.z);
         renderer.render(scene, cam);
         if (moving && visible) raf = requestAnimationFrame(frame);
