@@ -1420,7 +1420,7 @@
     async function start(){
       box.dataset.state = 'loading';
       try {
-        const [buf] = await Promise.all([fetch('assets/cart.bin').then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }), loadThree()]);
+        const [buf] = await Promise.all([fetch('assets/cart.bin?v=3').then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }), loadThree()]);
         build(buf);
         box.dataset.state = 'ready';
       } catch (e) { box.dataset.state = 'fail'; }
