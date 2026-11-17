@@ -44,6 +44,7 @@
   ul{padding:0;list-style:none}
   a{color:inherit;text-decoration:none}
   button{font:inherit;color:inherit}
+  [hidden]{display:none!important}
   :focus-visible{outline:2px solid var(--focus);outline-offset:3px;border-radius:6px}
   .skip{position:absolute;left:12px;top:-60px;z-index:100;background:var(--fg);color:var(--ink);padding:10px 14px;border-radius:10px;font-weight:600}
   .skip:focus{top:12px}
@@ -146,7 +147,7 @@
   b.g{color:var(--c-ok)} b.r{color:var(--c-bad)} b.o{color:var(--c-warn)}
 
   /* ── simulation + stats ──────────────────────────── */
-  .sim-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:clamp(24px,4vw,64px);align-items:center}
+  .sim-grid{display:grid;grid-template-columns:1.55fr 1fr;gap:clamp(16px,2vw,28px);align-items:start}
   .scene-card svg{width:100%;height:auto;border-radius:var(--r-s)}
   .scene-caption{display:flex;justify-content:space-between;align-items:baseline;gap:16px;flex-wrap:wrap}
   .legend{display:flex;gap:14px;white-space:nowrap}
@@ -154,10 +155,77 @@
   .legend i{width:7px;height:7px;border-radius:50%}
   .legend .you i{background:var(--ok)}
   .legend .obs i{background:var(--bad)}
-  .stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 clamp(20px,3vw,40px)}
+  .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0 clamp(20px,3vw,40px)}
   .stat{padding:22px 0;border-top:1px solid var(--line)}
   .stat b{display:block;font-family:var(--font);font-size:clamp(28px,3vw,44px);line-height:1.05;font-weight:700;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
   .stat span{display:block;margin-top:8px;font-size:13px;line-height:1.4;color:var(--txt-3)}
+
+  /* ── interactive figures: shared controls ────────── */
+  .fig-ctrl{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;margin-top:14px}
+  .icon-btn{display:inline-grid;place-items:center;width:44px;height:44px;flex:none;padding:0;border-radius:50%;border:1px solid var(--line-2);background:transparent;cursor:pointer;transition:background .25s var(--ease)}
+  .icon-btn:hover{background:rgba(255,255,255,.08)}
+  .icon-btn svg{width:16px;height:16px;fill:currentColor}
+  .icon-btn .i-play,.icon-btn[aria-pressed="true"] .i-pause{display:none}
+  .icon-btn[aria-pressed="true"] .i-play{display:block}
+  .seg{display:inline-flex;padding:3px;border-radius:999px;background:rgba(255,255,255,.07);border:1px solid var(--line)}
+  .seg button{position:relative;min-height:36px;padding:0 14px;border:0;border-radius:999px;background:transparent;font-size:13px;font-weight:500;color:var(--fg-3);cursor:pointer;transition:background .25s var(--ease),color .25s var(--ease)}
+  .seg button::before{content:"";position:absolute;left:0;right:0;top:-4px;bottom:-4px}
+  .seg button[aria-pressed="true"]{background:var(--fg);color:var(--ink)}
+  .btn.small{min-height:36px;padding:0 14px;font-size:13px}
+  .fig-hint{flex:1 1 220px;font-size:13px;line-height:1.4;color:var(--txt-3)}
+  .range{-webkit-appearance:none;appearance:none;display:block;width:100%;height:28px;margin:10px 0 0;background:transparent;cursor:pointer}
+  .range::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:linear-gradient(90deg,var(--fg) calc(var(--v,0) * 100%),var(--line-2) 0)}
+  .range::-moz-range-track{height:4px;border-radius:2px;background:var(--line-2)}
+  .range::-moz-range-progress{height:4px;border-radius:2px;background:var(--fg)}
+  .range::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;margin-top:-7px;border-radius:50%;background:var(--fg);border:0}
+  .range::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:var(--fg);border:0}
+
+  /* ── simulation: drive it yourself + live telemetry ─ */
+  #scene{user-select:none;-webkit-user-select:none}
+  #scene #shelves,#scene #aisles,#scene #walkers{transition:opacity .5s var(--ease)}
+  #scene.is-drive #shelves,#scene.is-drive #aisles,#scene.is-drive #walkers{opacity:0}
+  #scene.is-drive{touch-action:none;cursor:crosshair}
+  #scene.is-drive #shopper{cursor:grab}
+  #scene.is-drag,#scene.is-drag #shopper{cursor:grabbing}
+  .telem{padding:clamp(18px,2vw,26px);background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r)}
+  .telem-top{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:16px;font-size:13px;color:var(--fg-3)}
+  .telem-top b{font-size:13px;font-weight:600;letter-spacing:.04em;color:var(--fg)}
+  .telem-nums{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding-bottom:18px;border-bottom:1px solid var(--line)}
+  .telem-nums b{display:block;font-family:var(--font);font-size:clamp(28px,2.6vw,38px);line-height:1;font-weight:700;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+  .telem-nums span{display:block;margin-top:6px;font-size:12.5px;color:var(--fg-3)}
+  .telem-fig{margin-top:16px}
+  .telem-fig figcaption{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px;font-size:12.5px;color:var(--fg-2)}
+  .telem-fig canvas{display:block;width:100%;height:92px}
+  .telem-key{display:flex;gap:14px;color:var(--fg-3);font-variant-numeric:tabular-nums}
+  .telem-key span{display:inline-flex;align-items:center;gap:6px}
+  .telem-key i{width:12px;height:2px;border-radius:1px}
+  .telem-key b{min-width:2.2em;font-weight:600;color:var(--fg-2);text-align:right}
+  .stats-grid{margin-top:clamp(28px,4vw,56px)}
+
+  /* ── gap slider · colour picker · hardware hotspots ─ */
+  #gapfig{touch-action:pan-y}
+  #gs-cart{cursor:grab}
+  .pick{cursor:pointer;outline:none}
+  .pick .pick-frame{opacity:0;transition:opacity .25s var(--ease)}
+  .pick:hover .pick-frame,.pick:focus-visible .pick-frame{opacity:.4}
+  .pick[aria-pressed="true"] .pick-frame{opacity:1}
+  .hw-photo{position:relative}
+  .hw-mk{position:absolute;left:var(--x);top:var(--y);display:grid;place-items:center;width:28px;height:28px;margin:-14px 0 0 -14px;padding:0;border-radius:50%;
+    border:1.5px solid #fff;background:rgba(10,10,11,.62);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);color:#fff;font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;cursor:pointer;
+    transition:transform .3s var(--ease-out),background .25s var(--ease),color .25s var(--ease)}
+  .hw-mk::before{content:"";position:absolute;inset:-8px}
+  .hw-mk.on{background:#fff;color:var(--ink);transform:scale(1.25)}
+  .hw-specs{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(8px,1vw,12px);margin:clamp(12px,1.4vw,18px) 0 0;padding:0;list-style:none}
+  .hw-spec{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:baseline;width:100%;height:100%;padding:16px 18px;text-align:left;border-radius:var(--r-s);
+    background:var(--surface);border:1px solid var(--line);cursor:pointer;transition:border-color .25s var(--ease),box-shadow .25s var(--ease)}
+  .hw-spec i{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;border:1px solid var(--line-2);font-style:normal;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;
+    transition:background .25s var(--ease),color .25s var(--ease),border-color .25s var(--ease)}
+  .hw-spec b{font-family:var(--font);font-size:16px;font-weight:650;letter-spacing:-.015em}
+  .hw-spec span{grid-column:2;font-size:13.5px;line-height:1.45;color:var(--txt-3)}
+  .hw-spec.on{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+  .hw-spec.on i{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  @media (max-width:900px){.hw-specs{grid-template-columns:1fr 1fr}}
+  @media (max-width:560px){.hw-specs{grid-template-columns:1fr}}
 
   /* ── cards ───────────────────────────────────────── */
   .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(12px,1.4vw,18px)}
@@ -219,6 +287,7 @@
     .demo-grid,.sim-grid,.eyes,.build-grid{grid-template-columns:1fr}
     .eyes.flip > figure{order:0}
     .cards{grid-template-columns:1fr 1fr}
+    .stats-grid{grid-template-columns:1fr 1fr}
   }
   @media (max-width:560px){
     .cards{grid-template-columns:1fr}
@@ -315,7 +384,7 @@
     <div class="sim-grid">
     <div class="scene-card reveal">
       <!-- Top-down animated store scene: the cart trails the shopper's path at a fixed gap -->
-      <svg id="scene" viewBox="0 0 720 520" role="img" aria-label="Animated top-down simulation: the cart follows a shopper through store aisles at a steady two-meter gap and waits when people cross its path">
+      <svg id="scene" viewBox="0 0 720 520" tabindex="0" role="application" aria-label="Top-down simulation of the cart following a shopper" aria-describedby="sim-help">
         <defs>
           <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
             <circle cx="2" cy="2" r="1.2" fill="rgba(255,255,255,.07)"/>
@@ -325,12 +394,12 @@
         <rect x="0" y="0" width="720" height="520" rx="12" fill="url(#dots)"/>
 
         <!-- shelves -->
-        <g fill="rgba(255,255,255,.05)" stroke="rgba(255,255,255,.14)">
+        <g id="shelves" fill="rgba(255,255,255,.05)" stroke="rgba(255,255,255,.14)">
           <rect x="200" y="105" width="330" height="38" rx="9"/>
           <rect x="220" y="240" width="330" height="38" rx="9"/>
           <rect x="190" y="368" width="330" height="38" rx="9"/>
         </g>
-        <g font-size="11" fill="rgba(152,152,157,.55)" font-weight="600" letter-spacing="2">
+        <g id="aisles" font-size="11" fill="rgba(152,152,157,.55)" font-weight="600" letter-spacing="2">
           <text x="335" y="129">AISLE 3</text>
           <text x="355" y="264">AISLE 2</text>
           <text x="325" y="392">AISLE 1</text>
@@ -351,6 +420,7 @@
         <use href="#route" stroke="rgba(255,255,255,.05)" stroke-width="26" stroke-linejoin="round" stroke-linecap="round"/>
 
         <!-- moving obstacles (choreographed by the script) -->
+        <g id="walkers">
         <g id="o1" opacity="0">
           <circle id="o1r" r="16" fill="none" stroke="rgba(255,69,58,.45)" stroke-dasharray="3 5"/>
           <circle r="8" fill="#ff453a"/>
@@ -366,6 +436,10 @@
           <circle r="8" fill="#ff453a"/>
           <text y="-24" text-anchor="middle" font-size="9.5" font-weight="800" fill="rgba(255,69,58,.85)" letter-spacing="1.2">OBSTACLE</text>
         </g>
+
+        </g>
+        <!-- bystanders the visitor drops in "You drive" -->
+        <g id="drops"></g>
 
         <!-- live mode readout -->
         <g id="modepill" transform="translate(16,16)">
@@ -407,20 +481,48 @@
                 stroke="#111113" stroke-width="5" paint-order="stroke" letter-spacing="1.5">YOU</text>
         </g>
       </svg>
+      <div class="fig-ctrl">
+        <button class="icon-btn" id="sim-play" type="button" aria-pressed="false" aria-label="Pause the simulation">
+          <svg class="i-pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3h3v10H4zM9 3h3v10H9z"/></svg>
+          <svg class="i-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3v10l8-5z"/></svg>
+        </button>
+        <div class="seg" id="sim-mode" role="group" aria-label="Who moves the shopper">
+          <button type="button" data-mode="tour" aria-pressed="true">Store tour</button>
+          <button type="button" data-mode="drive" aria-pressed="false">You drive</button>
+        </div>
+        <button class="btn small" id="sim-clear" type="button" hidden>Clear bystanders</button>
+        <p class="fig-hint" id="sim-help">Choose You drive, then drag the green dot. Click the floor to drop a bystander in the cart's way.</p>
+      </div>
       <div class="scene-caption">
-        <span>Live simulation of the real behaviors: follow at a steady 2 m · wait for people crossing the path.</span>
+        <span id="sim-cap">Scripted tour of the real behaviors: follow at a steady 2 m · wait for people crossing the path.</span>
         <span class="legend">
           <span class="you"><i></i>target</span>
           <span class="obs"><i></i>everyone else</span>
         </span>
       </div>
     </div>
+    <div class="telem reveal" aria-label="Live telemetry from the simulation">
+      <div class="telem-top"><span>Cart state</span><b id="t-mode">FOLLOW</b></div>
+      <div class="telem-nums">
+        <div><b id="t-dist">2.0</b><span>metres to shopper</span></div>
+        <div><b id="t-ang">0°</b><span>off the cart's nose</span></div>
+      </div>
+      <figure class="telem-fig">
+        <figcaption><span>Gap to shopper, last 12 s</span><span class="telem-key">metres</span></figcaption>
+        <canvas id="c-gap" role="img" aria-label="Line chart of the gap between cart and shopper over the last twelve seconds, with the two-metre hold line"></canvas>
+      </figure>
+      <figure class="telem-fig">
+        <figcaption><span>Wheel command, last 12 s</span>
+          <span class="telem-key"><span><i style="background:#2997ff"></i>Left <b id="t-l">0</b></span><span><i style="background:#d97706"></i>Right <b id="t-r">0</b></span></span></figcaption>
+        <canvas id="c-whl" role="img" aria-label="Line chart of the left and right wheel commands over the last twelve seconds, on a scale where 100 is full power"></canvas>
+      </figure>
+    </div>
+    </div>
     <div class="stats-grid">
       <div class="stat reveal"><b>2.0 m</b><span>the gap it keeps behind you</span></div>
       <div class="stat reveal"><b>30×/sec</b><span>ten decisions per blink of your eye</span></div>
       <div class="stat reveal"><b>100% on-device</b><span>all AI runs on the cart, no internet</span></div>
       <div class="stat reveal"><b>4 hrs</b><span>of following on a single battery charge</span></div>
-    </div>
     </div>
    </div>
   </section>
@@ -497,7 +599,7 @@
     </div>
 
     <figure class="shot reveal">
-      <svg viewBox="0 0 760 310" role="img" aria-label="Diagram: the cart scans its shopper's outfit into a color fingerprint, then scores every person it sees against that fingerprint — the best match keeps the green target box">
+      <svg viewBox="0 0 760 310" id="lockfig" role="group" aria-label="Interactive diagram: the cart scans its shopper's outfit into a color fingerprint, then scores every person it sees against it. Choose a person to make them the shopper.">
         <rect width="760" height="310" rx="10" fill="#111113"/>
 
         <text x="28" y="34" font-size="11" font-weight="800" letter-spacing="2" fill="#98989d">1 · DURING WARM-UP</text>
@@ -507,8 +609,8 @@
         <!-- shopper being scanned -->
         <g transform="translate(80,170)">
           <circle cx="0" cy="-54" r="13" fill="#8e8e93"/>
-          <rect x="-21" y="-38" width="42" height="46" rx="9" fill="#3b82f6"/>
-          <rect x="-16" y="10" width="32" height="42" rx="7" fill="#64748b"/>
+          <rect id="cl-top" x="-21" y="-38" width="42" height="46" rx="9" fill="#3b82f6"/>
+          <rect id="cl-bot" x="-16" y="10" width="32" height="42" rx="7" fill="#64748b"/>
           <rect x="-30" y="-70" width="60" height="3.5" rx="2" fill="#30d158" opacity=".9">
             <animate attributeName="y" values="-70;50;-70" dur="3s" repeatCount="indefinite"/>
           </rect>
@@ -520,43 +622,46 @@
         <!-- fingerprint card -->
         <g transform="translate(180,118)">
           <rect width="130" height="92" rx="12" fill="rgba(255,255,255,.05)" stroke="rgba(255,255,255,.14)"/>
-          <rect x="12" y="12" width="50" height="30" rx="6" fill="#3b82f6"/>
-          <rect x="68" y="12" width="50" height="30" rx="6" fill="#1d4ed8"/>
-          <rect x="12" y="50" width="50" height="30" rx="6" fill="#64748b"/>
-          <rect x="68" y="50" width="50" height="30" rx="6" fill="#334155"/>
+          <rect id="cl-f1" x="12" y="12" width="50" height="30" rx="6" fill="#3b82f6"/>
+          <rect id="cl-f2" x="68" y="12" width="50" height="30" rx="6" fill="#1d4ed8"/>
+          <rect id="cl-f3" x="12" y="50" width="50" height="30" rx="6" fill="#64748b"/>
+          <rect id="cl-f4" x="68" y="50" width="50" height="30" rx="6" fill="#334155"/>
           <text x="65" y="112" text-anchor="middle" font-size="11" font-weight="700" fill="#f5f5f7">color fingerprint</text>
           <text x="65" y="127" text-anchor="middle" font-size="10" fill="#98989d">(no face — just colors)</text>
         </g>
 
         <path d="M322 165 H360" stroke="#30d158" stroke-width="2" marker-end="url(#arrh)"/>
 
-        <!-- the lineup -->
-        <g transform="translate(440,178)">
+        <!-- the lineup: any of them can be chosen as the shopper -->
+        <g class="pick" data-i="0" transform="translate(440,178)" tabindex="0" role="button" aria-pressed="false">
+          <rect x="-54" y="-112" width="108" height="174" fill="transparent"/>
+          <rect class="pick-frame" x="-34" y="-76" width="68" height="134" rx="10" fill="none" stroke="#30d158" stroke-width="2.5"/>
           <circle cx="0" cy="-54" r="13" fill="#8e8e93"/>
-          <rect x="-21" y="-38" width="42" height="46" rx="9" fill="#b45309"/>
-          <rect x="-16" y="10" width="32" height="42" rx="7" fill="#475569"/>
-          <rect x="-31" y="-102" width="62" height="22" rx="11" fill="rgba(255,255,255,.06)" stroke="rgba(255,255,255,.14)"/>
-          <text y="-87" text-anchor="middle" font-size="11.5" font-weight="700" fill="#98989d">32%</text>
+          <rect class="pick-top" x="-21" y="-38" width="42" height="46" rx="9"/>
+          <rect class="pick-bot" x="-16" y="10" width="32" height="42" rx="7"/>
+          <rect class="pick-pill" x="-52" y="-108" width="104" height="24" rx="12"/>
+          <text class="pick-score" y="-91" text-anchor="middle" font-size="11.5" font-weight="700"></text>
         </g>
-        <g transform="translate(560,178)">
-          <rect x="-34" y="-76" width="68" height="134" rx="10" fill="none" stroke="#30d158" stroke-width="2.5">
-            <animate attributeName="stroke-opacity" values="1;.45;1" dur="2s" repeatCount="indefinite"/>
-          </rect>
+        <g class="pick" data-i="1" transform="translate(560,178)" tabindex="0" role="button" aria-pressed="false">
+          <rect x="-54" y="-112" width="108" height="174" fill="transparent"/>
+          <rect class="pick-frame" x="-34" y="-76" width="68" height="134" rx="10" fill="none" stroke="#30d158" stroke-width="2.5"/>
           <circle cx="0" cy="-54" r="13" fill="#8e8e93"/>
-          <rect x="-21" y="-38" width="42" height="46" rx="9" fill="#3b82f6"/>
-          <rect x="-16" y="10" width="32" height="42" rx="7" fill="#64748b"/>
-          <rect x="-52" y="-108" width="104" height="24" rx="12" fill="rgba(48,209,88,.15)" stroke="rgba(48,209,88,.5)"/>
-          <text y="-91" text-anchor="middle" font-size="11.5" font-weight="800" fill="#30d158">97% — YOU ✓</text>
+          <rect class="pick-top" x="-21" y="-38" width="42" height="46" rx="9"/>
+          <rect class="pick-bot" x="-16" y="10" width="32" height="42" rx="7"/>
+          <rect class="pick-pill" x="-52" y="-108" width="104" height="24" rx="12"/>
+          <text class="pick-score" y="-91" text-anchor="middle" font-size="11.5" font-weight="700"></text>
         </g>
-        <g transform="translate(680,178)">
+        <g class="pick" data-i="2" transform="translate(680,178)" tabindex="0" role="button" aria-pressed="false">
+          <rect x="-54" y="-112" width="108" height="174" fill="transparent"/>
+          <rect class="pick-frame" x="-34" y="-76" width="68" height="134" rx="10" fill="none" stroke="#30d158" stroke-width="2.5"/>
           <circle cx="0" cy="-54" r="13" fill="#8e8e93"/>
-          <rect x="-21" y="-38" width="42" height="46" rx="9" fill="#eab308"/>
-          <rect x="-16" y="10" width="32" height="42" rx="7" fill="#1f2937"/>
-          <rect x="-31" y="-102" width="62" height="22" rx="11" fill="rgba(255,255,255,.06)" stroke="rgba(255,255,255,.14)"/>
-          <text y="-87" text-anchor="middle" font-size="11.5" font-weight="700" fill="#98989d">41%</text>
+          <rect class="pick-top" x="-21" y="-38" width="42" height="46" rx="9"/>
+          <rect class="pick-bot" x="-16" y="10" width="32" height="42" rx="7"/>
+          <rect class="pick-pill" x="-52" y="-108" width="104" height="24" rx="12"/>
+          <text class="pick-score" y="-91" text-anchor="middle" font-size="11.5" font-weight="700"></text>
         </g>
-        <text x="565" y="272" text-anchor="middle" font-size="11" fill="#98989d">every person is scored against the fingerprint —</text>
-        <text x="565" y="288" text-anchor="middle" font-size="11" fill="#98989d">the best match keeps the green box</text>
+        <text x="565" y="272" text-anchor="middle" font-size="11" fill="#98989d">every person is scored against the fingerprint,</text>
+        <text x="565" y="288" text-anchor="middle" font-size="11" fill="#98989d">and the best match keeps the green box</text>
 
         <defs>
           <marker id="arrh" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
@@ -564,6 +669,7 @@
           </marker>
         </defs>
       </svg>
+      <figcaption>Click any of the three people to make them the shopper. The scores here come from a simple color distance, as an illustration; the cart itself uses regression-trained weights.</figcaption>
     </figure>
 
     <div class="cards">
@@ -602,47 +708,36 @@
     <!-- idea 1: speed matches the gap -->
     <div class="eyes reveal">
       <figure class="shot">
-        <svg viewBox="0 0 680 230" role="img" aria-label="Diagram: the further the cart is from its shopper, the faster it drives; at the two-meter bubble it waits">
+        <svg id="gapfig" viewBox="0 0 680 230" role="img" aria-label="Interactive diagram: the wider the gap between cart and shopper, the harder the cart drives; within 2.2 metres it waits. Use the slider below to move the cart.">
           <rect width="680" height="230" rx="10" fill="#111113"/>
+          <text x="24" y="34" font-size="11" font-weight="700" letter-spacing="1.5" fill="#98989d">WHEEL COMMAND</text>
+          <text x="24" y="72" font-size="34" font-weight="700" fill="#f5f5f7" letter-spacing="-1"><tspan id="gs-cmd">69</tspan><tspan font-size="13" font-weight="500" fill="#98989d" letter-spacing="0" dx="6">/ 100</tspan></text>
+          <text id="gs-state" x="24" y="94" font-size="11.5" fill="#98989d">far behind → hurries</text>
           <line x1="20" y1="172" x2="660" y2="172" stroke="rgba(255,255,255,.10)" stroke-width="2"/>
-
-          <!-- shopper + bubble -->
-          <g transform="translate(585,150)">
-            <circle r="78" fill="rgba(48,209,88,.06)" stroke="rgba(48,209,88,.35)" stroke-dasharray="5 7"/>
+          <rect x="422" y="52" width="18" height="120" fill="rgba(48,209,88,.12)"/>
+          <line x1="440" y1="44" x2="440" y2="172" stroke="rgba(48,209,88,.6)" stroke-dasharray="5 6" stroke-width="2"/>
+          <text x="446" y="56" font-size="11" font-weight="700" fill="#30d158" letter-spacing="1">2.0 m HOLD</text>
+          <text x="416" y="56" text-anchor="end" font-size="10.5" fill="#98989d">0.2 m deadband</text>
+          <g transform="translate(620,150)">
             <circle r="9" fill="#30d158"/>
             <circle r="14" fill="none" stroke="#30d158" stroke-width="1.5" opacity=".7"/>
-            <text y="-90" text-anchor="middle" font-size="11.5" font-weight="800" fill="#30d158" letter-spacing="1">2 m BUBBLE</text>
+            <text y="-24" text-anchor="middle" font-size="11" font-weight="800" fill="#30d158" letter-spacing="1.5">YOU</text>
           </g>
-
-          <!-- same cart, three distances -->
-          <g stroke="#30d158" fill="rgba(48,209,88,.15)" stroke-width="2">
-            <g transform="translate(85,150)">
-              <rect x="-20" y="-12" width="40" height="24" rx="5"/>
-              <circle cx="22" cy="0" r="2.4" fill="#30d158" stroke="none"/>
-            </g>
-            <g transform="translate(295,150)">
-              <rect x="-20" y="-12" width="40" height="24" rx="5"/>
-              <circle cx="22" cy="0" r="2.4" fill="#30d158" stroke="none"/>
-            </g>
-            <g transform="translate(478,150)">
-              <rect x="-20" y="-12" width="40" height="24" rx="5"/>
-              <circle cx="22" cy="0" r="2.4" fill="#30d158" stroke="none"/>
-            </g>
+          <line id="gs-arrow" x1="0" y1="150" x2="0" y2="150" stroke="#30d158" stroke-width="3.5" marker-end="url(#arr2)"/>
+          <g id="gs-cart" transform="translate(215,150)">
+            <rect x="-34" y="-34" width="68" height="68" fill="transparent"/>
+            <rect x="-20" y="-12" width="40" height="24" rx="5" stroke="#30d158" fill="rgba(48,209,88,.15)" stroke-width="2"/>
+            <circle cx="22" cy="0" r="2.4" fill="#30d158"/>
           </g>
-          <!-- speed arrows -->
-          <line x1="112" y1="150" x2="196" y2="150" stroke="#30d158" stroke-width="3.5" marker-end="url(#arr2)"/>
-          <line x1="322" y1="150" x2="362" y2="150" stroke="#30d158" stroke-width="3.5" marker-end="url(#arr2)" opacity=".75"/>
-
-          <text x="85" y="205" text-anchor="middle" font-size="11.5" fill="#98989d">far behind → hurries</text>
-          <text x="295" y="205" text-anchor="middle" font-size="11.5" fill="#98989d">closing in → eases off</text>
-          <text x="478" y="205" text-anchor="middle" font-size="11.5" fill="#98989d">at the bubble → waits</text>
-
+          <text id="gs-gap" x="215" y="205" text-anchor="middle" font-size="11.5" font-weight="700" fill="#f5f5f7">4.5 m gap</text>
           <defs>
             <marker id="arr2" markerUnits="userSpaceOnUse" markerWidth="16" markerHeight="16" refX="11" refY="8" orient="auto">
               <path d="M0,0 L16,8 L0,16 z" fill="#30d158"/>
             </marker>
           </defs>
         </svg>
+        <input class="range" id="gs-range" type="range" min="1.2" max="6" step="0.1" value="4.5" aria-label="Gap between cart and shopper, in metres">
+        <figcaption>Drag the cart or the slider. The number is the cart's real control law: 30 units of wheel command per metre beyond a 0.2 m deadband, never below 12 while driving, capped at 100.</figcaption>
       </figure>
       <div class="eyes-copy">
         <h3>1 · Speed matches the gap</h3>
@@ -792,10 +887,26 @@
         <figcaption>Designed in CAD for modular assembly, maintenance access, and a factor of safety of 2.</figcaption>
       </figure>
       <figure class="shot reveal">
-        <img src="assets/cart-photo.jpg" alt="The real prototype: wooden chassis with the camera mounted up front and the Pi, ESP32, drivers, battery and wiring inside" loading="lazy" decoding="async">
+        <div class="hw-photo">
+          <img src="assets/cart-photo.jpg" alt="The real prototype: wooden chassis with the camera mounted up front and the Pi, ESP32, drivers, battery and wiring inside" loading="lazy" decoding="async">
+          <button class="hw-mk" type="button" data-k="1" style="--x:24%;--y:46.5%" aria-label="AI camera">1</button>
+          <button class="hw-mk" type="button" data-k="2" style="--x:37.5%;--y:60%" aria-label="Raspberry Pi 5">2</button>
+          <button class="hw-mk" type="button" data-k="3" style="--x:52%;--y:58%" aria-label="ESP32 + motor drivers">3</button>
+          <button class="hw-mk" type="button" data-k="4" style="--x:63%;--y:49%" aria-label="12 V battery">4</button>
+          <button class="hw-mk" type="button" data-k="5" style="--x:70.5%;--y:58.5%" aria-label="Voltage regulator">5</button>
+          <button class="hw-mk" type="button" data-k="6" style="--x:67%;--y:83%" aria-label="Drive wheels + encoders">6</button>
+        </div>
         <figcaption>Manufactured with precision laser-cut parts and 3D-printed mounts, then assembled into a compact working prototype.</figcaption>
       </figure>
     </div>
+    <ol class="hw-specs reveal" aria-label="Hardware components">
+      <li><button class="hw-spec" type="button" data-k="1" aria-pressed="false"><i aria-hidden="true">1</i><b>AI camera</b><span>Sony IMX500. The person-detection network runs on the camera's own chip.</span></button></li>
+      <li><button class="hw-spec" type="button" data-k="2" aria-pressed="false"><i aria-hidden="true">2</i><b>Raspberry Pi 5</b><span>Runs the follow loop at camera rate, about 30 times a second.</span></button></li>
+      <li><button class="hw-spec" type="button" data-k="3" aria-pressed="false"><i aria-hidden="true">3</i><b>ESP32 + motor drivers</b><span>Takes wheel commands over USB and powers the motors. Stops them if commands go quiet for half a second.</span></button></li>
+      <li><button class="hw-spec" type="button" data-k="4" aria-pressed="false"><i aria-hidden="true">4</i><b>12 V battery</b><span>About four hours of following on one charge.</span></button></li>
+      <li><button class="hw-spec" type="button" data-k="5" aria-pressed="false"><i aria-hidden="true">5</i><b>Voltage regulator</b><span>Steps the battery down for the electronics.</span></button></li>
+      <li><button class="hw-spec" type="button" data-k="6" aria-pressed="false"><i aria-hidden="true">6</i><b>Drive wheels + encoders</b><span>Encoders report how far each wheel really turned, every 20 ms.</span></button></li>
+    </ol>
     <div class="safety reveal">
       <p><b>Built to be maintained.</b> The modular layout keeps subsystems accessible, repeatable to manufacture, and ready to scale as the cart evolves.</p>
     </div>
@@ -823,30 +934,42 @@
 </main>
 
 <script>
-  // ── hero scene: the cart rides a steady 2 m behind the shopper ──
-  // The shopper walks the route; the cart trails it at a fixed gap, pausing
-  // (with the real 0.6 s hysteresis) when someone steps between them, then
-  // smoothly catching back up. The readout is true straight-line distance.
+  // ── simulation ──────────────────────────────────────────────────────────
+  // Two ways to run it. "Store tour": the shopper walks a scripted route and the
+  // cart trails it. "You drive": the visitor drags the shopper and drops
+  // bystanders, and the cart answers with the same rules and constants as
+  // follow.py (hold distance, deadband + hysteresis, damped-P speed, slew limits,
+  // start kick, proportional steering, obstacle hold, search spin).
+  // Either way the telemetry panel plots what the cart measured and commanded.
   (function(){
     const route = document.getElementById('route');
     if (!route || !route.getTotalLength) return;
     const $ = id => document.getElementById(id);
-    const shopper=$('shopper'), cart=$('cart'), body=$('cartbody'), cone=$('cone'),
-          tether=$('tether'), label=$('gaplabel'), pillR=$('moderect'), pillT=$('modetext');
+    const svg=$('scene'), shopper=$('shopper'), cart=$('cart'), body=$('cartbody'), cone=$('cone'),
+          tether=$('tether'), label=$('gaplabel'), pillR=$('moderect'), pillT=$('modetext'), dropsG=$('drops');
     const obs = [1,2,3].map(i => ({ g: $('o'+i), ring: $('o'+i+'r') }));
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     const L = route.getTotalLength();
-    const V = 58;              // shopper speed (px/s); 46 px ≈ 1 m
-    const VMAX = 150, KP = 10; // catch-up: speed = KP·(gap error), capped
+    const V = 58;              // tour: shopper speed (px/s); 46 px ≈ 1 m
+    const VMAX = 150, KP = 10; // tour: catch-up speed = KP·(gap error), capped
     const GAP = 92, PXM = 46;
     const T = L / V;
-    const GREEN='#30d158', CORAL='#ff453a';
+    const GREEN='#30d158', CORAL='#ff453a', AMBER='#ffb340', WHITE='#f5f5f7';
+    // follow.py constants (wheel command: 100 = full power)
+    const HOLD=2.0, DEADBAND=0.20, RESUME=0.10, KP_DIST=30, KD_DIST=8, DX_ALPHA=0.2, MIN_DRIVE=12,
+          SLEW_UP=50, SLEW_DOWN=150, KICK=50, SPIN_KICK=18, KP_ANGLE=120, ANG_DB=2*Math.PI/180, DIFF_SLEW=300,
+          BLOCK_ANG=20*Math.PI/180, BLOCK_MARGIN=0.3, BLOCK_HOLD=0.6, SEARCH_GRACE=0.3, TRACK=0.333, MAXC=100;
+    const MPS = 0.02;          // sim only: metres per second per unit of wheel command
+    const FOV = 38*Math.PI/180;
 
     const at = d => route.getPointAtLength(((d % L) + L) % L);
     const wrap = a => { while (a >  Math.PI) a -= 2*Math.PI;
                         while (a < -Math.PI) a += 2*Math.PI; return a; };
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const slew = (cur, tgt, up, down, dt) => tgt > cur ? Math.min(tgt, cur + up*dt) : Math.max(tgt, cur - down*dt);
 
-    // obstacle choreography, synced to the master loop
+    // tour: obstacle choreography, synced to the master loop
     function obPos(i, tm, t){
       if (i === 0){            // oncoming walker in the bottom aisle (once per loop)
         const t0 = 2, v = 54, dur = 616 / v;
@@ -861,9 +984,7 @@
       const a = t * 2 * Math.PI / 11;   // browsing drifter, parked off the corridor
       return { x: 612 + 16 * Math.cos(a), y: 250 + 12 * Math.sin(a) };
     }
-
-    // "in the way": near the cart, roughly between cart and shopper (same test
-    // shape as the real obstacle hold)
+    // tour: "in the way" = near the cart, roughly between cart and shopper
     function blocking(c, s, o){
       const dx = s.x - c.x, dy = s.y - c.y, l2 = dx*dx + dy*dy;
       if (l2 < 1) return false;
@@ -873,13 +994,25 @@
       return px*px + py*py < 52*52 && (o.x-c.x)**2 + (o.y-c.y)**2 < 170*170;
     }
 
-    function pill(txt, col, bg, br){
+    const LOOK = {
+      FOLLOW:  ['FOLLOW', GREEN, 'rgba(48,209,88,.12)', 'rgba(48,209,88,.4)'],
+      KICK:    ['KICK', GREEN, 'rgba(48,209,88,.12)', 'rgba(48,209,88,.4)'],
+      STOP:    ['HOLDING 2 m', WHITE, 'rgba(255,255,255,.08)', 'rgba(255,255,255,.3)'],
+      BLOCKED: ['WAITING FOR PATH', CORAL, 'rgba(255,69,58,.12)', 'rgba(255,69,58,.45)'],
+      SEARCH:  ['SEARCHING', AMBER, 'rgba(255,179,64,.12)', 'rgba(255,179,64,.45)'],
+    };
+    let shownMode = '';
+    function show(mode){
+      if (mode === shownMode) return;
+      shownMode = mode;
+      const [txt, col, bg, br] = LOOK[mode];
       pillT.textContent = txt; pillT.setAttribute('fill', col);
       pillR.setAttribute('fill', bg); pillR.setAttribute('stroke', br);
       const w = Math.ceil(pillT.getComputedTextLength()) + 30;
       pillR.setAttribute('width', w); pillT.setAttribute('x', w / 2);
+      $('t-mode').textContent = txt;
     }
-    function place(s, c, heading){
+    function place(s, c, heading, mode){
       shopper.setAttribute('transform', `translate(${s.x},${s.y})`);
       cart.setAttribute('transform', `translate(${c.x},${c.y})`);
       body.setAttribute('transform', `rotate(${heading * 180 / Math.PI})`);
@@ -887,86 +1020,342 @@
       tether.setAttribute('x2', s.x); tether.setAttribute('y2', s.y);
       label.setAttribute('x', (s.x + c.x) / 2);
       label.setAttribute('y', (s.y + c.y) / 2 - 10);
+      const dist = Math.hypot(s.x - c.x, s.y - c.y) / PXM;
+      const col = mode === 'BLOCKED' ? CORAL : mode === 'SEARCH' ? AMBER : GREEN;
+      const rgb = mode === 'BLOCKED' ? '255,69,58' : mode === 'SEARCH' ? '255,179,64' : '48,209,88';
+      tether.setAttribute('stroke', `rgba(${rgb},.6)`);
+      tether.setAttribute('opacity', mode === 'SEARCH' ? .25 : 1);
+      label.setAttribute('fill', col);
+      label.textContent = dist.toFixed(1) + ' m';
+      cone.setAttribute('fill', `rgba(${rgb},.08)`);
+      return dist;
     }
 
-    const c0 = at(-GAP), a0 = at(-GAP + 6);
-    let d_c = -GAP, heading = Math.atan2(a0.y - c0.y, a0.x - c0.x),
-        blockUntil = -9, lastMode = '', prevT;
-
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches){
-      const d = GAP + 170, s = at(d), c = at(d - GAP), a = at(d - GAP + 6);
-      place(s, c, Math.atan2(a.y - c.y, a.x - c.x));
-      [[455,480],[585,140],[615,255]].forEach((p, i) => {
-        obs[i].g.setAttribute('opacity', 1);
-        obs[i].g.setAttribute('transform', `translate(${p[0]},${p[1]})`);
+    // ── telemetry: readouts + two strip charts (one y-scale each) ──
+    const SPAN = 12, log = [];
+    const cGap = $('c-gap'), cWhl = $('c-whl');
+    function chart(cv, lo, hi, ticks, series, ref){
+      const dpr = Math.min(window.devicePixelRatio || 1, 2), w = cv.clientWidth, h = cv.clientHeight;
+      if (!w) return;
+      if (cv.width !== Math.round(w*dpr)){ cv.width = Math.round(w*dpr); cv.height = Math.round(h*dpr); }
+      const g = cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,w,h);
+      const padL = 26, padT = 6, padB = 6, pw = w - padL, ph = h - padT - padB;
+      const Y = v => padT + ph * (1 - (clamp(v, lo, hi) - lo) / (hi - lo));
+      g.font = '10.5px -apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif'; g.textBaseline = 'middle';
+      g.lineWidth = 1;
+      ticks.forEach(v => {
+        g.strokeStyle = 'rgba(255,255,255,.10)'; g.setLineDash([]);
+        g.beginPath(); g.moveTo(padL, Math.round(Y(v))+.5); g.lineTo(w, Math.round(Y(v))+.5); g.stroke();
+        g.fillStyle = 'rgba(245,245,247,.5)'; g.textAlign = 'right'; g.fillText(String(v), padL - 7, Y(v));
       });
-      return;
+      if (ref){
+        g.strokeStyle = 'rgba(48,209,88,.7)'; g.setLineDash([4,5]);
+        g.beginPath(); g.moveTo(padL, Y(ref.v)); g.lineTo(w, Y(ref.v)); g.stroke(); g.setLineDash([]);
+        g.fillStyle = 'rgba(245,245,247,.5)'; g.textAlign = 'left'; g.fillText(ref.label, padL + 6, Y(ref.v) + 9);
+      }
+      if (!log.length) return;
+      const tNow = log[log.length-1].t;
+      g.lineWidth = 2; g.lineJoin = 'round'; g.lineCap = 'round';
+      series.forEach(([key, col]) => {
+        g.strokeStyle = col; g.beginPath();
+        log.forEach((p, i) => { const x = padL + pw * (1 - (tNow - p.t) / SPAN), y = Y(p[key]); i ? g.lineTo(x, y) : g.moveTo(x, y); });
+        g.stroke();
+      });
+    }
+    let lastText = -1;
+    function telemetry(t, dist, ang, l, r){
+      log.push({ t, dist, l, r });
+      while (log.length && log[0].t < t - SPAN) log.shift();
+      chart(cGap, 0, 6, [0, 2, 4, 6], [['dist', WHITE]], { v: HOLD, label: '2 m hold' });
+      chart(cWhl, -50, 100, [-50, 0, 50, 100], [['l', '#2997ff'], ['r', '#d97706']]);
+      if (t - lastText > .1 || t < lastText){              // readouts at 10 Hz so the digits stay legible
+        lastText = t;
+        $('t-dist').textContent = dist.toFixed(1);
+        $('t-ang').textContent = (ang >= 0 ? '+' : '−') + Math.abs(ang * 180 / Math.PI).toFixed(0) + '°';
+        $('t-l').textContent = Math.round(l); $('t-r').textContent = Math.round(r);
+      }
     }
 
-    function tick(now){
-      requestAnimationFrame(tick);
-      const t = now / 1000;
-      const dt = Math.min(prevT === undefined ? 0.016 : t - prevT, 0.05);
-      prevT = t;
+    // ── tour state ──
+    const c0 = at(-GAP), a0 = at(-GAP + 6);
+    let d_c = -GAP, heading = Math.atan2(a0.y - c0.y, a0.x - c0.x), blockUntil = -9;
+    let last = { s: at(0), c: c0 };
+
+    function tour(t, dt){
       const tm = t % T, d_s = V * t;
       const s = at(d_s);
-
-      // obstacles
       const opos = [];
       obs.forEach((o, i) => {
         const p = obPos(i, tm, t);
-        if (p){ o.g.setAttribute('opacity', 1);
-                o.g.setAttribute('transform', `translate(${p.x},${p.y})`); }
+        if (p){ o.g.setAttribute('opacity', 1); o.g.setAttribute('transform', `translate(${p.x},${p.y})`); }
         else o.g.setAttribute('opacity', 0);
         opos[i] = p;
       });
-
-      // gap along the route; snap if the tab slept and the shopper teleported
       let gap = ((d_s - d_c) % L + L) % L;
       if (gap > 600){ d_c = d_s - GAP; gap = GAP; }
       const c = at(d_c);
-
-      // obstacle hold (same 0.6 s hysteresis as the real cart)
       let blocker = -1;
       opos.forEach((p, i) => { if (p && blocking(c, s, p)) blocker = i; });
-      if (blocker >= 0) blockUntil = t + 0.6;
+      if (blocker >= 0) blockUntil = t + BLOCK_HOLD;
       const mode = t < blockUntil ? 'BLOCKED' : 'FOLLOW';
-
-      // trail at a steady 2 m: pin when settled, proportional catch-up after a hold
+      let vpx = 0;
       if (mode !== 'BLOCKED'){
-        const err = gap - GAP;
+        const err = gap - GAP, before = d_c;
         if (err < 3) d_c = d_s - GAP;
         else d_c += Math.min(KP * err, VMAX) * dt;
+        vpx = dt > 0 ? clamp((d_c - before) / dt, 0, VMAX) : 0;
       }
       const c2 = at(d_c);
-
-      // heading: along the path while rolling; aimed at the shopper while held
       let des;
       if (mode === 'BLOCKED'){ des = Math.atan2(s.y - c2.y, s.x - c2.x); }
       else { const a = at(d_c + 6); des = Math.atan2(a.y - c2.y, a.x - c2.x); }
-      heading += Math.max(-4.5 * dt, Math.min(4.5 * dt, wrap(des - heading)));
-
-      place(s, c2, heading);
-
-      // dressing: colors, live straight-line distance, blocker highlight
-      const dist = Math.hypot(s.x - c2.x, s.y - c2.y);
-      tether.setAttribute('stroke', mode === 'BLOCKED' ? 'rgba(255,69,58,.65)' : 'rgba(48,209,88,.55)');
-      label.setAttribute('fill', mode === 'BLOCKED' ? CORAL : GREEN);
-      label.textContent = (dist / PXM).toFixed(1) + ' m';
-      cone.setAttribute('fill', mode === 'BLOCKED' ? 'rgba(255,69,58,.08)' : 'rgba(48,209,88,.08)');
+      const turn = clamp(wrap(des - heading), -4.5 * dt, 4.5 * dt);
+      heading += turn;
+      const dist = place(s, c2, heading, mode);
       obs.forEach((o, i) => {
         const isB = (i === blocker && mode === 'BLOCKED');
         o.ring.setAttribute('r', isB ? 20 + 3 * Math.sin(t * 10) : 16);
         o.ring.setAttribute('stroke', isB ? 'rgba(255,69,58,.95)' : 'rgba(255,69,58,.45)');
       });
-
-      if (mode !== lastMode){
-        lastMode = mode;
-        if (mode === 'FOLLOW') pill('FOLLOW', GREEN, 'rgba(48,209,88,.12)', 'rgba(48,209,88,.4)');
-        else pill('WAITING FOR PATH', CORAL, 'rgba(255,69,58,.12)', 'rgba(255,69,58,.45)');
-      }
+      show(mode);
+      // what wheel commands would produce this motion (same kinematics as "You drive")
+      const fwd = vpx / PXM / MPS, diff = dt > 0 ? (turn / dt) * TRACK / MPS : 0;
+      telemetry(t, dist, wrap(Math.atan2(s.y - c2.y, s.x - c2.x) - heading),
+                clamp(fwd + diff/2, -MAXC, MAXC), clamp(fwd - diff/2, -MAXC, MAXC));
+      last = { s, c: c2 };
     }
+
+    // ── "You drive" state ──
+    const D = { s:{x:0,y:0}, tgt:{x:0,y:0}, c:{x:0,y:0}, S:0, Df:0, moving:false, kickLeft:0, kickShow:-9,
+                dxs:0, pd:null, lostFor:0, lastTh:0, blockUntil:-9, drops:[] };
+    function drive(t, dt){
+      // the shopper walks toward the pointer at up to a brisk pace
+      const mx = D.tgt.x - D.s.x, my = D.tgt.y - D.s.y, ml = Math.hypot(mx, my), step = 2.2 * PXM * dt;
+      if (ml > step){ D.s.x += mx / ml * step; D.s.y += my / ml * step; } else { D.s.x = D.tgt.x; D.s.y = D.tgt.y; }
+
+      const d = Math.hypot(D.s.x - D.c.x, D.s.y - D.c.y) / PXM;
+      const th = wrap(Math.atan2(D.s.y - D.c.y, D.s.x - D.c.x) - heading);
+      const visible = Math.abs(th) < FOV;
+      if (visible){ D.lostFor = 0; D.lastTh = th; } else D.lostFor += dt;
+
+      // someone inside ±20° of straight ahead and clearly nearer than the shopper blocks the path
+      let blocker = -1;
+      D.drops.forEach((o, i) => {
+        const od = Math.hypot(o.x - D.c.x, o.y - D.c.y) / PXM;
+        const oa = wrap(Math.atan2(o.y - D.c.y, o.x - D.c.x) - heading);
+        if (Math.abs(oa) < BLOCK_ANG && od < d - BLOCK_MARGIN) blocker = i;
+      });
+      if (blocker >= 0 && visible) D.blockUntil = t + BLOCK_HOLD;
+      const blocked = t < D.blockUntil;
+      const searching = !visible && D.lostFor > SEARCH_GRACE;
+
+      const rate = D.pd === null || dt <= 0 ? 0 : (d - D.pd) / dt;      // opening (+) or closing (−), m/s
+      D.pd = d; D.dxs += DX_ALPHA * (clamp(rate, -3, 3) - D.dxs);
+
+      let tgtS = 0, tgtD = 0, mode;
+      if (searching){
+        mode = 'SEARCH'; D.moving = false;
+        tgtD = (D.lastTh >= 0 ? 1 : -1) * 2 * SPIN_KICK;                 // spin toward where it last saw you
+      } else {
+        const err = d - HOLD;
+        if (blocked || !visible) D.moving = false;
+        else if (!D.moving && err > DEADBAND + RESUME){ D.moving = true; D.kickLeft = 0.02; D.kickShow = t; D.S = Math.max(D.S, KICK); }
+        else if (D.moving && err <= DEADBAND) D.moving = false;
+        if (D.moving) tgtS = clamp(Math.max(MIN_DRIVE, KP_DIST * (err - DEADBAND) + KD_DIST * D.dxs), 0, MAXC);
+        if (visible && Math.abs(th) > ANG_DB) tgtD = clamp(KP_ANGLE * th, -MAXC, MAXC);
+        mode = blocked ? 'BLOCKED' : D.moving ? (t - D.kickShow < .35 ? 'KICK' : 'FOLLOW') : 'STOP';
+      }
+      D.S = D.kickLeft > 0 && D.moving ? Math.max(KICK, D.S) : slew(D.S, tgtS, SLEW_UP, SLEW_DOWN, dt);
+      D.Df = slew(D.Df, tgtD, DIFF_SLEW, DIFF_SLEW, dt);
+      const l = clamp(D.S + D.Df/2, -MAXC, MAXC), r = clamp(D.S - D.Df/2, -MAXC, MAXC);
+      const v = (l + r) / 2 * MPS, om = (l - r) * MPS / TRACK;
+      heading = wrap(heading + om * dt);
+      D.c.x = clamp(D.c.x + Math.cos(heading) * v * PXM * dt, 24, 696);
+      D.c.y = clamp(D.c.y + Math.sin(heading) * v * PXM * dt, 24, 496);
+      if (D.kickLeft > 0) D.kickLeft -= Math.abs(v) * dt;
+
+      place(D.s, D.c, heading, mode);
+      D.drops.forEach((o, i) => {
+        const isB = i === blocker && blocked;
+        o.ring.setAttribute('r', isB ? 20 + 3 * Math.sin(t * 10) : 16);
+        o.ring.setAttribute('stroke', isB ? 'rgba(255,69,58,.95)' : 'rgba(255,69,58,.45)');
+      });
+      show(mode);
+      telemetry(t, d, th, l, r);
+    }
+
+    // ── bystanders ──
+    const NS = 'http://www.w3.org/2000/svg';
+    function addDrop(x, y){
+      if (D.drops.length >= 8) removeDrop(0);
+      const g = document.createElementNS(NS, 'g'), ring = document.createElementNS(NS, 'circle'), dot = document.createElementNS(NS, 'circle');
+      g.setAttribute('transform', `translate(${x},${y})`);
+      ring.setAttribute('r', 16); ring.setAttribute('fill', 'none'); ring.setAttribute('stroke', 'rgba(255,69,58,.45)'); ring.setAttribute('stroke-dasharray', '3 5');
+      dot.setAttribute('r', 8); dot.setAttribute('fill', CORAL);
+      g.appendChild(ring); g.appendChild(dot); dropsG.appendChild(g);
+      D.drops.push({ x, y, g, ring });
+      $('sim-clear').hidden = false;
+    }
+    function removeDrop(i){ D.drops[i].g.remove(); D.drops.splice(i, 1); $('sim-clear').hidden = !D.drops.length; }
+    $('sim-clear').addEventListener('click', () => { while (D.drops.length) removeDrop(0); });
+
+    // ── modes, pause, pointer + keyboard ──
+    let mode = 'tour', playing = !reduced, onscreen = true, simT = 0, prev;
+    const seg = [...document.querySelectorAll('#sim-mode button')], playBtn = $('sim-play');
+    function setMode(m){
+      if (m === mode) return;
+      mode = m; log.length = 0;
+      seg.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+      svg.classList.toggle('is-drive', m === 'drive');
+      if (m === 'drive'){
+        D.s = { x: last.s.x, y: last.s.y }; D.tgt = { x: last.s.x, y: last.s.y }; D.c = { x: last.c.x, y: last.c.y };
+        D.S = D.Df = D.dxs = D.lostFor = 0; D.pd = null; D.moving = false; D.blockUntil = -9;
+        $('sim-cap').textContent = 'You drive: the cart runs the same rules and constants as its real control code. Speeds are scaled for the screen.';
+        $('sim-help').textContent = 'Drag the green dot, or use the arrow keys. Click the floor to drop a bystander; click one to remove it.';
+      } else {
+        last = { s: D.s, c: D.c };
+        dropsG.style.display = 'none';
+        $('sim-cap').textContent = 'Scripted tour of the real behaviors: follow at a steady 2 m · wait for people crossing the path.';
+        $('sim-help').textContent = "Choose You drive, then drag the green dot. Click the floor to drop a bystander in the cart's way.";
+      }
+      if (m === 'drive') dropsG.style.display = '';
+      $('sim-clear').hidden = m !== 'drive' || !D.drops.length;
+      if (!playing) render(0);
+    }
+    seg.forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+    function setPlaying(p){
+      playing = p; prev = undefined;
+      playBtn.setAttribute('aria-pressed', String(!p));
+      playBtn.setAttribute('aria-label', p ? 'Pause the simulation' : 'Play the simulation');
+    }
+    playBtn.addEventListener('click', () => setPlaying(!playing));
+
+    const pt = e => { const m = svg.getScreenCTM().inverse(); return { x: clamp(e.clientX * m.a + m.e, 14, 706), y: clamp(e.clientY * m.d + m.f, 14, 506) }; };
+    let dragging = false;
+    svg.addEventListener('pointerdown', e => {
+      if (mode !== 'drive') return;
+      const p = pt(e);
+      if (Math.hypot(p.x - D.s.x, p.y - D.s.y) < 44){
+        dragging = true; svg.classList.add('is-drag'); svg.setPointerCapture(e.pointerId); D.tgt = p;
+        if (!playing) setPlaying(true);
+      } else {
+        const hit = D.drops.findIndex(o => Math.hypot(p.x - o.x, p.y - o.y) < 20);
+        if (hit >= 0) removeDrop(hit); else addDrop(p.x, p.y);
+      }
+      e.preventDefault();
+    });
+    svg.addEventListener('pointermove', e => { if (dragging) D.tgt = pt(e); });
+    const drop = () => { dragging = false; svg.classList.remove('is-drag'); };
+    svg.addEventListener('pointerup', drop); svg.addEventListener('pointercancel', drop);
+    svg.addEventListener('keydown', e => {
+      const k = { ArrowLeft: [-1,0], ArrowRight: [1,0], ArrowUp: [0,-1], ArrowDown: [0,1] }[e.key];
+      if (!k) return;
+      e.preventDefault();
+      if (mode !== 'drive') setMode('drive');
+      D.tgt = { x: clamp(D.tgt.x + k[0] * 24, 14, 706), y: clamp(D.tgt.y + k[1] * 24, 14, 506) };
+      if (!playing) setPlaying(true);
+    });
+
+    function render(dt){ simT += dt; (mode === 'tour' ? tour : drive)(simT, dt); }
+    function tick(now){
+      requestAnimationFrame(tick);
+      const t = now / 1000;
+      const dt = Math.min(prev === undefined ? 0.016 : t - prev, 0.05);
+      prev = t;
+      if (playing && onscreen) render(dt);
+    }
+    if ('IntersectionObserver' in window)
+      new IntersectionObserver(es => { onscreen = es[0].isIntersecting; prev = undefined; }).observe(svg);
+    addEventListener('resize', () => { if (!playing) render(0); });
+
+    if (reduced){ simT = (GAP + 170) / V; setPlaying(false); }
+    render(0);
     requestAnimationFrame(tick);
+  })();
+
+  // ── speed matches the gap: drag the cart, read the real control law ──
+  (function(){
+    const $ = id => document.getElementById(id);
+    const svg = $('gapfig'), range = $('gs-range');
+    if (!svg || !range) return;
+    const PX = 90, YOU = 620;                  // 90 px per metre; shopper at x = 620
+    function set(g){
+      g = Math.max(1.2, Math.min(6, g));
+      const err = g - 2.0, cmd = err > 0.20 ? Math.min(100, Math.max(12, 30 * (err - 0.20))) : 0;
+      const x = YOU - PX * g;
+      $('gs-cart').setAttribute('transform', `translate(${x},150)`);
+      const a = $('gs-arrow');
+      a.setAttribute('x1', x + 30); a.setAttribute('x2', x + 30 + cmd * 1.1);
+      a.style.display = cmd ? '' : 'none';
+      $('gs-gap').setAttribute('x', x); $('gs-gap').textContent = g.toFixed(1) + ' m gap';
+      $('gs-cmd').textContent = Math.round(cmd);
+      $('gs-state').textContent = !cmd ? (g < 2 ? 'inside the hold distance → waits' : 'inside the deadband → waits')
+                                : cmd < 40 ? 'closing in → eases off' : cmd < 100 ? 'far behind → hurries' : 'far behind → full power';
+      range.value = g; range.style.setProperty('--v', (g - 1.2) / 4.8);
+    }
+    range.addEventListener('input', () => set(+range.value));
+    let drag = false;
+    const toGap = e => { const m = svg.getScreenCTM().inverse(); return (YOU - (e.clientX * m.a + m.e)) / PX; };
+    $('gs-cart').addEventListener('pointerdown', e => { drag = true; svg.setPointerCapture(e.pointerId); e.preventDefault(); });
+    svg.addEventListener('pointermove', e => { if (drag) set(Math.round(toGap(e) * 10) / 10); });
+    const end = () => { drag = false; };
+    svg.addEventListener('pointerup', end); svg.addEventListener('pointercancel', end);
+    set(4.5);
+  })();
+
+  // ── color lock: choose who the shopper is ──
+  (function(){
+    const fig = document.getElementById('lockfig');
+    if (!fig) return;
+    const people = [{ top: '#b45309', bot: '#475569' }, { top: '#3b82f6', bot: '#64748b' }, { top: '#eab308', bot: '#1f2937' }];
+    const picks = [...fig.querySelectorAll('.pick')];
+    const rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+    const dist = (a, b) => Math.hypot(...rgb(a).map((v, i) => v - rgb(b)[i])) / 441.7;
+    const shade = h => '#' + rgb(h).map(v => Math.round(v * .68).toString(16).padStart(2, '0')).join('');
+    function lock(k){
+      const me = people[k];
+      document.getElementById('cl-top').setAttribute('fill', me.top);
+      document.getElementById('cl-bot').setAttribute('fill', me.bot);
+      [me.top, shade(me.top), me.bot, shade(me.bot)].forEach((c, i) => document.getElementById('cl-f' + (i + 1)).setAttribute('fill', c));
+      picks.forEach((g, i) => {
+        const p = people[i], on = i === k;
+        const score = on ? 97 : Math.round(100 * Math.exp(-3 * (.65 * dist(p.top, me.top) + .35 * dist(p.bot, me.bot))));
+        g.querySelector('.pick-top').setAttribute('fill', p.top);
+        g.querySelector('.pick-bot').setAttribute('fill', p.bot);
+        const pill = g.querySelector('.pick-pill'), txt = g.querySelector('.pick-score');
+        pill.setAttribute('fill', on ? 'rgba(48,209,88,.15)' : 'rgba(255,255,255,.06)');
+        pill.setAttribute('stroke', on ? 'rgba(48,209,88,.5)' : 'rgba(255,255,255,.14)');
+        pill.setAttribute('x', on ? -52 : -31); pill.setAttribute('width', on ? 104 : 62);
+        txt.setAttribute('fill', on ? '#30d158' : '#98989d');
+        txt.textContent = on ? score + '% · YOU ✓' : score + '%';
+        g.setAttribute('aria-pressed', String(on));
+        g.setAttribute('aria-label', `Person ${i + 1}, ${score}% match` + (on ? ', the shopper' : '. Make this person the shopper'));
+      });
+    }
+    picks.forEach((g, i) => {
+      g.addEventListener('click', () => lock(i));
+      g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); lock(i); } });
+    });
+    lock(1);
+  })();
+
+  // ── hardware: markers on the photo and the parts list highlight each other ──
+  (function(){
+    const mks = [...document.querySelectorAll('.hw-mk')], specs = [...document.querySelectorAll('.hw-spec')];
+    if (!mks.length) return;
+    let pinned = null;
+    const paint = k => {
+      mks.forEach(m => m.classList.toggle('on', m.dataset.k === k));
+      specs.forEach(sp => { sp.classList.toggle('on', sp.dataset.k === k); sp.setAttribute('aria-pressed', String(sp.dataset.k === pinned)); });
+    };
+    [...mks, ...specs].forEach(el => {
+      const k = el.dataset.k;
+      el.addEventListener('mouseenter', () => paint(k));
+      el.addEventListener('mouseleave', () => paint(pinned));
+      el.addEventListener('focus', () => paint(k));
+      el.addEventListener('blur', () => paint(pinned));
+      el.addEventListener('click', () => { pinned = pinned === k ? null : k; paint(pinned || k); });
+    });
   })();
 
   // ── fly: the hero's backdrop IS the demo video; on scroll it shrinks from the full screen into its slot ──
